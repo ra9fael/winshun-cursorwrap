@@ -97,7 +97,7 @@ MinGW.
 ## Tests
 
 ```powershell
-ctest --test-dir build --output-on-failure       # L1: 42 cases + 6 layout fixtures
+ctest --test-dir build --output-on-failure       # L1: 43 cases + 6 layout fixtures
 python tests/protocol_roundtrip.py               # L3: 32 protocol round-trip checks
 ```
 

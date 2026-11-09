@@ -83,7 +83,7 @@ C++ 运行时，目标机器不需要 MinGW。
 ## 测试
 
 ```powershell
-ctest --test-dir build --output-on-failure       # L1：42 用例 + 6 布局 fixture
+ctest --test-dir build --output-on-failure       # L1：43 用例 + 6 布局 fixture
 python tests/protocol_roundtrip.py               # L3：32 项协议往返检查
 ```
 

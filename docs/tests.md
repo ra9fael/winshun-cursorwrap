@@ -15,7 +15,7 @@
 | 打包物含 `plugin.json` / `cursorwrap.exe` / `README.md` / `LICENSE`，无 `build/`、`dist/`、`.git` | §8 | `tools/package.py` + `tools/ci_release.py` |
 | 双语文档锚点互链（`docs/spec*.md`、`docs/tests*.md`、README、CHANGELOG） | — | 通过 |
 
-## L1 — 纯逻辑单测（`cw_tests`，ctest 目标，42 用例 + 6 布局 fixture）
+## L1 — 纯逻辑单测（`cw_tests`，ctest 目标，43 用例 + 6 布局 fixture）
 
 不引 OS 头文件，任何平台可跑。运行：
 
@@ -142,7 +142,7 @@ python tests/protocol_roundtrip.py
 
 ## 验收标准
 
-- L1 全绿（当前 42 用例 + 6 fixture）
+- L1 全绿（当前 43 用例 + 6 fixture）
 - L3 全通过（当前 32/32）
 - L0 静态校验通过
 - L4 全部勾选后才可宣布 v0.1.0 可发布；当前 L4 未执行，属发布阻塞项
@@ -152,4 +152,4 @@ python tests/protocol_roundtrip.py
 - L2 的注入事件与 `SetCursorPos` 失败路径没有自动化用例（需要真实钩子或故障注入）
 - L4 全部未执行：本机只有一块显示器，多屏手感、热插拔、拖拽抑制、远程会话、
   独占全屏、高对比度、放大镜都没有在真机上验证
-- `edgeThresholdPx` 设置项已解析并进入诊断，但判定仍固定 1px，没有验证调整后的行为
+- `edgeThresholdPx` 设置项已接入判定（默认 1px），但只有合成几何验证，没有真机手感验证

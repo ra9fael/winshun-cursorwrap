@@ -105,6 +105,25 @@ CW_TEST(edge_zero_direction_at_corner)
     CW_CHECK(x != 0 || y != 0);
 }
 
+CW_TEST(engine_edge_threshold_widens_the_band)
+{
+    // Default threshold 1: only the last pixel column wraps. With a 10 px
+    // threshold the band widens, so a point 5 px in also wraps.
+    WrapEngine tight;
+    tight.rebuild({ box(0, 0, 1920, 1080, true) });
+    const auto [x1, y1] = tight.onMouseMove({ 1914, 540 }, false, false);
+    CW_CHECK_EQ(x1, 1914); // 5 px from the edge: not on it
+
+    Settings s;
+    s.edgeThresholdPx = 10;
+    WrapEngine wide(s);
+    wide.rebuild({ box(0, 0, 1920, 1080, true) });
+    const auto [x2, y2] = wide.onMouseMove({ 1914, 540 }, false, false);
+    CW_CHECK_EQ(x2, 0); // now on the edge: wraps
+    (void)y1;
+    (void)y2;
+}
+
 CW_TEST(engine_wraps_only_mousemove_semantics)
 {
     // The engine consumes one sample at a time. Repeated samples at the same

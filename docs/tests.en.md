@@ -16,7 +16,7 @@ original: [tests.md](tests.md).
 | Package contains `plugin.json` / `cursorwrap.exe` / `README.md` / `LICENSE`, no `build/`, `dist/`, `.git` | §8 | `tools/package.py` + `tools/ci_release.py` |
 | Bilingual anchors cross-link (`docs/spec*.md`, `docs/tests*.md`, README, CHANGELOG) | — | pass |
 
-## L1 — Pure logic unit tests (`cw_tests`, ctest target, 42 cases + 6 layout fixtures)
+## L1 — Pure logic unit tests (`cw_tests`, ctest target, 43 cases + 6 layout fixtures)
 
 No OS headers: runs anywhere. Commands:
 
@@ -145,7 +145,7 @@ run (this session has a single display).
 
 ## Acceptance criteria
 
-- L1 green (currently 42 cases + 6 fixtures)
+- L1 green (currently 43 cases + 6 fixtures)
 - L3 fully passing (currently 32/32)
 - L0 static validation passing
 - L4 fully checked before v0.1.0 can be called releasable; L4 has not been run, so it

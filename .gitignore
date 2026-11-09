@@ -10,6 +10,7 @@ dist/
 # Local state
 data/
 *.log
+schema-cache/
 
 # Editor
 .vs/

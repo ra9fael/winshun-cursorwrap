@@ -134,7 +134,7 @@
 
 ### 已实测
 
-- 单元测试 `cw_tests`：42 个用例 + 6 个布局 fixture 文件全绿（`ctest` 1/1 通过）。
+- 单元测试 `cw_tests`：43 个用例 + 6 个布局 fixture 文件全绿（`ctest` 1/1 通过）。
 - 协议往返 `tests/protocol_roundtrip.py`：32 项检查全通过（initialize → query →
   action ×4 → settingsChanged ×2 → cancel → shutdown），进程退出码 0。
 - 构建：MinGW-w64 GCC 13.2 / CMake 3.29 / Ninja Release，`cursorwrap.exe` 静态链接
@@ -150,8 +150,8 @@
   例如两块横排屏，右侧屏的右外边回绕到左侧屏的左外边（位置最小的对向外边），
   这与 PowerToys 的 `FindNearestOppositeEdge` 语义一致（拖动光标跨越整个桌面）。
 - `adjacencyTolerancePx` 通过 `Topology::initialize` 的容差参数生效；
-  `edgeThresholdPx` 目前固定为 1px（与 PowerToys 相同），设置项已解析并进入诊断，
-  但**没有接入判定**——留作 v0.2。
+  `edgeThresholdPx` 现在也真正接入判定（`Topology::onOuterEdge` 的
+  `edgeThreshold` 参数），默认 1px 与 PowerToys 一致，调大后边缘判定带变宽。
 
 ### 未实测（发布阻塞项）
 

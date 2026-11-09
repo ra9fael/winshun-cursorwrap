@@ -153,7 +153,7 @@ names or user text).
 
 ### Measured
 
-- Unit tests `cw_tests`: 42 cases plus 6 layout fixture files, all green
+- Unit tests `cw_tests`: 43 cases plus 6 layout fixture files, all green
   (`ctest` 1/1 passed).
 - Protocol round trip `tests/protocol_roundtrip.py`: 32 checks passed
   (initialize → query → action ×4 → settingsChanged ×2 → cancel → shutdown), exit
@@ -174,9 +174,9 @@ names or user text).
   left edge (the opposite outer edge with the smallest position). This matches
   PowerToys' `FindNearestOppositeEdge` semantics (dragging across the whole desktop).
 - `adjacencyTolerancePx` takes effect through `Topology::initialize`'s tolerance
-  parameter. `edgeThresholdPx` is parsed and reported in diagnostics but the
-  decision still uses a fixed 1 px threshold (as PowerToys does) — wiring it is a
-  v0.2 item.
+  parameter. `edgeThresholdPx` is now wired into the decision too (the
+  `edgeThreshold` argument of `Topology::onOuterEdge`); the default 1 px matches
+  PowerToys, and a larger value widens the edge band.
 
 ### Not measured (release blockers)
 

@@ -93,10 +93,12 @@ public:
 
     bool monitorRect(int index, MonitorBox& out) const;
 
-    // Is the point on an outer edge of monitor `index` (within edgeThreshold)?
-    // At corners several edges can match; `direction` breaks the tie.
+    // Is the point on an outer edge of monitor `index`, within
+    // `edgeThreshold` pixels of it? At corners several edges can match;
+    // `direction` breaks the tie.
     bool onOuterEdge(int index, int64_t x, int64_t y, EdgeType& outEdge,
-                     WrapMode mode, const CursorDirection* direction) const;
+                     WrapMode mode, const CursorDirection* direction,
+                     int64_t edgeThreshold = 1) const;
 
     // Wrap destination for a point on the given edge. Falls back to the same
     // monitor's opposite edge when no other monitor provides one.

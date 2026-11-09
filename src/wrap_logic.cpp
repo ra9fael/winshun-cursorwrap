@@ -127,7 +127,8 @@ std::pair<int64_t, int64_t> WrapEngine::onMouseMove(const Sample& sample, bool m
 
     const CursorDirection dir = direction(sample);
     EdgeType edge = EdgeType::Left;
-    if (!m_topology.onOuterEdge(index, sample.x, sample.y, edge, m_settings.wrapMode, &dir)) {
+    if (!m_topology.onOuterEdge(index, sample.x, sample.y, edge, m_settings.wrapMode, &dir,
+                                m_settings.edgeThresholdPx)) {
         m_previous = sample;
         m_hasPrevious = true;
         return { sample.x, sample.y };

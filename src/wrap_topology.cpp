@@ -186,12 +186,13 @@ EdgeType Topology::prioritize(const std::vector<EdgeType>& candidates,
 }
 
 bool Topology::onOuterEdge(int index, int64_t x, int64_t y, EdgeType& outEdge,
-                           WrapMode mode, const CursorDirection* direction) const
+                           WrapMode mode, const CursorDirection* direction,
+                           int64_t edgeThreshold) const
 {
     MonitorBox box;
     if (!monitorRect(index, box))
         return false;
-    const int64_t threshold = 1;
+    const int64_t threshold = edgeThreshold < 0 ? 0 : edgeThreshold;
 
     std::vector<EdgeType> candidates;
     const bool verticalAllowed = mode == WrapMode::Both || mode == WrapMode::VerticalOnly;
