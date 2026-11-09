@@ -80,11 +80,11 @@ $ python -c "... jsonschema.validate(manifest, schema) ..."
 full schema validation: PASS
 
 $ python tools/package.py
-ra9fael.cursorwrap-0.1.0.wsplugin: 44 files, 1201424 bytes,
-sha256 d8facfbdd445115d8b7bef138079b722e8842e6427fec79997188d21b0c56fdf
+ra9fael.cursorwrap-0.1.0.wsplugin: <files> files, <bytes> bytes, sha256 <digest>
 ```
 
-（新增或修改文档后，包内文件数与 SHA-256 会随之变化，以最后一次打包输出为准。）
+包内文件数与 SHA-256 每改一次文档就会变，所以这里不写死具体值：以本次构建后
+`python tools/package.py` 的实际输出、以及 `dist/*.sha256` 为准。
 
 ### 真实宿主集成
 
