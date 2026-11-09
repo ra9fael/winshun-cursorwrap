@@ -85,9 +85,12 @@ $ python -c "... jsonschema.validate(manifest, schema) ..."
 full schema validation: PASS
 
 $ python tools/package.py
-ra9fael.cursorwrap-0.1.0.wsplugin: 42 files, 1189453 bytes,
-sha256 36e4151a492fd456120283817810b890051feca482b570fe8889ee9f8256a3a0
+ra9fael.cursorwrap-0.1.0.wsplugin: 44 files, 1201424 bytes,
+sha256 d8facfbdd445115d8b7bef138079b722e8842e6427fec79997188d21b0c56fdf
 ```
+
+(Adding or editing docs changes the file count and SHA-256; the last packaging
+output is the authoritative one.)
 
 ### Real host integration
 
