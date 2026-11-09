@@ -2,6 +2,7 @@
 
 状态：v0.1.0 已实现。协议与清单字段以 Win顺 0.22.0 插件文档为准（resident JSON-RPC over stdio）。
 测试证据与未验证项见 [tests.md](tests.md)。English: [spec.en.md](spec.en.md)
+实现与验证记录见 [validation.md](validation.md)。
 
 ## 1 目标
 
