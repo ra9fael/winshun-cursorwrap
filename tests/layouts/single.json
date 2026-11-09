@@ -1,0 +1,15 @@
+{
+  "$comment": "Synthetic layout fixture: one 1920x1080 display. Safe to commit.",
+  "name": "single",
+  "monitors": [
+    { "device": "DISPLAY1", "primary": true, "left": 0, "top": 0, "right": 1920, "bottom": 1080, "dpi": 96 }
+  ],
+  "cases": [
+    { "x": 0, "y": 540, "edge": "left", "wrap": true },
+    { "x": 1919, "y": 540, "edge": "right", "wrap": true },
+    { "x": 960, "y": 0, "edge": "top", "wrap": true },
+    { "x": 960, "y": 1079, "edge": "bottom", "wrap": true },
+    { "x": 960, "y": 540, "edge": "left", "wrap": false },
+    { "x": 2, "y": 540, "edge": "left", "wrap": false }
+  ]
+}

@@ -1,0 +1,105 @@
+# ra9fael.cursorwrap — 多显示器光标回绕（Win顺 插件）
+
+> **简体中文（默认）** · [English](README.en.md)
+
+光标推到屏幕**外边**时，从**对边**重新出现。多显示器并排或上下叠放时，省掉横跨整个
+桌面的长距离拖动。算法移植自 PowerToys CursorWrap（MIT）。
+
+## 设计目的
+
+多屏桌面上，把光标从最右边推到最左边要长距离拖动；很多工具用快捷键或热角（hot
+corner）解决，都得额外记一个操作。本插件用的是「把光标推到屏幕边上」这个本来就会
+做的动作：到了最外层的外边，就从布局的对边进来。
+
+屏与屏**贴合**的那条边（内边）不参与回绕——那里 Windows 自己就会把光标送到相邻屏，
+插件不插手，不会出现「闪回」。
+
+## 用法
+
+留空输入 `cursorwrap`（或 `wrap` / `环绕`）看状态：
+
+| 键 | 效果 |
+|---|---|
+| Enter | 开启 / 关闭回绕 |
+| Ctrl+Enter | 切换模式：双向 → 仅上下 → 仅左右 |
+| Shift+Enter | 复制诊断信息（模式、屏数、外边数、计数、阈值、布局缝隙） |
+
+## 设置
+
+| 键 | 默认 | 说明 |
+|---|---|---|
+| `wrapMode` | both | 双向 / 仅上下 / 仅左右 |
+| `activationMode` | always | 总是回绕 / 按住 Ctrl / 按住 Shift |
+| `disableDuringDrag` | true | 按住左键拖动时不回绕 |
+| `disableOnSingleMonitor` | false | 只有一块屏时禁用（默认仍回绕到本屏对边） |
+| `edgeThresholdPx` | 1 | 1–20，离外边多近算到达 |
+| `wrapGuardPx` | 50 | 10–200，回绕落点周围的防震荡半径 |
+| `adjacencyTolerancePx` | 50 | 10–200，两条边差多少像素内算相邻（内边） |
+
+非法值一律回落到默认，不会报错。
+
+## 权限说明
+
+本插件只申请 `ui`（窗口与钩子）权限，因为需要：
+
+- 一个低级鼠标钩子（`WH_MOUSE_LL`）来观察光标移动；
+- 一个**不可见的** message-only 窗口来接收显示器变更通知。
+
+它不申请管理员权限、不访问网络、不读写文件、不动剪贴板。光标坐标与显示器几何
+**只在插件进程内使用**，不落盘、不出网。
+
+宿主对 `ui` 只是**部分**强制，这一点请按你自己的判断接受或拒绝。
+
+## 已知限制
+
+- 独占全屏（exclusive fullscreen）的 DirectX 程序里外框可能不生效
+- 若系统因 `LowLevelHooksTimeout` 把钩子摘掉，本版不会自动重装（状态行会显示
+  「钩子未安装，仅显示状态」）；重新启用插件即可
+- 远程桌面会话只有一块虚拟屏，走单屏语义
+- 高对比度、放大镜等辅助功能未专门验证
+- 与 PowerToys 原版的差异：没有「快捷键触发回绕」模式，也没有按进程自动启停
+
+## 安装
+
+1. 从 [Release](https://github.com/ra9fael/winshun-cursorwrap/releases/latest) 下载
+   `ra9fael.cursorwrap-<version>.wsplugin`（可用 `.sha256` 核对）
+2. Win顺 → **设置 → 插件 → 已安装 → 添加插件 → 压缩包**，选中该文件
+3. 本地安装的插件**不会自动启用**，请在列表里打开开关；启用时确认 `ui` 权限
+
+本插件是原生 exe 包，需要 Win顺 0.22.0 或更新（清单的 `minWinShun` 声明了这一点）。
+
+## 从源码构建
+
+```powershell
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+需要 CMake 3.16+、C++17 编译器（MinGW-w64 或 MSVC）。产物 `cursorwrap.exe` 落在
+仓库根，与 `plugin.json` 同级（`runtime.program` 是相对路径）。GNU 分支会静态链接
+C++ 运行时，目标机器不需要 MinGW。
+
+## 测试
+
+```powershell
+ctest --test-dir build --output-on-failure       # L1：42 用例 + 6 布局 fixture
+python tests/protocol_roundtrip.py               # L3：32 项协议往返检查
+```
+
+设计说明见 [docs/spec.md](docs/spec.md)，测试规格见 [docs/tests.md](docs/tests.md)。
+
+## 打包
+
+```powershell
+python tools/package.py            # dist/<id>-<version>.wsplugin + .sha256 + release-notes.md
+python tools/package.py --tag v0.1.0
+```
+
+## 许可证
+
+MIT。算法移植自 PowerToys CursorWrap（Microsoft Corporation，MIT），
+详见 [docs/spec.md](docs/spec.md) 第 5 节。
+
+GUI 图标由 [winshun-plugin-icons](https://github.com/ra9fael/winshun-plugin-icons)
+从 Phosphor 字形 `arrows-out-cardinal` 生成。

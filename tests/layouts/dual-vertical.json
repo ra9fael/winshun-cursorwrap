@@ -1,0 +1,16 @@
+{
+  "$comment": "Synthetic layout fixture: two 1920x1080 displays stacked, touching. Safe to commit.",
+  "name": "dual-vertical",
+  "monitors": [
+    { "device": "DISPLAY1", "primary": false, "left": 0, "top": 0, "right": 1920, "bottom": 1080, "dpi": 96 },
+    { "device": "DISPLAY2", "primary": true, "left": 0, "top": 1080, "right": 1920, "bottom": 2160, "dpi": 96 }
+  ],
+  "cases": [
+    { "x": 960, "y": 0, "edge": "top", "wrap": true },
+    { "x": 960, "y": 1079, "edge": "bottom", "wrap": false },
+    { "x": 960, "y": 1080, "edge": "top", "wrap": false },
+    { "x": 960, "y": 2159, "edge": "bottom", "wrap": true },
+    { "x": 0, "y": 540, "edge": "left", "wrap": true },
+    { "x": 1919, "y": 1500, "edge": "right", "wrap": true }
+  ]
+}

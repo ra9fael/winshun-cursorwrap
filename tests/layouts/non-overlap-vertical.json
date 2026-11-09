@@ -1,0 +1,17 @@
+{
+  "$comment": "Synthetic layout fixture: narrow 1920x1080 monitor centered above a wide 3840x2160 one. The narrow display's top edge is outer and wraps within itself; the wide display's top edge is inner (touching). Safe to commit.",
+  "name": "non-overlap-vertical",
+  "monitors": [
+    { "device": "DISPLAY1", "primary": false, "left": 960, "top": -1080, "right": 2880, "bottom": 0, "dpi": 96 },
+    { "device": "DISPLAY2", "primary": true, "left": 0, "top": 0, "right": 3840, "bottom": 2160, "dpi": 96 }
+  ],
+  "cases": [
+    { "x": 1500, "y": 0, "edge": "top", "wrap": false },
+    { "x": 100, "y": 0, "edge": "top", "wrap": false },
+    { "x": 1500, "y": -1, "edge": "bottom", "wrap": false },
+    { "x": 960, "y": -1080, "edge": "top", "wrap": true },
+    { "x": 0, "y": 1000, "edge": "left", "wrap": true },
+    { "x": 3839, "y": 1000, "edge": "right", "wrap": true },
+    { "x": 100, "y": 2159, "edge": "bottom", "wrap": true }
+  ]
+}

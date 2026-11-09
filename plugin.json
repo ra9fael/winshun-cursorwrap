@@ -1,0 +1,103 @@
+{
+  "$schema": "https://raw.githubusercontent.com/LingCore/WinShun-plugins/main/schema/plugin.schema.json",
+  "manifest": 1,
+  "id": "ra9fael.cursorwrap",
+  "name": {"zh": "光标回绕", "en": "Cursor wrap"},
+  "version": "0.1.0",
+  "description": {
+    "zh": "光标到达屏幕外边时从对边进入（多显示器边缘拓扑，支持仅纵向/仅横向与按住 Ctrl/Shift 激活）；cursorwrap 关键字查看状态与开关",
+    "en": "The cursor re-enters from the opposite edge when it reaches an outer edge (multi-monitor edge topology; vertical/horizontal-only modes and Ctrl/Shift activation); the cursorwrap keyword shows status and toggles it"
+  },
+  "author": "ra9fael",
+  "homepage": "https://github.com/ra9fael/winshun-cursorwrap",
+  "license": "MIT",
+  "minWinShun": "0.22.0",
+  "permissions": ["ui"],
+  "runtime": {
+    "mode": "resident",
+    "program": "cursorwrap.exe",
+    "sandbox": "normal",
+    "start": "eager",
+    "idleExitSec": 0,
+    "timeoutMs": 1500,
+    "memoryMB": 64
+  },
+  "commands": [
+    {
+      "id": "cursorwrap",
+      "keyword": ["cursorwrap", "wrap", "环绕"],
+      "title": {"zh": "光标回绕", "en": "Cursor wrap"},
+      "hint": {"zh": "留空看状态；不需要输入文字", "en": "empty shows status; no text needed"},
+      "icon": "glyph:U+E8A4",
+      "actions": [
+        {"id": "toggleEnabled", "title": {"zh": "开启 / 关闭回绕", "en": "Toggle wrapping"}, "key": "Enter"},
+        {"id": "cycleMode", "title": {"zh": "切换回绕模式", "en": "Cycle wrap mode"}, "key": "Ctrl+Enter"},
+        {"id": "copyDiagnostics", "title": {"zh": "复制诊断信息", "en": "Copy diagnostics"}, "key": "Shift+Enter"}
+      ],
+      "ai": {
+        "description": "Show the cursor-wrap status: whether wrapping is enabled, the wrap mode, the activation mode, monitor count and outer-edge count. Read-only; nothing changes until an action runs."
+      }
+    }
+  ],
+  "settings": [
+    {
+      "key": "wrapMode",
+      "type": "choice",
+      "title": {"zh": "回绕方向", "en": "Wrap direction"},
+      "hint": {"zh": "both：四个方向；vertical：仅上/下；horizontal：仅左/右", "en": "both: all four; vertical: top/bottom only; horizontal: left/right only"},
+      "options": [
+        {"value": "both", "title": {"zh": "双向", "en": "Both"}},
+        {"value": "vertical", "title": {"zh": "仅上下", "en": "Vertical only"}},
+        {"value": "horizontal", "title": {"zh": "仅左右", "en": "Horizontal only"}}
+      ],
+      "default": "both"
+    },
+    {
+      "key": "activationMode",
+      "type": "choice",
+      "title": {"zh": "激活方式", "en": "Activation"},
+      "hint": {"zh": "always 立即生效；ctrl / shift 需按住该键才回绕（Ctrl 单独滚轮留给任务栏音量插件，本插件只看移动）", "en": "always wraps immediately; ctrl / shift wrap only while the key is held (plain Ctrl stays with the taskbar volume plugin — this plugin only watches movement)"},
+      "options": [
+        {"value": "always", "title": {"zh": "总是", "en": "Always"}},
+        {"value": "ctrl", "title": {"zh": "按住 Ctrl", "en": "While Ctrl is held"}},
+        {"value": "shift", "title": {"zh": "按住 Shift", "en": "While Shift is held"}}
+      ],
+      "default": "always"
+    },
+    {
+      "key": "disableDuringDrag",
+      "type": "bool",
+      "title": {"zh": "拖拽时不回绕", "en": "No wrap while dragging"},
+      "hint": {"zh": "按住左键拖动窗口或选区时禁用，防止把窗口甩到对角", "en": "disables wrapping while the left button is held, so dragged windows stay put"},
+      "default": true
+    },
+    {
+      "key": "disableOnSingleMonitor",
+      "type": "bool",
+      "title": {"zh": "单屏时禁用", "en": "Disable on a single monitor"},
+      "hint": {"zh": "只接一块屏时也回绕到本屏对边（PowerToys 默认行为）；不想这样可关掉", "en": "on one display the cursor still wraps to the same display's opposite edge (PowerToys default); turn off to disable that"},
+      "default": false
+    },
+    {
+      "key": "edgeThresholdPx",
+      "type": "number",
+      "title": {"zh": "边缘判定距离（像素）", "en": "Edge threshold (px)"},
+      "hint": {"zh": "1–20，默认 1；离外边多近才算到了边上", "en": "1–20, default 1; how close to an outer edge counts as being on it"},
+      "default": 1
+    },
+    {
+      "key": "wrapGuardPx",
+      "type": "number",
+      "title": {"zh": "防震荡距离（像素）", "en": "Anti-oscillation guard (px)"},
+      "hint": {"zh": "10–200，默认 50；回绕后在这个范围内不再触发，防止来回弹", "en": "10–200, default 50; after a wrap, events within this range of the destination do not wrap again"},
+      "default": 50
+    },
+    {
+      "key": "adjacencyTolerancePx",
+      "type": "number",
+      "title": {"zh": "邻接容差（像素）", "en": "Adjacency tolerance (px)"},
+      "hint": {"zh": "10–200，默认 50；两条边差多少像素以内算相邻（内边不回绕）", "en": "10–200, default 50; edges closer than this count as adjacent (inner edges never wrap)"},
+      "default": 50
+    }
+  ]
+}

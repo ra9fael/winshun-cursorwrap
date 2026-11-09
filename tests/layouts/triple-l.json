@@ -1,0 +1,17 @@
+{
+  "$comment": "Synthetic layout fixture: L-shape, one 1920x2560 primary plus one right monitor plus one monitor above the primary. Safe to commit.",
+  "name": "triple-l",
+  "monitors": [
+    { "device": "DISPLAY1", "primary": true, "left": 0, "top": 0, "right": 1920, "bottom": 2560, "dpi": 96 },
+    { "device": "DISPLAY2", "primary": false, "left": 1920, "top": 0, "right": 3840, "bottom": 2560, "dpi": 96 },
+    { "device": "DISPLAY3", "primary": false, "left": 0, "top": -1440, "right": 1920, "bottom": 0, "dpi": 96 }
+  ],
+  "cases": [
+    { "x": 100, "y": 0, "edge": "top", "wrap": false },
+    { "x": 2000, "y": 0, "edge": "top", "wrap": true },
+    { "x": 3839, "y": 540, "edge": "right", "wrap": true },
+    { "x": 0, "y": 1300, "edge": "left", "wrap": true },
+    { "x": 960, "y": 2559, "edge": "bottom", "wrap": true },
+    { "x": 960, "y": -1439, "edge": "top", "wrap": true }
+  ]
+}

@@ -1,0 +1,17 @@
+# Build output
+build/
+dist/
+*.exe
+*.obj
+*.pdb
+*.ilk
+*.lib
+
+# Local state
+data/
+*.log
+
+# Editor
+.vs/
+.vscode/
+.idea/

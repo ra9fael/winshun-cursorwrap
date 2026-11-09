@@ -1,0 +1,16 @@
+{
+  "$comment": "Synthetic layout fixture: two monitors with a 30px coordinate gap (GPU driver quirk). Within the default 50px adjacency tolerance the touching sides are inner. Safe to commit.",
+  "name": "gap-50",
+  "monitors": [
+    { "device": "DISPLAY1", "primary": true, "left": 0, "top": 0, "right": 1920, "bottom": 1080, "dpi": 96 },
+    { "device": "DISPLAY2", "primary": false, "left": 1950, "top": 0, "right": 3870, "bottom": 1080, "dpi": 96 }
+  ],
+  "cases": [
+    { "x": 1919, "y": 540, "edge": "right", "wrap": false },
+    { "x": 1950, "y": 540, "edge": "left", "wrap": false },
+    { "x": 0, "y": 540, "edge": "left", "wrap": true },
+    { "x": 3869, "y": 540, "edge": "right", "wrap": true },
+    { "x": 960, "y": 0, "edge": "top", "wrap": true },
+    { "x": 3000, "y": 1079, "edge": "bottom", "wrap": true }
+  ]
+}

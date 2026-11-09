@@ -1,0 +1,164 @@
+# 光标回绕（`ra9fael.cursorwrap`）功能规格
+
+状态：v0.1.0 已实现。协议与清单字段以 Win顺 0.22.0 插件文档为准（resident JSON-RPC over stdio）。
+测试证据与未验证项见 [tests.md](tests.md)。English: [spec.en.md](spec.en.md)
+
+## 1 目标
+
+- 多显示器下把光标从左/右/上/下外边「绕」到对边，省去长距离拖动
+- 纯逻辑核心可脱离屏幕单测（显示器以结构体注入）
+- 键盘路径：`cursorwrap` 关键字查看状态、开关、切模式、取诊断
+
+## 2 非目标
+
+- 不做托盘图标、托盘子菜单、设置窗口（v0.1 无任何窗口）
+- 不做全局热键（激活方式是「按住 Ctrl / Shift」，不是热键注册）
+- 不做光标「吸附」（snap / magnet），只做外边回绕
+- 不复刻 PowerToys 的 `wrap_simulator.py` tk 可视化
+
+## 3 命令（`cursorwrap` / `wrap` / `环绕`）
+
+留空查询返回一行状态：
+
+- 标题：`光标回绕：已开启` / `光标回绕：已关闭`
+- 副标题：`模式 <模式> · 激活 <方式> · N 块屏 · M 条外边`；钩子安装失败时追加
+  `钩子未安装，仅显示状态`
+- 动作（顺序即 Enter / Ctrl+Enter / Shift+Enter）：
+  - `toggleEnabled` 开启 / 关闭回绕
+  - `cycleMode` 双向 → 仅上下 → 仅左右 → 双向
+  - `copyDiagnostics` 复制多行诊断（模式、激活、屏数、外边数、移动/回绕/抑制/重建计数、
+    阈值、布局缝隙）
+- 输入文字被忽略（查询无副作用，永不改状态）
+
+## 4 手势（本插件唯一的自动化行为）
+
+- 监听 `WH_MOUSE_LL` 的 `WM_MOUSEMOVE`，按当前设置判定是否回绕
+- 命中时 `SetCursorPos` 到目的地并吞掉这一条移动消息（`return 1`）；失败的
+  `SetCursorPos` 不吞事件
+- 只处理 mousemove：按键、滚轮、`LLMHF_INJECTED`（程序注入）一律只看不绕，
+  从不吞
+- 判定顺序（与 PowerToys `HandleMouseMove` 一致）：单屏禁用 → 拖拽抑制 →
+  激活键未按 → 防震荡半径 → 边缘判定 → 目的地计算
+
+## 5 拓扑算法
+
+移植自 PowerToys `MonitorTopology`（MIT，Microsoft）：
+
+1. 每块屏 4 条边，用「拓扑内索引 + 边类型」作键（HMONITOR 会变，索引在单次快照内稳定）
+2. 相邻判定：相反边类型、位置差 ≤ 邻接容差（默认 50px）、垂直区间重叠 > 容差
+3. 与任何屏相邻的边是「内边」，永不回绕；其余为「外边」
+4. 外边回绕目的地：先找坐标落在其区间内的对向外边（重叠区，保留垂直/水平坐标）；
+   找不到则按坐标距离取最近的对向外边并把坐标夹进其区间（非重叠区投影，±1px 内缩）
+5. 一条对向外边都找不到（单屏）时同屏回绕到自己的对边
+
+显示器快照按「主屏优先，再按 left/top」排序，保证同一布局的索引稳定、测试可复现。
+
+## 6 防震荡与方向
+
+- 防震荡半径（`wrapGuardPx`，默认 50）：回绕落点周围该半径内不再触发；离开该范围后
+  重新武装。没有它，落在对边上的光标会立刻原路弹回。
+- 角点同时满足两条边时按移动主轴择优（水平移动优先左右边、垂直移动优先上下边），
+  主轴候选失败再试另一条。
+
+## 7 设置
+
+| 键 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `wrapMode` | choice | both | both / vertical（仅上下）/ horizontal（仅左右） |
+| `activationMode` | choice | always | always / ctrl / shift（按住该键才回绕） |
+| `disableDuringDrag` | bool | true | 按住左键时不回绕 |
+| `disableOnSingleMonitor` | bool | false | 只有一块屏时是否禁用（PowerToys 默认不禁用） |
+| `edgeThresholdPx` | number | 1 | 1–20，离外边多近算到达 |
+| `wrapGuardPx` | number | 50 | 10–200，防震荡半径 |
+| `adjacencyTolerancePx` | number | 50 | 10–200，内边判定容差 |
+
+非法值（类型不对、越界、NaN/Inf）一律回落到清单默认值，绝不报错、绝不产生越界行为。
+`settingsChanged` 按部分更新合并：未给出的字段保留当前值。
+
+## 8 架构
+
+单进程单文件 `cursorwrap.exe`，无 DLL、无 Qt、无窗口、无托盘。三个线程：
+
+| 线程 | 职责 |
+|---|---|
+| 协议线程（SDK `serve()`） | `query` / `action` / `settingsChanged` / `shutdown`；持有一个 `WrapEngine` |
+| 钩子线程 | `WH_MOUSE_LL` + 自己的消息泵；配置经 `WM_APP_SETTINGS` 投递，热路径无锁 |
+| 监听线程 | message-only 窗口收 `WM_DISPLAYCHANGE` / `WM_SETTINGCHANGE` / `WM_DEVICECHANGE`，500ms 防抖后重建拓扑 |
+
+纯逻辑（`wrap_topology`、`wrap_logic`）不引任何 OS 头文件，显示器以 `MonitorBox`
+结构体注入，因此单测在任意平台可跑。
+
+## 9 数据位置
+
+不使用 `WS_DATA_DIR`：无状态落盘、无日志文件、无缓存。设置由宿主在 `WinShun.ini`
+管理。诊断只在 `copyDiagnostics` 时进入剪贴板，且只含计数与几何信息（不含窗口标题、
+文件名、用户文字）。
+
+## 10 失败处理
+
+| 失败 | 表现 | 降级 |
+|---|---|---|
+| `SetWindowsHookEx` 失败 | 状态行标「钩子未安装」，`winshun/log` 记 warn | 关键字查询/开关仍可用 |
+| `SetCursorPos` 失败 | 不吞事件，原样放行 | 该次不移动，不产生「卡住」 |
+| 显示器枚举为空 | 引擎空转，不吞任何事件 | 状态行显示 0 块屏 |
+| 布局有坐标缝隙（GPU 驱动怪癖） | 缝隙 ≤ 容差仍算相邻；更大的缝隙按外边处理 | 诊断里列出缝隙 |
+| 远程会话（RDP） | 只有一块虚拟屏 | 单屏语义（默认回绕到本屏对边） |
+| 屏被热拔/热插 | 500ms 防抖后重建，移动历史清零 | 无崩溃、无错位 |
+| 锁屏 / 安全桌面 | 收不到钩子事件 | 什么都不做（正确行为） |
+| 设置值非法 | 回默认 | 状态行显示生效值 |
+| 宿主太旧（无 `window`/`appearance`） | 忽略 | 关键字路径可用 |
+| 连续 3 次查询超时 | 宿主重启插件 | `initialized()` 里重建钩子与拓扑 |
+
+## 11 权限、隐私
+
+- `permissions: ["ui"]`：低级鼠标钩子与（message-only）窗口。`ui` 在宿主侧只是
+  部分强制，README 要写清楚。
+- 不要求 `elevated`、`processes`、`network`、`files:write`、剪贴板权限。
+- 坐标、显示器几何全部留在进程内，不出网、不落盘。
+
+## 12 已知限制
+
+- 需要低级鼠标钩子：若系统把钩子超时移除（`LowLevelHooksTimeout`），插件不做重建
+  （与 findmouse 一致，见 tests.md 未验证项）。
+- 独占全屏（exclusive fullscreen）D3D 应用里外框可能不生效。
+- 高对比度/放大镜等辅助功能未专门验证。
+- 与 PowerToys CursorWrap 的差异：不实现 `activation_shortcut` 热键触发模式，
+  也不实现「自动激活」的进程白名单。
+
+## 13 里程碑
+
+- v0.1（本版）：上述全部
+- v0.2 候选：按显示器单独开关、缝隙自动吸附建议、钩子超时后重建
+
+## 14 实现记录（v0.1.0 回填）
+
+### 已实测
+
+- 单元测试 `cw_tests`：42 个用例 + 6 个布局 fixture 文件全绿（`ctest` 1/1 通过）。
+- 协议往返 `tests/protocol_roundtrip.py`：32 项检查全通过（initialize → query →
+  action ×4 → settingsChanged ×2 → cancel → shutdown），进程退出码 0。
+- 构建：MinGW-w64 GCC 13.2 / CMake 3.29 / Ninja Release，`cursorwrap.exe` 静态链接
+  C++ 运行时，产物落在仓库根（与 `plugin.json` 同名目录）。
+
+### 与规格的偏差
+
+- §5 的「同屏回绕 ±2px 内缩」实际不生效：因为单屏的左右边、上下边都是外边，
+  `findOppositeOverlapping` 总能直接命中自己的对边，所以目的地是对边的
+  `position`（`right-1` / `bottom-1`），而不是 `right-2`。PowerToys 的
+  `GetWrapDestination` 同样先走「找到对边」分支，行为一致；回弹由防震荡半径吸收。
+- §5 的「回绕到本屏对边」在双屏以上实际是「回绕到整体布局最外的对边」：
+  例如两块横排屏，右侧屏的右外边回绕到左侧屏的左外边（位置最小的对向外边），
+  这与 PowerToys 的 `FindNearestOppositeEdge` 语义一致（拖动光标跨越整个桌面）。
+- `adjacencyTolerancePx` 通过 `Topology::initialize` 的容差参数生效；
+  `edgeThresholdPx` 目前固定为 1px（与 PowerToys 相同），设置项已解析并进入诊断，
+  但**没有接入判定**——留作 v0.2。
+
+### 未实测（发布阻塞项）
+
+- 真实双屏/三屏下的手感与误判率：本轮只有单显示器环境，所有多屏断言都来自
+  注入的几何快照。
+- 真实鼠标移动下的 `SetCursorPos` 落点、拖拽抑制手感、按住 Ctrl 的互不干扰。
+- 热插拔/`WM_DISPLAYCHANGE` 的真实重建时序（代码路径只有合成测试）。
+- 远程会话、独占全屏、高对比度、放大镜。
+- 在真实 Win顺 宿主里安装 `.wsplugin` 并启用（L3 目前是直接驱动 exe 的 stdio 往返，
+  不是宿主集成）。
