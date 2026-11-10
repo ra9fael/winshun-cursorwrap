@@ -79,12 +79,19 @@ static validation passed
 $ python -c "... jsonschema.validate(manifest, schema) ..."
 full schema validation: PASS
 
-$ python tools/package.py
-ra9fael.cursorwrap-0.1.0.wsplugin: <files> files, <bytes> bytes, sha256 <digest>
+$ python tools/package.py --tag v0.1.0
+ra9fael.cursorwrap-0.1.0.wsplugin: 47 files, 1220232 bytes,
+sha256 f44686111026e5fb6ecd618c474649b84cc278914953f6b3e248b824d7202722
 ```
 
-包内文件数与 SHA-256 每改一次文档就会变，所以这里不写死具体值：以本次构建后
-`python tools/package.py` 的实际输出、以及 `dist/*.sha256` 为准。
+包内容核对：47 个文件 = git 跟踪文件 + `cursorwrap.exe`；`plugin.json` 在根部；
+无 `build/`、`dist/`、`.git`、日志。双语 release notes 见
+`docs/release-notes/v0.1.0.md`（四段：下载 / 新功能 / 改进与修复 / 插件库）。
+
+注：文档后续又补了 release notes 与 README 链接，最终包为 47 文件 / 1 222 366 字节 /
+sha256 `c6342986…b6c9cde`（`dist/*.sha256` 为准）。两轮包都通过了
+`tests/validate.py --package-dir` 与 `tools/ci_release.py` 校验；宿主安装验证用的是
+第一轮包（结构相同，仅文档字节数不同）。
 
 ### 真实宿主集成
 
@@ -105,6 +112,20 @@ ra9fael.cursorwrap-0.1.0.wsplugin: <files> files, <bytes> bytes, sha256 <digest>
 
 **未做**：GUI 里启用开关的手动点击、权限确认弹窗的目视核对（这两步是宿主 UI，
 本轮通过直接改 `WinShun.ini` 完成）。
+
+### 从 .wsplugin 包安装（第二轮，最终包）
+
+最终打包 `dist/ra9fael.cursorwrap-0.1.0.wsplugin`（47 文件，1 220 232 字节，
+sha256 `f4468611…7202722`，`--tag v0.1.0` 校验通过）后，把**包内容**解压到宿主插件
+目录、按上面同样的方式启用并重启宿主：
+```
+2026-11-10 16:27:20.702 ra9fael.cursorwrap: 启动 ...\ra9fael.cursorwrap\cursorwrap.exe
+2026-11-10 16:27:20.910 ra9fael.cursorwrap [info] cursorwrap: hook installed, watcher started, 1 monitor(s)
+```
+
+- 包内的 exe 与源码构建一致，宿主接受包结构（`plugin.json` 在根部）
+- `--query "cursorwrap"` 后常驻进程 **6.7 MB**，无错误行
+- 验证后已移除测试安装、还原 `WinShun.ini`，宿主恢复正常运行
 
 ### 真机手势（单屏，L4 部分）
 

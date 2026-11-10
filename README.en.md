@@ -73,13 +73,31 @@ judgement.
 
 1. Download `ra9fael.cursorwrap-<version>.wsplugin` from
    [Releases](https://github.com/ra9fael/winshun-cursorwrap/releases/latest)
-   (verify it with the `.sha256` sidecar if you like)
+   (verify it with the `.sha256` sidecar: `Get-FileHash <file> -Algorithm SHA256`)
 2. WinShun → **Settings → Plugins → Installed → Add plugin → Archive**, pick the file
 3. Plugins installed from a local archive are **not enabled automatically**; flip the
    switch in the list. Enabling is where you confirm the `ui` permission
 
 This is a native exe package and needs WinShun 0.22.0 or newer (the manifest's
-`minWinShun` says so).
+`minWinShun` says so). WinShun recognises the same id, asks whether to replace the old
+version and keeps the plugin's data directory; uninstall from
+**Settings → Plugins → Installed**.
+
+**Restart the plugin process after an upgrade** (disable and re-enable, or restart
+WinShun) — a native exe does not hot-reload like a script.
+
+**Manual install** (without the host UI): unpack the archive into
+`%LOCALAPPDATA%\WinShun\plugins\ra9fael.cursorwrap\` (`plugin.json` must sit at the
+root of that folder) and add to `WinShun.ini`:
+
+```ini
+[Plugin.ra9fael.cursorwrap]
+Enabled=true
+Confirmed=ui
+```
+
+Then restart WinShun. `Confirmed=ui` records that you accepted the `ui` permission;
+without that line the host asks for confirmation when you enable the plugin.
 
 ## Build from source
 
@@ -92,23 +110,33 @@ ctest --test-dir build --output-on-failure
 Requires CMake 3.16+ and a C++17 compiler (MinGW-w64 or MSVC). `cursorwrap.exe` lands
 at the repository root next to `plugin.json` (`runtime.program` is a relative path).
 The GNU branch links the C++ runtime statically, so the target machine needs no
-MinGW.
+MinGW. MSVC builds use the static runtime (`/MT`) and likewise ship no external DLL.
 
 ## Tests
 
 ```powershell
-ctest --test-dir build --output-on-failure       # L1: 43 cases + 6 layout fixtures
+ctest --test-dir build --output-on-failure       # L1: 43 cases + 7 layout fixtures
 python tests/protocol_roundtrip.py               # L3: 32 protocol round-trip checks
+python tests/live_wrap_probe.py                  # L4 single display: real SetCursorPos gestures
+python tests/validate.py                         # L0: manifest / bilingual docs / packaging checks
 ```
 
 Design notes: [docs/spec.en.md](docs/spec.en.md). Test plan: [docs/tests.en.md](docs/tests.en.md).
+This round's validation evidence: [docs/validation.en.md](docs/validation.en.md).
 
 ## Packaging
 
 ```powershell
 python tools/package.py            # dist/<id>-<version>.wsplugin + .sha256 + release-notes.md
-python tools/package.py --tag v0.1.0
+python tools/package.py --tag v0.1.0   # also checks the tag matches plugin.json and the CHANGELOG section exists
 ```
+
+The package contains every git-tracked file plus `cursorwrap.exe`, as a deterministic
+zip (fixed timestamps, stored uncompressed): the same inputs always produce the same
+SHA-256. The release flow (tag → CI verify/build/publish) lives in
+[.github/workflows/release.yml](.github/workflows/release.yml) and [AGENTS.md](AGENTS.md).
+The bilingual release notes are at
+[docs/release-notes/v0.1.0.md](docs/release-notes/v0.1.0.md).
 
 ## License
 

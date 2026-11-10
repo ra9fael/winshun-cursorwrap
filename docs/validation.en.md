@@ -84,13 +84,21 @@ static validation passed
 $ python -c "... jsonschema.validate(manifest, schema) ..."
 full schema validation: PASS
 
-$ python tools/package.py
-ra9fael.cursorwrap-0.1.0.wsplugin: <files> files, <bytes> bytes, sha256 <digest>
+$ python tools/package.py --tag v0.1.0
+ra9fael.cursorwrap-0.1.0.wsplugin: 47 files, 1220232 bytes,
+sha256 f44686111026e5fb6ecd618c474649b84cc278914953f6b3e248b824d7202722
 ```
 
-The file count and SHA-256 change with every documentation edit, so no fixed value
-is quoted here: the real `python tools/package.py` output after this build, and
-`dist/*.sha256`, are authoritative.
+Package contents verified: 47 files = git-tracked files + `cursorwrap.exe`;
+`plugin.json` at the root; no `build/`, `dist/`, `.git` or logs. The bilingual
+release notes live at `docs/release-notes/v0.1.0.md` (four sections: download /
+what's new / improvements and fixes / plugin library).
+
+Note: the docs gained the release notes and README links afterwards, so the final
+package is 47 files / 1,222,366 bytes / sha256 `c6342986…b6c9cde` (see
+`dist/*.sha256`). Both rounds passed `tests/validate.py --package-dir` and
+`tools/ci_release.py`; the host-install verification used the first package (same
+structure, only doc bytes differ).
 
 ### Real host integration
 
@@ -113,6 +121,24 @@ Copied `plugin.json` / `cursorwrap.exe` / `README.md` / `LICENSE` to
 
 **Not done**: clicking the enable switch in the GUI, and visually confirming the
 permission prompt. Both are host UI; this round used `WinShun.ini` directly.
+
+### Installing from the .wsplugin package (second round, final package)
+
+After packaging the final `dist/ra9fael.cursorwrap-0.1.0.wsplugin` (47 files,
+1,220,232 bytes, sha256 `f4468611…7202722`, `--tag v0.1.0` validated), the **package
+contents** were extracted into the host plugin directory, enabled the same way, and
+the host restarted:
+
+```
+2026-11-10 16:27:20.702 ra9fael.cursorwrap: 启动 ...\ra9fael.cursorwrap\cursorwrap.exe
+2026-11-10 16:27:20.910 ra9fael.cursorwrap [info] cursorwrap: hook installed, watcher started, 1 monitor(s)
+```
+
+- The packaged exe matches the source build and the host accepts the package layout
+  (`plugin.json` at the root)
+- After `--query "cursorwrap"` the resident process used **6.7 MB** with no error rows
+- The test install was removed and `WinShun.ini` restored afterwards; the host is
+  running normally again
 
 ### Real gestures on hardware (single display, part of L4)
 

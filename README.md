@@ -62,11 +62,29 @@ corner）解决，都得额外记一个操作。本插件用的是「把光标�
 ## 安装
 
 1. 从 [Release](https://github.com/ra9fael/winshun-cursorwrap/releases/latest) 下载
-   `ra9fael.cursorwrap-<version>.wsplugin`（可用 `.sha256` 核对）
+   `ra9fael.cursorwrap-<version>.wsplugin`（可用旁边的 `.sha256` 核对：
+   `Get-FileHash <文件> -Algorithm SHA256`）
 2. Win顺 → **设置 → 插件 → 已安装 → 添加插件 → 压缩包**，选中该文件
 3. 本地安装的插件**不会自动启用**，请在列表里打开开关；启用时确认 `ui` 权限
 
 本插件是原生 exe 包，需要 Win顺 0.22.0 或更新（清单的 `minWinShun` 声明了这一点）。
+Win顺 认出同一个 id 会询问是否替换旧版本，并保留插件的数据目录；卸载在
+**设置 → 插件 → 已安装** 里移除。
+
+**升级后需重新启动插件进程**（停用再启用，或重启 Win顺）——原生 exe 不走脚本热重载。
+
+**手动安装**（不经过宿主界面）：把包内文件解到
+`%LOCALAPPDATA%\WinShun\plugins\ra9fael.cursorwrap\`（`plugin.json` 必须在目录根部），
+再在 `WinShun.ini` 加：
+
+```ini
+[Plugin.ra9fael.cursorwrap]
+Enabled=true
+Confirmed=ui
+```
+
+然后重启 Win顺。`Confirmed=ui` 表示你确认了 `ui` 权限；没有这一行，宿主会在启用时
+弹确认。
 
 ## 从源码构建
 
@@ -78,23 +96,32 @@ ctest --test-dir build --output-on-failure
 
 需要 CMake 3.16+、C++17 编译器（MinGW-w64 或 MSVC）。产物 `cursorwrap.exe` 落在
 仓库根，与 `plugin.json` 同级（`runtime.program` 是相对路径）。GNU 分支会静态链接
-C++ 运行时，目标机器不需要 MinGW。
+C++ 运行时，目标机器不需要 MinGW。MSVC 构建用静态运行库（`/MT`），同样无外部 DLL。
 
 ## 测试
 
 ```powershell
-ctest --test-dir build --output-on-failure       # L1：43 用例 + 6 布局 fixture
+ctest --test-dir build --output-on-failure       # L1：43 用例 + 7 布局 fixture
 python tests/protocol_roundtrip.py               # L3：32 项协议往返检查
+python tests/live_wrap_probe.py                  # L4 单屏：真实 SetCursorPos 手势
+python tests/validate.py                         # L0：清单/双语文档/打包静态校验
 ```
 
-设计说明见 [docs/spec.md](docs/spec.md)，测试规格见 [docs/tests.md](docs/tests.md)。
+设计说明见 [docs/spec.md](docs/spec.md)，测试规格见 [docs/tests.md](docs/tests.md)，
+本轮验证证据见 [docs/validation.md](docs/validation.md)。
 
 ## 打包
 
 ```powershell
 python tools/package.py            # dist/<id>-<version>.wsplugin + .sha256 + release-notes.md
-python tools/package.py --tag v0.1.0
+python tools/package.py --tag v0.1.0   # 校验 tag 与 plugin.json 版本一致、CHANGELOG 有对应 section
 ```
+
+包内容：git 跟踪的全部文件 + `cursorwrap.exe`，确定性 zip（固定时间戳、不压缩），
+同一份输入永远得到同一个 SHA-256。发布流程（tag → CI verify/build/publish）见
+[.github/workflows/release.yml](.github/workflows/release.yml) 与
+[AGENTS.md](AGENTS.md)。双语 release notes 在
+[docs/release-notes/v0.1.0.md](docs/release-notes/v0.1.0.md)。
 
 ## 许可证
 
