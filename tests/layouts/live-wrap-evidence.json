@@ -25,12 +25,12 @@
       ],
       "after": [
         0,
-        511
+        540
       ],
       "expected_wrap": true,
       "wrapped": true,
       "ok": true,
-      "observed_moves": 19,
+      "observed_moves": 12,
       "injected_seen": 0
     },
     {
@@ -50,11 +50,31 @@
       "expected_wrap": true,
       "wrapped": true,
       "ok": true,
-      "observed_moves": 12,
+      "observed_moves": 10,
       "injected_seen": 0
     },
     {
       "check": "impact-slow-drift-no-wrap",
+      "start": [
+        960,
+        540
+      ],
+      "target": [
+        1919,
+        540
+      ],
+      "after": [
+        1919,
+        540
+      ],
+      "expected_wrap": false,
+      "wrapped": false,
+      "ok": true,
+      "observed_moves": 12,
+      "injected_seen": 0
+    },
+    {
+      "check": "impact-braking-no-wrap",
       "start": [
         960,
         540
@@ -90,7 +110,7 @@
       "expected_wrap": true,
       "wrapped": true,
       "ok": true,
-      "observed_moves": 8,
+      "observed_moves": 9,
       "injected_seen": 0
     },
     {

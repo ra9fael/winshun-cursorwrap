@@ -228,12 +228,20 @@ def main() -> int:
         # --- gate on at 3000 px/s ---
         fast = dict(base, impactGate=True, impactSpeedPps=3000)
 
-        # A fast push: 12 steps over ~180 ms across ~960 px ≈ 5300 px/s. Wraps.
-        push(fast, "impact-fast-push-wraps", (960, mid_y), (right_edge, mid_y), 12, 15, True)
+        # A fast push: 24 steps × 5 ms across ~960 px. Dense in-band samples
+        # (40 px steps keep ~4 inside the 150 px band) are essential: with
+        # only 2, a coalesced event leaves the band with a single sample and
+        # the gate fails closed. Wraps.
+        push(fast, "impact-fast-push-wraps", (960, mid_y), (right_edge, mid_y), 24, 5, True)
         # A slow drift: 12 steps over ~1.2 s ≈ 800 px/s. Must NOT wrap.
         push(fast, "impact-slow-drift-no-wrap", (960, mid_y), (right_edge, mid_y), 12, 100, False)
+        # A braking push: fast to the band, slow inside it. The band cut
+        # must measure the slow part only: 12 steps × 120 ms ≈ 670 px/s
+        # overall, and every in-band step (~80 px over ~130 ms) is far under
+        # the gate. Must NOT wrap.
+        push(fast, "impact-braking-no-wrap", (960, mid_y), (right_edge, mid_y), 12, 120, False)
         # Left edge, fast: wraps to the right edge.
-        push(fast, "impact-left-fast-wraps", (960, mid_y), (left_edge, mid_y), 12, 15, True)
+        push(fast, "impact-left-fast-wraps", (960, mid_y), (left_edge, mid_y), 24, 5, True)
         # Untimed teleports (a single big jump) must not wrap: move far away
         # first, then one jump onto the edge.
         push(fast, "impact-single-jump-no-wrap", (300, mid_y), (right_edge, mid_y), 1, 200, False)

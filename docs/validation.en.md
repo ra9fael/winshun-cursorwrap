@@ -167,19 +167,25 @@ not rejected by its own hook as injected input. Evidence file:
 the real hook, real `SetCursorPos` and the guard radius all ran on the real path.
 What remains unverified is multi-display geometry and feel (see "Not tested").
 
-### Impact mode on real hardware (L4 single display, second round, 2026-11-10)
+### Impact mode on real hardware (L4 single display, second round 2026-11-10; band version, third round 2026-11-11)
 
 `tests/live_wrap_probe.py` extended to compare gate off/on, fast push / slow drift /
-teleport (gate at 3000 px/s; the probe's step timing converts to roughly 5300 px/s
-for 12 steps × 15 ms and 800 px/s for 12 steps × 100 ms):
+braking push / teleport (gate at 3000 px/s; the probe's step timing: 24 steps × 5 ms
+fast push, × 100 ms slow drift, × 120 ms braking):
 
 | Case | Push to | Actual landing | Verdict |
 |---|---|---|---|
 | Gate off + fast push | (1919, 540) | (0, 511) | 0.1 behaviour unchanged ✓ |
-| Gate on + fast push ≈5300 px/s | (1919, 540) | (0, 540) | wraps ✓ |
+| Gate on + fast push | (1919, 540) | (0, 540) | wraps ✓ |
 | Gate on + slow drift ≈800 px/s | (1919, 540) | (1919, 540) | **no wrap** ✓ |
+| Gate on + braking (fast far out, slow in-band ≈670 px/s) | (1919, 540) | (1919, 540) | **no wrap** (band cut) ✓ |
 | Gate on + fast push, left edge | (0, 540) | (1919, 540) | wraps ✓ |
 | Gate on + single teleport | (1919, 540) | (1919, 540) | **no wrap** (fail closed) ✓ |
+
+The braking case is the direct on-hardware evidence for the measuring band: the
+whole-stroke average comes close to the gate, but the in-band part (≈150 px) is far
+under it, and the band-cut semantics correctly fail it — the old whole-window
+average would have wrapped here.
 
 The impact-mode unit cases (`test_impact_gate.cpp` — now 24, including 12 for the
 measuring band and de-jitter) and the protocol round-trip diagnostics checks pass
