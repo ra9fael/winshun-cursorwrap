@@ -22,18 +22,46 @@ Implementation and validation record: [validation.en.md](validation.en.md).
 
 ## 3 Command (`cursorwrap` / `wrap`)
 
-An empty query returns one status row:
+### Empty text: the status row
 
 - Title: `Cursor wrap: on` / `Cursor wrap: off`
-- Subtitle: `mode <mode> · activation <mode> · N display(s) · M outer edge(s)`;
-  when the hook failed to install, ` · hook failed, status only` is appended
-- Actions (order = Enter / Ctrl+Enter / Shift+Enter):
+- Subtitle: `mode <mode> · activation <mode> · impact on/off [gate] · N display(s)`;
+  when the search bar has overridden settings, ` · search-bar overrides active
+  (reset to fall back)` is appended; when the hook failed to install,
+  ` · hook failed, status only` is appended
+- Actions (order = Enter / Ctrl+Enter / Shift+Enter / Ctrl+Enter):
   - `toggleEnabled` — turn wrapping on/off
   - `cycleMode` — both → vertical only → horizontal only → both
-  - `copyDiagnostics` — copy multi-line diagnostics (mode, activation, display
-    count, outer-edge count, move/wrap/suppressed/rebuild counters, thresholds,
-    layout gaps)
-- Query text is ignored: a query never changes state
+  - `toggleImpact` — impact mode on/off
+  - `copyDiagnostics` — copy multi-line diagnostics
+
+### Text: change settings from the search bar
+
+`cursorwrap <words>` (case-insensitive, zh and en; the whole text is one command):
+
+| Input | Effect |
+|---|---|
+| `impact` | toggle impact mode |
+| `impact on` / `impact off` | set it directly |
+| `speed 3000` | the impact gate (500–20000, clamped; setting a speed turns the gate on) |
+| `mode` | cycle the direction: both → vertical → horizontal |
+| `mode vertical` etc. | set the direction directly |
+| `ctrl` / `shift` / `always` | the activation mode |
+| `guard 120` | the anti-oscillation radius (10–200) |
+| `edge 5` | the edge threshold (1–20) |
+| `tol 80` | the adjacency tolerance (10–200) |
+| `reset` | clear the search-bar overrides; the host card applies again |
+| anything else | a `valid:false` hint row listing the words |
+
+**Persistence and precedence**: the host has no plugin→host settings channel (the
+protocol only accepts `winshun/log|notify|progress|refresh|hotkeys|tool`; unknown
+methods are dropped), and `WinShun.ini` is the host's file — the plugin does not
+touch it. Search-bar changes go to the plugin's own data directory,
+`WS_DATA_DIR/settings.json` (only keys that differ from the defaults), and are
+applied on top of the host's settings at startup and in `settingsChanged`; `reset`
+deletes the file. The host's settings card stays authoritative for **keys the search
+bar has not overridden** — both places work, and the status row says which source is
+active.
 
 ## 4 Gesture (the plugin's only automatic behaviour)
 

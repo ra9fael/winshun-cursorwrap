@@ -16,13 +16,31 @@ corner）解决，都得额外记一个操作。本插件用的是「把光标�
 
 ## 用法
 
-留空输入 `cursorwrap`（或 `wrap` / `环绕`）看状态：
+输入 `cursorwrap`（或 `wrap` / `环绕`）看状态，**在后面带词直接改设置**：
+
+| 输入 | 效果 |
+|---|---|
+| `cursorwrap`（留空） | 状态行 |
+| `cursorwrap impact` / `撞击` | 撞击模式开 ↔ 关 |
+| `cursorwrap impact on` / `off` | 直接设撞击模式 |
+| `cursorwrap speed 3000` / `速度 3000` | 撞击门槛（500–20000 px/s，设速度即开撞击） |
+| `cursorwrap mode` / `模式` | 方向循环：双向 → 仅上下 → 仅左右 |
+| `cursorwrap mode vertical` / `模式 上下` | 直接设方向 |
+| `cursorwrap ctrl` / `shift` / `always` / `按住` / `总是` | 激活方式 |
+| `cursorwrap guard 120` / `防震 120` | 防震荡半径（10–200 px） |
+| `cursorwrap edge 5` / `边缘 5` | 边缘判定距离（1–20 px） |
+| `cursorwrap tol 80` / `容差 80` | 邻接容差（10–200 px） |
+| `cursorwrap reset` / `恢复` | 清掉搜索栏覆盖，宿主设置卡重新生效 |
+
+改动**立即生效**，并持久化到插件数据目录（`settings.json`，只存与默认不同的键）；
+宿主设置卡对没被覆盖的键仍然权威，状态行会注明「搜索栏覆盖中」。
 
 | 键 | 效果 |
 |---|---|
 | Enter | 开启 / 关闭回绕 |
 | Ctrl+Enter | 切换模式：双向 → 仅上下 → 仅左右 |
-| Shift+Enter | 复制诊断信息（模式、屏数、外边数、计数、阈值、布局缝隙） |
+| Shift+Enter | 撞击模式开 ↔ 关 |
+| Ctrl+Enter | 复制诊断信息（模式、屏数、外边数、计数、阈值、布局缝隙） |
 
 ## 设置
 

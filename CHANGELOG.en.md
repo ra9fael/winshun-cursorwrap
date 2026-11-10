@@ -11,6 +11,17 @@ single source of truth; release tags are `v<version>`.
 
 ### Added
 
+- Change settings from the search bar: `cursorwrap impact` (toggle the impact
+  gate), `cursorwrap speed 3000` (the gate), `cursorwrap mode vertical` (the
+  direction), `cursorwrap ctrl/shift/always` (activation), `cursorwrap
+  guard/edge/tol <n>` (thresholds), `cursorwrap reset` (fall back to the host's
+  settings card). Changes apply immediately and persist in the plugin's data
+  directory (`WS_DATA_DIR/settings.json`, only keys that differ from the
+  defaults); the host card stays authoritative for keys not overridden, and the
+  status row says which source is active. zh/en keywords, out-of-range numbers
+  clamp, unknown words get a hint row.
+- A new `toggleImpact` action (Shift+Enter toggles impact mode; copying
+  diagnostics moved to Ctrl+Enter).
 - Impact mode (`impactGate` / `impactSpeedPps`): when on, the cursor must hit the
   edge fast enough to wrap, so drifting to the edge (say, toward the taskbar) no
   longer triggers. The speed is the displacement perpendicular to the edge over a

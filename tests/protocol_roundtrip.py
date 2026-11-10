@@ -191,8 +191,8 @@ def run(exe: Path) -> int:
             check(bool(row.get("subtitle")), "row has a subtitle", str(row.get("subtitle")))
             actions = row.get("actions") or []
             check([a.get("id") for a in actions]
-                  == ["toggleEnabled", "cycleMode", "copyDiagnostics"],
-                  "three actions in Enter/Ctrl+Enter/Shift+Enter order",
+                  == ["toggleEnabled", "cycleMode", "toggleImpact", "copyDiagnostics"],
+                  "four actions in Enter/Ctrl+Enter/Shift+Enter/Ctrl+Enter order",
                   str([a.get("id") for a in actions]))
             check("monitor" in json.dumps(row, ensure_ascii=False).lower()
                   or "屏" in json.dumps(row, ensure_ascii=False),
@@ -201,6 +201,37 @@ def run(exe: Path) -> int:
         print("query with text is ignored (no side effects)")
         q2 = drv.query("anything")
         check(len(items_of(q2)) == 1, "query with text still returns one row")
+
+        print("query: search-bar commands change settings")
+        # The impact gate toggles through the search bar and persists.
+        q3 = drv.query("impact")
+        row3 = items_of(q3)[0]
+        check("impact" in json.dumps(row3, ensure_ascii=False).lower()
+              or "撞击" in json.dumps(row3, ensure_ascii=False),
+              "the status row shows the impact state", json.dumps(row3, ensure_ascii=False)[:200])
+        q4 = drv.query("impact")
+        row4 = items_of(q4)[0]
+        # Two toggles return to the original state.
+        check(("撞击开" in row3["subtitle"] or "impact on" in row3["subtitle"].lower())
+              != ("撞击开" in row4["subtitle"] or "impact on" in row4["subtitle"].lower()),
+              "two impact toggles flip the state twice",
+              row3["subtitle"] + " || " + row4["subtitle"])
+        # A speed command turns the gate on with the given value.
+        q5 = drv.query("speed 3500")
+        row5 = items_of(q5)[0]
+        check("3500" in row5.get("subtitle", ""),
+              "speed 3500 shows in the status row", row5.get("subtitle", ""))
+        # An unknown word yields an invalid row, not a fake success.
+        q6 = drv.query("hello world")
+        row6 = items_of(q6)[0]
+        check(row6.get("id") == "cursorwrap.unknown" and row6.get("valid") is False,
+              "unknown words give an invalid hint row", str(row6)[:200])
+        # reset clears the overrides (the status row drops the source note).
+        q7 = drv.query("reset")
+        row7 = items_of(q7)[0]
+        check("搜索栏覆盖" not in row7.get("subtitle", "")
+              and "overrides active" not in row7.get("subtitle", ""),
+              "reset clears the override note", row7.get("subtitle", ""))
 
         print("action: cycleMode x3 returns to both")
         row = items[0] if items else {"id": "cursorwrap.status", "title": "x"}

@@ -11,6 +11,13 @@ single source of truth; release tags are `v<version>`.
 
 ### Added
 
+- 搜索栏直接改设置：`cursorwrap impact`（撞击开关）、`cursorwrap speed 3000`
+  （撞击门槛）、`cursorwrap mode vertical`（方向）、`cursorwrap ctrl/shift/always`
+  （激活方式）、`cursorwrap guard/edge/tol <n>`（阈值）、`cursorwrap reset`
+  （恢复宿主设置卡）。改动立即生效并持久化到插件数据目录
+  （`WS_DATA_DIR\settings.json`，只存与默认不同的键）；宿主设置卡对未覆盖的键
+  仍然权威，状态行注明来源。中英文关键词、数字越界夹入、未知词给提示行。
+- 新增动作 `toggleImpact`（Shift+Enter 切换撞击模式；复制诊断移到 Ctrl+Enter）。
 - 撞击模式（`impactGate` / `impactSpeedPps`）：开启后光标必须以足够速度撞到边缘才
   回绕，防止慢慢挪到边缘（比如去点任务栏）时误触发。速度按 100ms 窗口内垂直于
   边缘的位移计算（500–20000 px/s，默认 2000）；沿边缘平行滑动不算；测不出速度

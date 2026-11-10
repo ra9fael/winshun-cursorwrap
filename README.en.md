@@ -21,13 +21,34 @@ nothing flashes back.
 
 ## Usage
 
-Type `cursorwrap` (or `wrap`) with no argument to see the status row:
+Type `cursorwrap` (or `wrap`) to see the status row — **and put words after it to
+change settings right there**:
+
+| Input | Effect |
+|---|---|
+| `cursorwrap` (empty) | the status row |
+| `cursorwrap impact` | toggle impact mode |
+| `cursorwrap impact on` / `off` | set impact mode directly |
+| `cursorwrap speed 3000` | the impact gate (500–20000 px/s; setting a speed turns it on) |
+| `cursorwrap mode` | cycle the direction: both → vertical → horizontal |
+| `cursorwrap mode vertical` | set the direction directly |
+| `cursorwrap ctrl` / `shift` / `always` | the activation mode |
+| `cursorwrap guard 120` | the anti-oscillation radius (10–200 px) |
+| `cursorwrap edge 5` | the edge threshold (1–20 px) |
+| `cursorwrap tol 80` | the adjacency tolerance (10–200 px) |
+| `cursorwrap reset` | clear the search-bar overrides; the host card applies again |
+
+Changes **apply immediately** and persist in the plugin's data directory
+(`settings.json`, only keys that differ from the defaults); the host's settings card
+stays authoritative for keys not overridden, and the status row says when overrides
+are active.
 
 | Key | Effect |
 |---|---|
 | Enter | turn wrapping on / off |
 | Ctrl+Enter | cycle the mode: both → vertical only → horizontal only |
-| Shift+Enter | copy diagnostics (mode, display count, outer-edge count, counters, thresholds, layout gaps) |
+| Shift+Enter | impact mode on ↔ off |
+| Ctrl+Enter | copy diagnostics (mode, display count, outer-edge count, counters, thresholds, layout gaps) |
 
 ## Settings
 

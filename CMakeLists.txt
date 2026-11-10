@@ -25,6 +25,8 @@ add_executable(WinShunCursorWrap WIN32
     src/main.cpp
     src/wrap_topology.cpp
     src/wrap_logic.cpp
+    src/query_parser.cpp
+    src/settings_store.cpp
     src/mouse_hook.cpp
     src/monitor_watcher.cpp
     cursorwrap.rc
@@ -55,8 +57,12 @@ add_executable(cw_tests
     tests/test_wrap_logic.cpp
     tests/test_edge_cases.cpp
     tests/test_impact_gate.cpp
+    tests/test_query_parser.cpp
+    tests/test_settings_store.cpp
     src/wrap_topology.cpp
     src/wrap_logic.cpp
+    src/query_parser.cpp
+    src/settings_store.cpp
 )
 target_include_directories(cw_tests PRIVATE src tests)
 target_compile_definitions(cw_tests PRIVATE UNICODE _UNICODE NOMINMAX
