@@ -29,7 +29,7 @@ New repository `ra9fael.cursorwrap`, v0.1.0:
 | `src/monitor_watcher.{h,cpp}` | message-only window, 500 ms debounced topology rebuild |
 | `src/main.cpp` | derives `winshun::Plugin`; the `cursorwrap` keyword plus three actions |
 | `plugin.json` | resident / eager / `ui` permission / 7 settings |
-| `tests/` | 43 unit cases, 6 synthetic layout fixtures, 32-check protocol round trip, L0 static validation |
+| `tests/` | 80 unit cases, 7 layout fixtures (6 synthetic + 1 captured), 45-check protocol round trip, L0 static validation |
 | `docs/` | bilingual spec and test plan, including the not-tested list |
 
 ## Measured
@@ -56,7 +56,7 @@ $ .\build\cw_tests.exe .\tests\layouts
 all tests passed (0 failures)
 ```
 
-All 54 cases are green, covering single display, two side by side, two stacked,
+All 80 cases are green, covering single display, two side by side, two stacked,
 L-shape with three displays, non-overlap projection, three in a row, mixed DPI,
 negative coordinates, extreme coordinates, zero-area displays, adjacency tolerance,
 gap diagnostics, all three modes, all three activation modes, drag suppression,
@@ -71,7 +71,7 @@ boundary values 500/20000 are accepted while 499/20001 fall back).
 ```
 $ python tests/protocol_roundtrip.py
 ...
-all 32 protocol checks passed
+all 45 protocol checks passed
 ```
 
 Covers `initialize → query(empty/with text) → action(cycleMode×3 / toggleEnabled /
@@ -181,9 +181,9 @@ for 12 steps × 15 ms and 800 px/s for 12 steps × 100 ms):
 | Gate on + fast push, left edge | (0, 540) | (1919, 540) | wraps ✓ |
 | Gate on + single teleport | (1919, 540) | (1919, 540) | **no wrap** (fail closed) ✓ |
 
-The 12 new unit cases (`test_impact_gate.cpp`) and 3 new protocol round-trip checks
-(the gate state and speed in the diagnostics, and turning it off again) pass as
-well. Note for future runs: the first probe run saw `observed_moves: 0` everywhere
+The impact-mode unit cases (`test_impact_gate.cpp` — now 24, including 12 for the
+measuring band and de-jitter) and the protocol round-trip diagnostics checks pass
+as well. Note for future runs: the first probe run saw `observed_moves: 0` everywhere
 because a `settingsChanged` notification is only delivered when the probe pumps
 messages — one `pump(50)` after the notification fixed it; the probe now does this
 and the pitfall is documented here.

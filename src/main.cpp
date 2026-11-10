@@ -105,6 +105,7 @@ cw::RawSettings rawFromJson(const Json& s)
     numberField("adjacencyTolerancePx", raw.adjacencyTolerancePx, raw.hasAdjacency);
     boolField("impactGate", raw.impactGate, raw.hasImpactGate);
     numberField("impactSpeedPps", raw.impactSpeedPps, raw.hasImpactSpeed);
+    numberField("impactBandPx", raw.impactBandPx, raw.hasImpactBand);
     return raw;
 }
 
@@ -545,8 +546,10 @@ private:
         text += "wrap guard: " + intText(d.settings.wrapGuardPx) + " px\n";
         text += "adjacency tolerance: " + intText(d.settings.adjacencyTolerancePx) + " px\n";
         text += std::string("impact gate: ") + (d.settings.impactGate ? "on" : "off") + "\n";
-        if (d.settings.impactGate)
+        if (d.settings.impactGate) {
             text += "impact speed: " + intText(d.settings.impactSpeedPps) + " px/s\n";
+            text += "impact band: " + intText(d.settings.impactBandPx) + " px\n";
+        }
         for (const std::string& gap : d.gaps)
             text += "gap: " + gap + "\n";
         return text;

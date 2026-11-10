@@ -110,8 +110,15 @@
       "key": "impactSpeedPps",
       "type": "number",
       "title": {"zh": "撞击速度门槛（像素/秒）", "en": "Impact speed gate (px/s)"},
-      "hint": {"zh": "500–20000，默认 2000；按 100ms 窗口内垂直于边缘的速度判定，沿边缘平行滑动不算", "en": "500–20000, default 2000; judged by the speed perpendicular to the edge over a 100 ms window — sliding along the edge does not count"},
+      "hint": {"zh": "500–20000，默认 2000；按最近一段朝向边缘的连续逼近测速，沿边缘平行滑动不算", "en": "500–20000, default 2000; judged over the last continuous stroke toward the edge — sliding along the edge does not count"},
       "default": 2000
+    },
+    {
+      "key": "impactBandPx",
+      "type": "number",
+      "title": {"zh": "撞击测速区间（像素）", "en": "Impact measuring band (px)"},
+      "hint": {"zh": "50–500，默认 150；只在距边缘该范围内测速——远处冲刺不算，贴边抖动因位移过小也不算", "en": "50–500, default 150; speed is measured only within this distance of the edge — distant sprints and edge jitter (too little travel) both fail"},
+      "default": 150
     }
   ]
 }

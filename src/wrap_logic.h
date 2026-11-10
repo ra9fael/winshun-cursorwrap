@@ -32,12 +32,14 @@ struct Settings {
     int wrapGuardPx = 50;           // 10..200
     int adjacencyTolerancePx = 50;  // 10..200
     // Impact gate: wrap only when the pointer reaches the edge fast enough.
-    // The speed is the displacement perpendicular to the edge over a 100 ms
-    // window; per-event acceleration is noise at 1000 Hz report rates, so
-    // the knob is a speed floor (the same conclusion PowerToys Find My Mouse
-    // reached for its shake gate).
+    // The speed is measured over the last continuous stroke toward the edge,
+    // clipped to the approach band (impactBandPx) so a fast flight that
+    // braked before the edge does not count; per-event acceleration is noise
+    // at 1000 Hz report rates, so the knob is a speed floor (the same
+    // conclusion PowerToys Find My Mouse reached for its shake gate).
     bool impactGate = false;
     int impactSpeedPps = 2000;      // 500..20000 px/s
+    int impactBandPx = 150;         // 50..500 px: the approach band speed is measured in
 };
 
 // Parsed-setting values straight from the host JSON, already type-checked.
@@ -53,6 +55,7 @@ struct RawSettings {
     double adjacencyTolerancePx = 50;
     bool impactGate = false;
     double impactSpeedPps = 2000;
+    double impactBandPx = 150;
     bool hasWrapMode = false;
     bool hasActivation = false;
     bool hasDrag = false;
@@ -62,6 +65,7 @@ struct RawSettings {
     bool hasAdjacency = false;
     bool hasImpactGate = false;
     bool hasImpactSpeed = false;
+    bool hasImpactBand = false;
 };
 
 // Apply RawSettings onto Settings. Every bad value falls back to the default
@@ -128,16 +132,23 @@ public:
     size_t outerEdgeCount() const;
 
     static constexpr int64_t kNever = INT64_MIN;
-    // The impact speed is measured over this window of recent samples.
+    // The impact speed is measured over the last continuous stroke toward
+    // the edge, at most this long (older samples are irrelevant anyway).
     static constexpr long long kImpactWindowUs = 100 * 1000; // 100 ms
-    static constexpr size_t kHistoryMax = 32;
+    // 1000 Hz gaming mice: 32 samples were only 32 ms; 128 covers the
+    // window with headroom for a busy hook chain.
+    static constexpr size_t kHistoryMax = 128;
+    // A stroke shorter than this is jitter, not a hit: the pointer must
+    // actually travel toward the edge before its speed means anything.
+    static constexpr int64_t kImpactMinTravelPx = 20;
 
 private:
     bool withinGuard(int64_t x, int64_t y) const;
     CursorDirection direction(const Sample& s) const;
-    // Signed approach speed toward `edge` over the recent window, px/s;
-    // 0 when it cannot be measured. The mutex is held by the caller.
-    long long approachSpeedPps(EdgeType edge) const;
+    // Signed approach speed toward `edge` over the last continuous stroke
+    // clipped to the approach band; 0 when it cannot be measured. The mutex
+    // is held by the caller.
+    long long approachSpeedPps(EdgeType edge, int64_t edgeCoord) const;
     void noteSample(const Sample& sample); // mutex held by the caller
 
     mutable std::mutex m_mutex;

@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 
 namespace cw {
 namespace {
@@ -81,36 +82,61 @@ void WrapEngine::noteSample(const Sample& sample)
         m_history.erase(m_history.begin(), m_history.begin() + (m_history.size() - kHistoryMax));
 }
 
-long long WrapEngine::approachSpeedPps(EdgeType edge) const
+long long WrapEngine::approachSpeedPps(EdgeType edge, int64_t edgeCoord) const
 {
-    // Speed of the coordinate perpendicular to `edge`, measured over the
-    // recent window. Fail closed: fewer than two timestamped samples, a
+    // The impact speed of the LAST continuous stroke toward the edge,
+    // clipped to the approach band. Three de-jitter mechanisms:
+    //
+    // 1. Approach band: the stroke is cut at the first sample farther than
+    //    impactBandPx from the edge, so a fast flight that braked before
+    //    the band measures by what happened near the edge, not en route.
+    // 2. Stroke split: the walk stops at the first reversal or pause, so
+    //    bounce-then-hit sequences measure the last hit, not an average
+    //    diluted by the bounce.
+    // 3. Minimal travel: a stroke shorter than kImpactMinTravelPx is
+    //    jitter at the edge, not a hit — fail closed.
+    //
+    // Fail closed otherwise: fewer than two timestamped samples, a
     // non-monotonic clock or a zero window all mean "cannot measure".
     if (m_history.size() < 2)
         return 0;
     const Sample& newest = m_history.back();
     if (newest.tUs <= 0)
         return 0;
-    // Walk back to the oldest sample inside the window.
-    size_t i = m_history.size() - 1;
-    while (i > 0 && newest.tUs - m_history[i - 1].tUs <= kImpactWindowUs
-           && m_history[i - 1].tUs > 0)
-        --i;
-    const Sample& oldest = m_history[i];
-    if (oldest.tUs <= 0 || newest.tUs <= oldest.tUs)
-        return 0;
-    const long long windowUs = newest.tUs - oldest.tUs;
-    if (windowUs <= 0)
-        return 0;
     const auto coord = [](const Sample& s, EdgeType e) -> long long {
         return horizontal(e) ? s.x : s.y;
     };
-    const long long delta = coord(newest, edge) - coord(oldest, edge);
-    // Signed: the edge sits at the axis minimum (Left/Top) or maximum
-    // (Right/Bottom), so approaching it means decreasing (Left/Top) or
-    // increasing (Right/Bottom) coordinates. Negative => moving away.
-    const long long toward = (edge == EdgeType::Left || edge == EdgeType::Top) ? -delta : delta;
-    const long long pps = toward * 1'000'000LL / windowUs;
+    // +1 when approaching means increasing coordinates (Right/Bottom),
+    // -1 when decreasing (Left/Top).
+    const int dir = (edge == EdgeType::Left || edge == EdgeType::Top) ? -1 : 1;
+    const auto travel = [&coord, dir, edge](const Sample& a, const Sample& b) {
+        return (coord(b, edge) - coord(a, edge)) * dir; // +: toward the edge
+    };
+    const long long band = m_settings.impactBandPx;
+
+    // Walk back over the last continuous toward-the-edge stroke, inside the
+    // window and inside the band.
+    size_t i = m_history.size() - 1;
+    while (i > 0) {
+        const Sample& prev = m_history[i - 1];
+        if (prev.tUs <= 0 || newest.tUs - prev.tUs > kImpactWindowUs)
+            break; // clock gap or window end: the stroke starts at i
+        if (travel(prev, m_history[i]) < 0)
+            break; // reversed: the stroke toward the edge starts at i
+        if (std::llabs(coord(prev, edge) - edgeCoord) > band)
+            break; // left the approach band: the stroke starts at i
+        --i;
+    }
+    const Sample& first = m_history[i];
+    if (first.tUs <= 0 || newest.tUs <= first.tUs)
+        return 0;
+    const long long stroke = travel(first, newest);
+    if (stroke < kImpactMinTravelPx)
+        return 0; // jitter, not a hit
+    const long long windowUs = newest.tUs - first.tUs;
+    if (windowUs <= 0)
+        return 0;
+    const long long pps = stroke * 1'000'000LL / windowUs;
     return pps > 0 ? pps : 0;
 }
 
@@ -156,10 +182,15 @@ std::pair<int64_t, int64_t> WrapEngine::onMouseMove(const Sample& sample, bool m
         return skip();
 
     // Impact gate: reaching the edge must look like a hit, not a drift.
-    // Measured over the recent window perpendicular to the edge; a sample
-    // without a timestamp (tUs == 0) cannot prove speed and fails closed.
+    // Measured over the last continuous stroke, inside the approach band;
+    // a sample without a timestamp (tUs == 0) cannot prove speed and fails
+    // closed.
     if (m_settings.impactGate) {
-        const long long pps = approachSpeedPps(edge);
+        const MonitorBox box = m_topology.monitors()[static_cast<size_t>(index)];
+        const int64_t edgeCoord = (edge == EdgeType::Left || edge == EdgeType::Top)
+            ? (edge == EdgeType::Left ? box.left : box.top)
+            : (edge == EdgeType::Right ? box.right - 1 : box.bottom - 1);
+        const long long pps = approachSpeedPps(edge, edgeCoord);
         if (pps < m_settings.impactSpeedPps)
             return skip();
     }
@@ -263,6 +294,8 @@ void applySettings(const RawSettings& raw, Settings& out, bool merge)
                                            previous.adjacencyTolerancePx);
     out.impactSpeedPps = applyNumber(raw.impactSpeedPps, raw.hasImpactSpeed, 500, 20000,
                                      fallback.impactSpeedPps, previous.impactSpeedPps);
+    out.impactBandPx = applyNumber(raw.impactBandPx, raw.hasImpactBand, 50, 500,
+                                   fallback.impactBandPx, previous.impactBandPx);
     (void)merge; // partial updates: untouched fields keep `previous` above
 }
 

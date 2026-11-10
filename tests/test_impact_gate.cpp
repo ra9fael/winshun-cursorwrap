@@ -18,11 +18,12 @@ MonitorBox box(int64_t l, int64_t t, int64_t r, int64_t b, bool primary = false)
     return m;
 }
 
-Settings gateOn(int speedPps = 2000)
+Settings gateOn(int speedPps = 2000, int bandPx = 150)
 {
     Settings s;
     s.impactGate = true;
     s.impactSpeedPps = speedPps;
+    s.impactBandPx = bandPx;
     return s;
 }
 } // namespace
@@ -39,13 +40,14 @@ CW_TEST(impact_off_by_default_fast_still_wraps)
 
 CW_TEST(impact_slow_drift_does_not_wrap)
 {
-    // ~250 px/s toward the right edge: under a 2000 px/s gate.
+    // ~250 px/s toward the right edge, entirely inside the band: under the
+    // 2000 px/s gate and over the minimal-travel bar.
     WrapEngine e(gateOn());
     e.rebuild({ box(0, 0, 1920, 1080, true) });
     long long t = 1'000'000;
-    for (int i = 0; i < 6; ++i) {
-        e.onMouseMove({ 1900 + i, 540, t }, false, false);
-        t += 4000; // 1 px per 4 ms = 250 px/s
+    for (int x = 1807; x <= 1919; ++x) {
+        e.onMouseMove({ x, 540, t }, false, false);
+        t += 4000; // 1 px per 4 ms = 250 px/s, continuously to the edge
     }
     const auto [x, y] = e.onMouseMove({ 1919, 540, t }, false, false);
     CW_CHECK_EQ(x, 1919); // suppressed
@@ -55,20 +57,20 @@ CW_TEST(impact_slow_drift_does_not_wrap)
 
 CW_TEST(impact_fast_hit_wraps)
 {
-    // ~6000 px/s toward the right edge: over the gate.
+    // Fast inside the band (~6000 px/s): over the gate. An earlier fast
+    // flight OUTSIDE the band must not inflate the measurement.
     WrapEngine e(gateOn());
     e.rebuild({ box(0, 0, 1920, 1080, true) });
     long long t = 1'000'000;
-    e.onMouseMove({ 1700, 540, t }, false, false);
-    // Jump near the edge quickly, then the final sample crosses onto the edge.
+    e.onMouseMove({ 1700, 540, t }, false, false); // outside the 150px band
     t += 16000; // 200 px in 16 ms = 12500 px/s
-    const auto [x, y] = e.onMouseMove({ 1900, 540, t }, false, false);
-    t += 3000; // 19 px in 3 ms ≈ 6300 px/s
-    const auto [x2, y2] = e.onMouseMove({ 1919, 540, t }, false, false);
-    CW_CHECK_EQ(x2, 0); // wrapped
+    e.onMouseMove({ 1800, 540, t }, false, false); // band start (dist 119)
+    t += 2000; // 100 px in 2 ms = 50000 px/s
+    const auto [x, y] = e.onMouseMove({ 1919, 540, t }, false, false);
+    // In-band stroke: 1800 -> 1919 = 119 px in 2 ms. The gate only sees the
+    // in-band part; either way it is far over the 2000 px/s gate.
+    CW_CHECK_EQ(x, 0); // wrapped
     CW_CHECK_EQ(e.stats().wraps, 1);
-    (void)x;
-    (void)y;
 }
 
 CW_TEST(impact_measures_only_the_perpendicular_axis)
@@ -137,9 +139,9 @@ CW_TEST(impact_history_resets_after_wrap)
     e.rebuild({ box(0, 0, 1920, 1080, true) });
     long long t = 1'000'000;
     e.onMouseMove({ 1700, 540, t }, false, false);
-    t += 16000;
-    e.onMouseMove({ 1900, 540, t }, false, false);
-    t += 3000;
+    t += 16000; // 100 px in 16 ms, ends at the band edge
+    e.onMouseMove({ 1800, 540, t }, false, false);
+    t += 2000; // 119 px in 2 ms inside the band: a fast hit
     const auto [x1, y1] = e.onMouseMove({ 1919, 540, t }, false, false);
     CW_CHECK_EQ(x1, 0); // fast hit wraps
     // Immediately push to the left edge with slow samples: no wrap, and the
@@ -197,6 +199,7 @@ CW_TEST(impact_settings_defaults)
     const Settings s;
     CW_CHECK_EQ(s.impactGate, false);
     CW_CHECK_EQ(s.impactSpeedPps, 2000);
+    CW_CHECK_EQ(s.impactBandPx, 150);
     RawSettings raw;
     raw.impactGate = true;
     raw.hasImpactGate = true;
@@ -204,4 +207,191 @@ CW_TEST(impact_settings_defaults)
     applySettings(raw, merged, true);
     CW_CHECK_EQ(merged.impactGate, true); // partial update applies
     CW_CHECK_EQ(merged.impactSpeedPps, 2000); // untouched field keeps default
+    CW_CHECK_EQ(merged.impactBandPx, 150);
+}
+
+// --- approach band + stroke splitting + minimal travel ---
+
+CW_TEST(impact_band_ignores_distant_sprint)
+{
+    // A fast flight far out, then a slow crawl inside the band: the old
+    // whole-window average could still pass; the band must measure only
+    // the crawl and fail it.
+    WrapEngine e(gateOn(2000, 150));
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    long long t = 1'000'000;
+    e.onMouseMove({ 1750, 540, t }, false, false); // 169 px out: outside the band
+    t += 2000;
+    e.onMouseMove({ 1900, 540, t }, false, false); // 150 px in 2 ms — "fast"
+    // Crawl inside the band, then step onto the edge: the stroke restarts
+    // at 1900 and totals 19 px — under the minimal-travel bar.
+    for (int i = 0; i < 15; ++i) {
+        t += 4000;
+        e.onMouseMove({ 1901 + i, 540, t }, false, false); // 1 px / 4 ms
+    }
+    const auto [x, y] = e.onMouseMove({ 1919, 540, t }, false, false);
+    CW_CHECK_EQ(x, 1919);
+    CW_CHECK_EQ(e.stats().wraps, 0);
+}
+
+CW_TEST(impact_band_ignores_distant_sprint_when_braking)
+{
+    // The motivating case: fly to the band, brake hard inside it, arrive
+    // slowly. Only the in-band stroke counts: 169 px over 100 ms ≈
+    // 1690 px/s < the 2000 gate.
+    WrapEngine e(gateOn(2000, 150));
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    long long t = 1'000'000;
+    // Fast approach to the band edge: 150 px in 25 ms = 6000 px/s.
+    e.onMouseMove({ 1600, 540, t }, false, false);
+    t += 25000;
+    e.onMouseMove({ 1750, 540, t }, false, false); // band boundary (dist 169)
+    // Brake: 100 px in 40 ms = 2500 px/s, then coast 69 px in 60 ms.
+    t += 40000;
+    e.onMouseMove({ 1850, 540, t }, false, false);
+    t += 60000;
+    const auto [x, y] = e.onMouseMove({ 1919, 540, t }, false, false);
+    CW_CHECK_EQ(x, 1919);
+    CW_CHECK_EQ(e.stats().wraps, 0);
+}
+
+CW_TEST(impact_edge_jitter_fails_minimal_travel)
+{
+    // A 2 px bounce at the edge: instantaneous "speed" is huge (e.g.
+    // 2 px / 1 ms = 2000 px/s) but the stroke traveled almost nothing.
+    // Minimal travel must fail it even with a zero gate.
+    WrapEngine e(gateOn(500));
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    long long t = 1'000'000;
+    e.onMouseMove({ 1910, 540, t }, false, false);
+    t += 1000;
+    e.onMouseMove({ 1912, 540, t }, false, false);
+    t += 1000;
+    e.onMouseMove({ 1911, 540, t }, false, false); // tiny reversal
+    t += 1000;
+    const auto [x, y] = e.onMouseMove({ 1919, 540, t }, false, false);
+    // Last stroke: 1911 -> 1919 = 8 px < 20 minimal travel.
+    CW_CHECK_EQ(x, 1919);
+    CW_CHECK_EQ(e.stats().wraps, 0);
+}
+
+CW_TEST(impact_bounce_then_hit_measures_last_stroke)
+{
+    // Slow first hit (suppressed), bounce off, come back fast: the
+    // measurement must restart at the reversal and measure the final hit,
+    // not average across the whole sequence.
+    WrapEngine e(gateOn(2000));
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    long long t = 1'000'000;
+    e.onMouseMove({ 1800, 540, t }, false, false);
+    t += 80000;
+    e.onMouseMove({ 1919, 540, t }, false, false); // slow first hit: suppressed (~1488 px/s)
+    t += 2000;
+    e.onMouseMove({ 1880, 540, t }, false, false); // bounce back out
+    t += 2000;
+    // Final stroke: 1880 -> 1919 = 39 px in 2 ms = 19500 px/s > gate.
+    const auto [x, y] = e.onMouseMove({ 1919, 540, t }, false, false);
+    CW_CHECK_EQ(x, 0);
+    CW_CHECK_EQ(e.stats().wraps, 1);
+}
+
+CW_TEST(impact_bounce_then_slow_measures_last_stroke_fail)
+{
+    // Same shape, but the final stroke is slow: it must fail even though
+    // the average of the whole sequence was fast.
+    WrapEngine e(gateOn(2000));
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    long long t = 1'000'000;
+    e.onMouseMove({ 1800, 540, t }, false, false);
+    t += 80000;
+    e.onMouseMove({ 1919, 540, t }, false, false); // slow first hit: suppressed
+    t += 2000;
+    e.onMouseMove({ 1880, 540, t }, false, false); // bounce back out
+    // Slow crawl back: 39 px over 80 ms ≈ 490 px/s.
+    t += 40000;
+    e.onMouseMove({ 1900, 540, t }, false, false);
+    t += 40000;
+    const auto [x, y] = e.onMouseMove({ 1919, 540, t }, false, false);
+    CW_CHECK_EQ(x, 1919);
+    CW_CHECK_EQ(e.stats().wraps, 0);
+}
+
+CW_TEST(impact_pause_resets_stroke)
+{
+    // A pause inside the window: the stroke restarts after it, so speed is
+    // measured over the post-pause travel only.
+    WrapEngine e(gateOn(2000));
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    long long t = 1'000'000;
+    e.onMouseMove({ 1800, 540, t }, false, false); // inside the band
+    t += 2000;
+    e.onMouseMove({ 1850, 540, t }, false, false); // 50 px in 2 ms: fast
+    t += 120'000; // pause longer than the 100 ms window
+    e.onMouseMove({ 1900, 540, t }, false, false);
+    t += 2000;
+    const auto [x, y] = e.onMouseMove({ 1919, 540, t }, false, false);
+    // Post-pause stroke: 19 px < 20 minimal travel; even ignoring that,
+    // 19 px / 2 ms alone would pass — the pause must cut it off.
+    CW_CHECK_EQ(x, 1919);
+    CW_CHECK_EQ(e.stats().wraps, 0);
+}
+
+CW_TEST(impact_left_edge_band_symmetry)
+{
+    // The same band/stroke rules on the left edge (decreasing x).
+    WrapEngine e(gateOn(2000));
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    long long t = 1'000'000;
+    e.onMouseMove({ 120, 540, t }, false, false); // inside the band
+    t += 2000;
+    const auto [x, y] = e.onMouseMove({ 0, 540, t }, false, false);
+    // Stroke: 120 px in 2 ms = 60000 px/s: wraps.
+    CW_CHECK_EQ(x, 1919);
+    CW_CHECK_EQ(e.stats().wraps, 1);
+}
+
+CW_TEST(impact_top_edge_band_symmetry)
+{
+    // And on the top edge (decreasing y).
+    WrapEngine e(gateOn(2000));
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    long long t = 1'000'000;
+    e.onMouseMove({ 960, 100, t }, false, false);
+    t += 2000;
+    const auto [x, y] = e.onMouseMove({ 960, 0, t }, false, false);
+    CW_CHECK_EQ(y, 1079);
+    CW_CHECK_EQ(e.stats().wraps, 1);
+}
+
+CW_TEST(impact_exactly_minimal_travel_passes)
+{
+    // 20 px is the bar (stroke < 20 fails); exactly 20 px at gate-clearing
+    // speed wraps.
+    WrapEngine e(gateOn(2000));
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    long long t = 1'000'000;
+    e.onMouseMove({ 1899, 540, t }, false, false); // 20 px from the edge
+    t += 4000; // 20 px in 4 ms = 5000 px/s
+    const auto [x, y] = e.onMouseMove({ 1919, 540, t }, false, false);
+    CW_CHECK_EQ(x, 0);
+    CW_CHECK_EQ(e.stats().wraps, 1);
+}
+
+CW_TEST(impact_band_boundary_value_settings)
+{
+    RawSettings raw;
+    raw.impactBandPx = 50;
+    raw.hasImpactBand = true;
+    Settings s;
+    applySettings(raw, s, false);
+    CW_CHECK_EQ(s.impactBandPx, 50);
+    raw.impactBandPx = 500;
+    applySettings(raw, s, true);
+    CW_CHECK_EQ(s.impactBandPx, 500);
+    raw.impactBandPx = 49; // out of range -> default
+    applySettings(raw, s, true);
+    CW_CHECK_EQ(s.impactBandPx, 150);
+    raw.impactBandPx = 501;
+    applySettings(raw, s, true);
+    CW_CHECK_EQ(s.impactBandPx, 150);
 }

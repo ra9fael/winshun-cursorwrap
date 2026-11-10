@@ -54,7 +54,7 @@ $ .\build\cw_tests.exe .\tests\layouts
 all tests passed (0 failures)
 ```
 
-54 个用例全绿，覆盖：单屏/双屏横/双屏竖/L 形三屏/非重叠投影/三屏并排/混合 DPI/
+80 个用例全绿，覆盖：单屏/双屏横/双屏竖/L 形三屏/非重叠投影/三屏并排/混合 DPI/
 负坐标/极端坐标/零面积屏/邻接容差/缝隙诊断/三种模式/三种激活方式/拖拽抑制/单屏禁用/
 防震荡进出/角点方向/设置钳制与类型混淆/NaN 与 Inf/诊断结构/阈值带宽/撞击模式
 （慢速漂移不触发、快速撞击触发、垂直分量判定、时间戳缺失判负、回绕后历史清零、
@@ -65,7 +65,7 @@ all tests passed (0 failures)
 ```
 $ python tests/protocol_roundtrip.py
 ...
-all 32 protocol checks passed
+all 45 protocol checks passed
 ```
 
 覆盖 `initialize → query(空/带文字) → action(cycleMode×3 / toggleEnabled /
@@ -163,8 +163,8 @@ sha256 `f4468611…7202722`，`--tag v0.1.0` 校验通过）后，把**包内容
 | 门槛开启 + 快推左边缘 | (0, 540) | (1919, 540) | 回绕 ✓ |
 | 门槛开启 + 单次瞬移 | (1919, 540) | (1919, 540) | **不回绕**（fail closed）✓ |
 
-单元测试 12 项（`test_impact_gate.cpp`）+ 协议往返 3 项新检查（诊断里撞击门槛
-状态与速度、可再关闭）同步通过。注意探针第一次跑全部 `observed_moves: 0`——
+单元测试 24 项（`test_impact_gate.cpp`，其中 12 项为测速区间与去抖新增）+ 协议往返
+诊断检查同步通过。注意探针第一次跑全部 `observed_moves: 0`——
 原因是 `settingsChanged` 通知后没有泵消息钩子就收不到事件，补一个 `pump(50)`
 后恢复；这个坑写进探针注释，避免下次再踩。
 

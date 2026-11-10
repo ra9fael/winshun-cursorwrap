@@ -118,6 +118,7 @@ and tests are reproducible.
 | `adjacencyTolerancePx` | number | 50 | 10–200, inner-edge tolerance |
 | `impactGate` | bool | false | impact mode: the cursor must hit the edge fast enough to wrap |
 | `impactSpeedPps` | number | 2000 | 500–20000, the impact speed gate (px/s) |
+| `impactBandPx` | number | 150 | 50–500, the impact measuring band (how close to the edge counts as approach) |
 
 Invalid values (wrong type, out of range, NaN/Inf) fall back to the manifest
 default. A bad settings file must never error out or produce out-of-range
@@ -127,17 +128,31 @@ behaviour. `settingsChanged` merges: fields not present keep their current value
 
 Off (default): reaching an outer edge wraps, exactly like PowerToys.
 
-On: a wrap must also pass a speed gate — the **perpendicular speed toward the
-edge over the recent 100 ms window** must reach `impactSpeedPps`. Design
-choices:
+On: a wrap must also pass a speed gate — the **speed of the last continuous
+approach stroke toward the edge, measured inside the band** must reach
+`impactSpeedPps`. The stroke is traced backwards from the newest sample and cut
+at the first of:
 
-- A window speed, not per-event acceleration: at 1000 Hz report rates the
-  displacement between adjacent events is pure noise — the same conclusion
-  PowerToys Find My Mouse reached for its `shakeMinSpeed` gate.
+- a sample farther than `impactBandPx` from the edge — a distant sprint does
+  not count toward the measurement;
+- a reversal of the approach direction — after a bounce, only the last hit
+  counts;
+- a gap over the 100 ms window — after a pause the stroke restarts;
+- missing or non-monotonic timestamps — unmeasurable speed fails closed.
+
+Design choices:
+
+- The **last in-band stroke**, not a whole-window average: a fast distant
+  flight dilutes the braking near the edge, so "fly over, then crawl in" would
+  pass as a hit. Cutting at the band measures only what happened close to it.
+- A minimal-travel bar (20 px): edge jitter over 2 px reaches thousands of px/s
+  instantaneously, but such a stroke is not a hit — a net displacement below
+  20 px fails outright. Same conclusion PowerToys Find My Mouse reached for its
+  `shakeMinSpeed` gate: at 1000 Hz the displacement between adjacent events is
+  pure noise.
 - Only the **perpendicular** axis counts: sliding along the edge (say, toward
   a taskbar icon) never triggers, however fast.
-- **Unmeasurable speed fails closed**: too few samples in the window, missing
-  or non-monotonic timestamps — no wrap. This blocks programmatic teleports
+- **Unmeasurable speed fails closed**: this blocks programmatic teleports
   (a big `SetCursorPos` jump) from masquerading as an impact.
 - Timestamps come from `QueryPerformanceCounter` on the hook thread
   (microseconds), not `MSLLHOOKSTRUCT.time` (millisecond resolution, wraps).
@@ -207,9 +222,9 @@ names or user text).
 
 ### Measured
 
-- Unit tests `cw_tests`: 54 cases plus 6 layout fixture files, all green
+- Unit tests `cw_tests`: 80 cases plus 7 layout fixture files, all green
   (`ctest` 1/1 passed).
-- Protocol round trip `tests/protocol_roundtrip.py`: 32 checks passed
+- Protocol round trip `tests/protocol_roundtrip.py`: 45 checks passed
   (initialize → query → action ×4 → settingsChanged ×2 → cancel → shutdown), exit
   code 0.
 - Build: MinGW-w64 GCC 13.2 / CMake 3.29 / Ninja Release; `cursorwrap.exe` links

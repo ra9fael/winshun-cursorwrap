@@ -16,7 +16,7 @@ original: [tests.md](tests.md).
 | Package contains `plugin.json` / `cursorwrap.exe` / `README.md` / `LICENSE`, no `build/`, `dist/`, `.git` | §8 | `tools/package.py` + `tools/ci_release.py` |
 | Bilingual anchors cross-link (`docs/spec*.md`, `docs/tests*.md`, README, CHANGELOG) | — | pass |
 
-## L1 — Pure logic unit tests (`cw_tests`, ctest target, 54 cases + 6 layout fixtures)
+## L1 — Pure logic unit tests (`cw_tests`, ctest target, 80 cases + 7 layout fixtures)
 
 No OS headers: runs anywhere. Commands:
 
@@ -50,6 +50,7 @@ ctest --test-dir build --output-on-failure
 | Settings parsing | out-of-range falls back, boundary values accepted, unknown enums keep the previous value, partial updates merge | §7 |
 | Settings type confusion | empty-string enums ignored; NaN/±Inf fall back | §7 |
 | Impact mode | gate off behaves as before; a slow drift does not wrap; a fast hit wraps; only the perpendicular axis counts (sliding along the edge never triggers); missing/mixed timestamps and programmatic teleports fail closed; history clears after a wrap; the speed boundary values 500/20000 are accepted, 499/20001 fall back | §7 impact mode |
+| Impact band and de-jitter | a distant sprint then a slow crawl does not wrap (band cut); a distant sprint with braking inside the band does not wrap; edge jitter over 2 px fails (minimal travel); after a reversal only the last stroke counts (fast return wraps, slow return fails); a pause over the window restarts the stroke; exactly 20 px of travel passes; left/right/top/bottom edge symmetry; band boundary values 50/500 are accepted, 49/501 fall back | §7 impact mode |
 | Diagnostics shape | display count, outer-edge count, hook flag, gap text | §3 |
 | Layout fixtures | `tests/layouts/*.json` — six synthetic layouts asserted case by case | §5 |
 
@@ -76,7 +77,7 @@ The hook callback and settings delivery can be tested without a real hook:
 python tests/protocol_roundtrip.py
 ```
 
-Run on 2026-11-10: **32 checks passed**, process exit code 0.
+Run on 2026-11-10: **45 checks passed**, process exit code 0.
 
 | Check | Spec |
 |---|---|
@@ -165,9 +166,9 @@ Evidence: `tests/layouts/live-wrap-evidence.json`, `tests/layouts/live-single.js
 
 ## Acceptance criteria
 
-- L1 green (currently 54 cases + 7 fixtures, including the captured
+- L1 green (currently 80 cases + 7 fixtures, including the captured
   `live-single.json`)
-- L3 fully passing (currently 32/32)
+- L3 fully passing (currently 45/45)
 - L0 static validation passing
 - The single-display part of L4 has been measured and passed; **all multi-display
   boxes must be checked** before v0.1.0 can be called releasable for multi-display,

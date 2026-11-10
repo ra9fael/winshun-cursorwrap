@@ -64,7 +64,8 @@ The host binds at most three keys per row; diagnostics live at `cursorwrap diag`
 | `wrapGuardPx` | 50 | 10–200, anti-oscillation radius around the landing point |
 | `adjacencyTolerancePx` | 50 | 10–200, how close two edges must be to count as adjacent (inner) |
 | `impactGate` | false | impact mode: the cursor must hit the edge fast enough to wrap; drifting there does not trigger |
-| `impactSpeedPps` | 2000 | 500–20000, the impact speed gate (px/s, perpendicular to the edge, 100 ms window) |
+| `impactSpeedPps` | 2000 | 500–20000, the impact speed gate (px/s, over the last in-band approach stroke) |
+| `impactBandPx` | 150 | 50–500, the impact measuring band: speed is measured only this close to the edge; distant sprints and edge jitter both fail |
 
 Invalid values fall back to the defaults; nothing errors out.
 
@@ -140,7 +141,7 @@ MinGW. MSVC builds use the static runtime (`/MT`) and likewise ship no external 
 ## Tests
 
 ```powershell
-ctest --test-dir build --output-on-failure       # L1: 54 cases + 7 layout fixtures
+ctest --test-dir build --output-on-failure       # L1: 80 cases + 7 layout fixtures
 python tests/protocol_roundtrip.py               # L3: 32 protocol round-trip checks
 python tests/live_wrap_probe.py                  # L4 single display: real SetCursorPos gestures
 python tests/validate.py                         # L0: manifest / bilingual docs / packaging checks
