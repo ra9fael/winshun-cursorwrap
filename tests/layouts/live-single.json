@@ -1,0 +1,16 @@
+﻿{
+    "$comment":  "Captured monitor layout, device names anonymized. Safe to commit.",
+    "name":  "live-single",
+    "capturedAt":  "2026-11-10T08:17:29Z",
+    "monitors":  [
+                     {
+                         "device":  "DISPLAY1",
+                         "primary":  true,
+                         "left":  0,
+                         "top":  0,
+                         "right":  1920,
+                         "bottom":  1080,
+                         "dpi":  96
+                     }
+                 ]
+}

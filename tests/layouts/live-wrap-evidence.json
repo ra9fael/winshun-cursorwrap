@@ -1,0 +1,94 @@
+{
+  "layout": {
+    "device": "DISPLAY1",
+    "primary": true,
+    "left": 0,
+    "top": 0,
+    "right": 1920,
+    "bottom": 1080,
+    "dpi": 96
+  },
+  "checks": [
+    {
+      "check": "initialize",
+      "ok": true
+    },
+    {
+      "check": "push-right-edge-wraps-left",
+      "start": [
+        960,
+        540
+      ],
+      "target": [
+        1919,
+        540
+      ],
+      "before": [
+        960,
+        538
+      ],
+      "after": [
+        0,
+        536
+      ],
+      "expected_wrap": true,
+      "wrapped": true,
+      "ok": true,
+      "observed_moves": 15,
+      "injected_seen": 0
+    },
+    {
+      "check": "push-left-edge-wraps-right",
+      "start": [
+        960,
+        540
+      ],
+      "target": [
+        0,
+        540
+      ],
+      "before": [
+        960,
+        540
+      ],
+      "after": [
+        1919,
+        540
+      ],
+      "expected_wrap": true,
+      "wrapped": true,
+      "ok": true,
+      "observed_moves": 12,
+      "injected_seen": 0
+    },
+    {
+      "check": "middle-no-wrap",
+      "start": [
+        960,
+        540
+      ],
+      "target": [
+        960,
+        540
+      ],
+      "before": [
+        960,
+        540
+      ],
+      "after": [
+        960,
+        540
+      ],
+      "expected_wrap": false,
+      "wrapped": false,
+      "ok": true,
+      "observed_moves": 0,
+      "injected_seen": 0
+    },
+    {
+      "check": "clean-exit",
+      "exit_code": 0,
+      "ok": true
+    }
+  ]
+}

@@ -114,6 +114,30 @@ Copied `plugin.json` / `cursorwrap.exe` / `README.md` / `LICENSE` to
 **Not done**: clicking the enable switch in the GUI, and visually confirming the
 permission prompt. Both are host UI; this round used `WinShun.ini` directly.
 
+### Real gestures on hardware (single display, part of L4)
+
+`tests/live_wrap_probe.py` drives the real hook with real `SetCursorPos` moves: the
+probe installs its own `WH_MOUSE_LL` observer hook to record events, pushes the
+pointer toward a screen edge, and reads back where the cursor actually landed. Real
+layout 1920×1080 (`tests/layouts/live-single.json`):
+
+| Case | Start | Push to | Actual landing | Verdict |
+|---|---|---|---|---|
+| Push right edge | (960, 540) | (1919, 540) | **(0, 536)** | wrapped to the left edge ✓ |
+| Push left edge | (960, 540) | (0, 540) | **(1919, 540)** | wrapped to the right edge ✓ |
+| Screen middle | (960, 540) | (960, 540) | (960, 540) | no wrap ✓ |
+| Exit | — | — | exit code 0 | clean ✓ |
+
+The observer hook received 27 real move events, all with `LLMHF_INJECTED=0` — the
+probe's `SetCursorPos` does not look injected to a hook, which is exactly the
+environment the plugin's own `SetCursorPos` runs in, so the plugin's wrap landing is
+not rejected by its own hook as injected input. Evidence file:
+`tests/layouts/live-wrap-evidence.json`.
+
+**This proves single-display wrapping works on real hardware**: the plugin process,
+the real hook, real `SetCursorPos` and the guard radius all ran on the real path.
+What remains unverified is multi-display geometry and feel (see "Not tested").
+
 ### Cleanup
 
 - The test install and its `.data` directory were removed from
@@ -126,7 +150,8 @@ permission prompt. Both are host UI; this round used `WinShun.ini` directly.
 - **Every real multi-display behaviour is unverified**: this machine has one display.
   Two side by side, stacked, L-shape, inner edges left alone, hot-plug rebuild, gap
   layouts and the feel of `disableOnSingleMonitor` are only covered by unit tests over
-  synthetic geometry.
+  synthetic geometry. **Single-display wrapping does have real-hardware evidence**
+  (see `live_wrap_probe.py` above) and is not on the unverified list.
 - **Real pointer gestures**: the `SetCursorPos` landing point, whether swallowing a
   move causes a visible skip, drag suppression feel, and interaction with the
   Ctrl+wheel taskbar volume plugin while Ctrl is held have not been tried on hardware.

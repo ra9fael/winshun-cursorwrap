@@ -106,6 +106,27 @@ ra9fael.cursorwrap-0.1.0.wsplugin: <files> files, <bytes> bytes, sha256 <digest>
 **未做**：GUI 里启用开关的手动点击、权限确认弹窗的目视核对（这两步是宿主 UI，
 本轮通过直接改 `WinShun.ini` 完成）。
 
+### 真机手势（单屏，L4 部分）
+
+`tests/live_wrap_probe.py` 用真实 `SetCursorPos` 驱动真实钩子：探针自己装一个
+`WH_MOUSE_LL` 观察钩子记录事件，再向屏幕边缘推光标，读回光标实际落点。真机布局
+1920×1080（`tests/layouts/live-single.json`）：
+
+| 用例 | 起点 | 推向 | 实际落点 | 结论 |
+|---|---|---|---|---|
+| 推右边缘 | (960, 540) | (1919, 540) | **(0, 536)** | 回绕到左边缘 ✓ |
+| 推左边缘 | (960, 540) | (0, 540) | **(1919, 540)** | 回绕到右边缘 ✓ |
+| 屏幕中间 | (960, 540) | (960, 540) | (960, 540) | 不回绕 ✓ |
+| 退出 | — | — | 退出码 0 | 干净 ✓ |
+
+观察钩子共收到 27 条真实移动事件，全部 `LLMHF_INJECTED=0`（探针的 `SetCursorPos`
+在钩子看来不是注入事件——这正是插件自己 `SetCursorPos` 时的真实环境，说明插件的
+回绕落点不会被自己的钩子当成注入而拒绝）。证据文件：
+`tests/layouts/live-wrap-evidence.json`。
+
+**这证明单屏 wrap 在真机上工作**：插件进程、真实钩子、真实 `SetCursorPos`、
+防震荡半径全部在真实路径上跑通。仍未覆盖的是多屏几何与手感（见"没测的"）。
+
 ### 收尾清理
 
 - 已从 `%LOCALAPPDATA%\WinShun\plugins\` 移除测试安装与 `.data` 目录
@@ -116,6 +137,7 @@ ra9fael.cursorwrap-0.1.0.wsplugin: <files> files, <bytes> bytes, sha256 <digest>
 
 - **多显示器真机行为全部未验证**：本机只有一块显示器。双屏横排/竖排/L 形、内边不介入、
   热插拔重建、缝隙布局、`disableOnSingleMonitor` 的实际手感都只有合成几何的单测覆盖。
+  **单屏回绕已有真机证据**（见上节 `live_wrap_probe.py`），不在未验证之列。
 - **真实鼠标手势**：`SetCursorPos` 落点、吞事件后是否有跳帧、拖拽抑制手感、与
   「按住 Ctrl 滚轮」的音量插件同时使用时的互相干扰，都没有在真机上试过。
 - **远程会话、独占全屏、高对比度、放大镜**未验证。

@@ -95,7 +95,21 @@ python tests/protocol_roundtrip.py
 
 ## L4 — 真机交互 E2E（Windows 11，Win顺 0.22.0+）
 
-需真实桌面与至少两块屏。本节全部**未执行**（本机单屏环境）。
+需真实桌面与至少两块屏。**单屏部分已实测**（见下），多屏部分全部未执行。
+
+### 已实测（单屏，2026-11-10）
+
+`tests/live_wrap_probe.py` 用真实 `SetCursorPos` + 真实钩子驱动真实插件进程：
+
+- [x] 推到右边缘 → 光标落在左边缘 (0, 536)
+- [x] 推到左边缘 → 光标落在右边缘 (1919, 540)
+- [x] 屏幕中间 → 不回绕
+- [x] 进程干净退出 0
+- [x] 观察钩子确认插件自己的 `SetCursorPos` 不带 `LLMHF_INJECTED`，不会被自己的钩子拒绝
+
+证据：`tests/layouts/live-wrap-evidence.json`、`tests/layouts/live-single.json`。
+
+### 未执行（多屏）
 
 - [ ] 打包 `.wsplugin` → 宿主「本地安装」→ 启用 → 权限确认只在 `ui` 上出现
 - [ ] `cursorwrap` 留空：状态行屏数与系统显示设置一致
@@ -142,10 +156,11 @@ python tests/protocol_roundtrip.py
 
 ## 验收标准
 
-- L1 全绿（当前 43 用例 + 6 fixture）
+- L1 全绿（当前 43 用例 + 7 fixture，含真机采集的 `live-single.json`）
 - L3 全通过（当前 32/32）
 - L0 静态校验通过
-- L4 全部勾选后才可宣布 v0.1.0 可发布；当前 L4 未执行，属发布阻塞项
+- L4 单屏部分已实测通过；**多屏部分全部勾选后**才可宣布 v0.1.0 多屏可发布，
+  当前属发布阻塞项
 
 ## 没测的
 

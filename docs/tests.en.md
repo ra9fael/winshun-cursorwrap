@@ -98,8 +98,24 @@ integration is L4 item 1.
 
 ## L4 — Interactive E2E on real hardware (Windows 11, WinShun 0.22.0+)
 
-Needs a real desktop and at least two displays. Nothing in this section has been
-run (this session has a single display).
+Needs a real desktop and at least two displays. **The single-display part has been
+measured** (below); the multi-display part has not been run.
+
+### Measured (single display, 2026-11-10)
+
+`tests/live_wrap_probe.py` drives the real plugin process with real `SetCursorPos`
+moves and a real hook:
+
+- [x] Pushing off the right edge lands the cursor on the left edge (0, 536)
+- [x] Pushing off the left edge lands the cursor on the right edge (1919, 540)
+- [x] The middle of the screen does not wrap
+- [x] The process exits cleanly with code 0
+- [x] The observer hook confirms the plugin's own `SetCursorPos` carries no
+      `LLMHF_INJECTED`, so it is not rejected by the plugin's own hook
+
+Evidence: `tests/layouts/live-wrap-evidence.json`, `tests/layouts/live-single.json`.
+
+### Not run (multi-display)
 
 - [ ] Install the `.wsplugin` through the host, enable it; the permission prompt asks for `ui` only
 - [ ] `cursorwrap` empty: the display count matches Windows display settings
@@ -145,8 +161,10 @@ run (this session has a single display).
 
 ## Acceptance criteria
 
-- L1 green (currently 43 cases + 6 fixtures)
+- L1 green (currently 43 cases + 7 fixtures, including the captured
+  `live-single.json`)
 - L3 fully passing (currently 32/32)
 - L0 static validation passing
-- L4 fully checked before v0.1.0 can be called releasable; L4 has not been run, so it
-  remains a release blocker
+- The single-display part of L4 has been measured and passed; **all multi-display
+  boxes must be checked** before v0.1.0 can be called releasable for multi-display,
+  which remains a release blocker
