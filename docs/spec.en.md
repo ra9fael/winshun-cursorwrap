@@ -4,6 +4,7 @@ Status: v0.1.0 implemented. Protocol and manifest fields follow WinShun 0.22.0
 plugin docs (resident JSON-RPC over stdio). See [tests.md](tests.md) for evidence
 and unverified items. Chinese original: [spec.md](spec.md).
 Implementation and validation record: [validation.en.md](validation.en.md).
+Line-by-line comparison against the PowerToys original: [comparison.md](comparison.md).
 
 ## 1 Goal
 
