@@ -65,7 +65,7 @@ all tests passed (0 failures)
 ```
 $ python tests/protocol_roundtrip.py
 ...
-all 45 protocol checks passed
+all 63 protocol checks passed
 ```
 
 覆盖 `initialize → query(空/带文字) → action(cycleMode×3 / toggleEnabled /

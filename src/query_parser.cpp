@@ -16,35 +16,39 @@ struct Token {
 const Token kTokens[] = {
     { "impact on", CommandKind::SetImpact, 1 },
     { "impact off", CommandKind::SetImpact, 0 },
-    { "impact", CommandKind::ToggleImpact, 0 },
+    { "impact", CommandKind::MenuImpact, 0 },
     { "撞击 开", CommandKind::SetImpact, 1 },
     { "撞击 关", CommandKind::SetImpact, 0 },
-    { "撞击", CommandKind::ToggleImpact, 0 },
-    { "speed", CommandKind::SetImpactSpeed, 0 },
-    { "速度", CommandKind::SetImpactSpeed, 0 },
+    { "撞击", CommandKind::MenuImpact, 0 },
+    { "speed", CommandKind::MenuSpeed, 0 },
+    { "速度", CommandKind::MenuSpeed, 0 },
+    { "band", CommandKind::MenuBand, 0 },
+    { "区间", CommandKind::MenuBand, 0 },
     { "mode both", CommandKind::SetMode, static_cast<long long>(WrapMode::Both) },
     { "mode vertical", CommandKind::SetMode, static_cast<long long>(WrapMode::VerticalOnly) },
     { "mode horizontal", CommandKind::SetMode, static_cast<long long>(WrapMode::HorizontalOnly) },
-    { "mode", CommandKind::CycleMode, 0 },
+    { "mode", CommandKind::MenuMode, 0 },
     { "模式 双向", CommandKind::SetMode, static_cast<long long>(WrapMode::Both) },
     { "模式 上下", CommandKind::SetMode, static_cast<long long>(WrapMode::VerticalOnly) },
     { "模式 左右", CommandKind::SetMode, static_cast<long long>(WrapMode::HorizontalOnly) },
-    { "模式", CommandKind::CycleMode, 0 },
+    { "模式", CommandKind::MenuMode, 0 },
     { "ctrl", CommandKind::SetActivation, static_cast<long long>(ActivationMode::WhileCtrl) },
     { "shift", CommandKind::SetActivation, static_cast<long long>(ActivationMode::WhileShift) },
     { "always", CommandKind::SetActivation, static_cast<long long>(ActivationMode::Always) },
+    { "activation", CommandKind::MenuActivation, 0 },
+    { "激活", CommandKind::MenuActivation, 0 },
     { "按住 ctrl", CommandKind::SetActivation, static_cast<long long>(ActivationMode::WhileCtrl) },
     { "按住 shift", CommandKind::SetActivation, static_cast<long long>(ActivationMode::WhileShift) },
     { "按住ctrl", CommandKind::SetActivation, static_cast<long long>(ActivationMode::WhileCtrl) },
     { "按住shift", CommandKind::SetActivation, static_cast<long long>(ActivationMode::WhileShift) },
     { "总是", CommandKind::SetActivation, static_cast<long long>(ActivationMode::Always) },
     { "按住", CommandKind::SetActivation, static_cast<long long>(ActivationMode::WhileCtrl) },
-    { "guard", CommandKind::SetGuard, 0 },
-    { "防震", CommandKind::SetGuard, 0 },
-    { "edge", CommandKind::SetEdge, 0 },
-    { "边缘", CommandKind::SetEdge, 0 },
-    { "tol", CommandKind::SetTolerance, 0 },
-    { "容差", CommandKind::SetTolerance, 0 },
+    { "guard", CommandKind::MenuGuard, 0 },
+    { "防震", CommandKind::MenuGuard, 0 },
+    { "edge", CommandKind::MenuEdge, 0 },
+    { "边缘", CommandKind::MenuEdge, 0 },
+    { "tol", CommandKind::MenuTolerance, 0 },
+    { "容差", CommandKind::MenuTolerance, 0 },
     { "diag", CommandKind::CopyDiagnostics, 0 },
     { "诊断", CommandKind::CopyDiagnostics, 0 },
     { "reset", CommandKind::ResetToDefaults, 0 },
@@ -133,18 +137,49 @@ ParsedCommand parseCommand(const std::string& rawText)
         cmd.kind = token.kind;
         cmd.word = token.word;
         cmd.value = token.value;
-        if (token.kind == CommandKind::SetImpactSpeed) {
-            const auto n = trailingNumber(rest);
-            cmd.value = n ? clampTo(*n, 500, 20000) : 2000;
-        } else if (token.kind == CommandKind::SetGuard) {
-            const auto n = trailingNumber(rest);
-            cmd.value = n ? clampTo(*n, 10, 200) : 50;
-        } else if (token.kind == CommandKind::SetEdge) {
-            const auto n = trailingNumber(rest);
-            cmd.value = n ? clampTo(*n, 1, 20) : 1;
-        } else if (token.kind == CommandKind::SetTolerance) {
-            const auto n = trailingNumber(rest);
-            cmd.value = n ? clampTo(*n, 10, 200) : 50;
+        // A menu keyword with a trailing number becomes a direct set
+        // ("speed 3000" sets the speed; "speed" alone opens the submenu).
+        const auto n = trailingNumber(rest);
+        switch (token.kind) {
+        case CommandKind::MenuSpeed:
+            if (n) {
+                cmd.kind = CommandKind::SetImpactSpeed;
+                cmd.value = clampTo(*n, 500, 20000);
+            }
+            break;
+        case CommandKind::MenuBand:
+            if (n) {
+                cmd.kind = CommandKind::SetBand;
+                cmd.value = clampTo(*n, 50, 500);
+            }
+            break;
+        case CommandKind::MenuGuard:
+            if (n) {
+                cmd.kind = CommandKind::SetGuard;
+                cmd.value = clampTo(*n, 10, 200);
+            }
+            break;
+        case CommandKind::MenuEdge:
+            if (n) {
+                cmd.kind = CommandKind::SetEdge;
+                cmd.value = clampTo(*n, 1, 20);
+            }
+            break;
+        case CommandKind::MenuTolerance:
+            if (n) {
+                cmd.kind = CommandKind::SetTolerance;
+                cmd.value = clampTo(*n, 10, 200);
+            }
+            break;
+        case CommandKind::MenuMode:
+            // "mode" alone opens the submenu; "mode both" etc. already
+            // matched the longer tokens above.
+            break;
+        case CommandKind::MenuImpact:
+            // "impact" alone opens the submenu; "impact on/off" matched above.
+            break;
+        default:
+            break;
         }
         return cmd;
     }

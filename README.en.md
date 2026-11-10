@@ -21,16 +21,44 @@ nothing flashes back.
 
 ## Usage
 
-Type `cursorwrap` (or `wrap`) to see the status row — **and put words after it to
-change settings right there**:
+Type `cursorwrap` (or `wrap`) to get a **multi-row settings list** — one row per
+setting, where Enter is that row's main action, so there are no chords to remember:
+
+| Row | Enter |
+|---|---|
+| `Cursor wrap: on/off` | turn wrapping on / off |
+| `Impact mode: on/off` | toggle impact mode |
+| `Impact speed: <n> px/s` | drill down to the speed submenu |
+| `Impact band: <n> px` | drill down to the band submenu |
+| `Wrap mode: <mode>` | cycle both → vertical → horizontal |
+| `Activation: <mode>` | drill down to the activation submenu |
+| `Wrap guard: <n> px` | drill down to the radius submenu |
+| `Edge threshold: <n> px` | drill down to the threshold submenu |
+| `Adjacency tolerance: <n> px` | drill down to the tolerance submenu |
+| `Cursor wrap: diagnostics` | copy the full diagnostics |
+| `Restore host settings` | clear the search-bar overrides |
+
+**Submenus** (after drilling down, the first row is always `← Back`; every other
+row is one choice, and Enter applies it):
+
+| Input | Submenu |
+|---|---|
+| `cursorwrap impact` | back · impact toggle · impact speed · impact band |
+| `cursorwrap speed` | back · 500/1000/2000/3000/5000/8000/12000/20000 px/s |
+| `cursorwrap band` | back · 50/80/120/150/200/300/500 px |
+| `cursorwrap mode` | back · both · vertical only · horizontal only |
+| `cursorwrap activation` | back · always · while Ctrl · while Shift |
+| `cursorwrap guard` | back · 10/30/50/80/120/200 px |
+| `cursorwrap edge` | back · 1/2/5/10/20 px |
+| `cursorwrap tol` | back · 10/30/50/80/120/200 px |
+
+**With a number, set directly** (skips the submenu):
 
 | Input | Effect |
 |---|---|
-| `cursorwrap` (empty) | the status row |
-| `cursorwrap impact` | toggle impact mode |
 | `cursorwrap impact on` / `off` | set impact mode directly |
 | `cursorwrap speed 3000` | the impact gate (500–20000 px/s; setting a speed turns it on) |
-| `cursorwrap mode` | cycle the direction: both → vertical → horizontal |
+| `cursorwrap band 300` | the measuring band (50–500 px) |
 | `cursorwrap mode vertical` | set the direction directly |
 | `cursorwrap ctrl` / `shift` / `always` | the activation mode |
 | `cursorwrap guard 120` | the anti-oscillation radius (10–200 px) |
@@ -43,14 +71,6 @@ Changes **apply immediately** and persist in the plugin's data directory
 (`settings.json`, only keys that differ from the defaults); the host's settings card
 stays authoritative for keys not overridden, and the status row says when overrides
 are active.
-
-| Key | Effect |
-|---|---|
-| Enter | turn wrapping on / off |
-| Ctrl+Enter | cycle the mode: both → vertical only → horizontal only |
-| Shift+Enter | impact mode on ↔ off |
-
-The host binds at most three keys per row; diagnostics live at `cursorwrap diag`.
 
 ## Settings
 
@@ -142,7 +162,7 @@ MinGW. MSVC builds use the static runtime (`/MT`) and likewise ship no external 
 
 ```powershell
 ctest --test-dir build --output-on-failure       # L1: 80 cases + 7 layout fixtures
-python tests/protocol_roundtrip.py               # L3: 32 protocol round-trip checks
+python tests/protocol_roundtrip.py               # L3: 63 protocol round-trip checks
 python tests/live_wrap_probe.py                  # L4 single display: real SetCursorPos gestures
 python tests/validate.py                         # L0: manifest / bilingual docs / packaging checks
 ```

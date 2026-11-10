@@ -77,14 +77,17 @@ The hook callback and settings delivery can be tested without a real hook:
 python tests/protocol_roundtrip.py
 ```
 
-Run on 2026-11-10: **45 checks passed**, process exit code 0.
+Run on 2026-11-10: **63 checks passed**, process exit code 0.
 
 | Check | Spec |
 |---|---|
 | `initialize` has no error and reports `protocolVersion == "1"` | §8 |
-| An empty query returns exactly one row, `id == cursorwrap.status`, with a title and subtitle | §3 |
-| Three actions in Enter / Ctrl+Enter / Shift+Enter order | §3 |
+| An empty query returns the **multi-row settings list** (≥5 rows), first row `id == cursorwrap.status`, with all 10 setting row ids present | §3 |
+| The status row has only `toggleEnabled` (every other setting has its own row) | §3 |
+| Drill-down rows (speed/band/activation/guard/edge/tol) carry `setQuery` | §3 |
 | A query with text still returns one row (queries have no side effects) | §3 |
+| `impact` opens the submenu (first row `← Back`); `impact on/off` set the value directly | §3 |
+| `speed 3500` opens the speed submenu and the status row subtitle shows `3500` | §3 |
 | `cycleMode` reports three distinct modes, each with `replace` + `notify` | §3 |
 | `toggleEnabled` takes effect and the replaced row says the plugin is off | §3 |
 | `copyDiagnostics` emits one `copy` containing mode/activation/monitors/outer edges/wraps | §3 |
@@ -168,7 +171,7 @@ Evidence: `tests/layouts/live-wrap-evidence.json`, `tests/layouts/live-single.js
 
 - L1 green (currently 80 cases + 7 fixtures, including the captured
   `live-single.json`)
-- L3 fully passing (currently 45/45)
+- L3 fully passing (currently 63/63)
 - L0 static validation passing
 - The single-display part of L4 has been measured and passed; **all multi-display
   boxes must be checked** before v0.1.0 can be called releasable for multi-display,

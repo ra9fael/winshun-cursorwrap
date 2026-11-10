@@ -29,7 +29,7 @@ New repository `ra9fael.cursorwrap`, v0.1.0:
 | `src/monitor_watcher.{h,cpp}` | message-only window, 500 ms debounced topology rebuild |
 | `src/main.cpp` | derives `winshun::Plugin`; the `cursorwrap` keyword plus three actions |
 | `plugin.json` | resident / eager / `ui` permission / 7 settings |
-| `tests/` | 80 unit cases, 7 layout fixtures (6 synthetic + 1 captured), 45-check protocol round trip, L0 static validation |
+| `tests/` | 80 unit cases, 7 layout fixtures (6 synthetic + 1 captured), 63-check protocol round trip, L0 static validation |
 | `docs/` | bilingual spec and test plan, including the not-tested list |
 
 ## Measured
@@ -71,7 +71,7 @@ boundary values 500/20000 are accepted while 499/20001 fall back).
 ```
 $ python tests/protocol_roundtrip.py
 ...
-all 45 protocol checks passed
+all 63 protocol checks passed
 ```
 
 Covers `initialize → query(empty/with text) → action(cycleMode×3 / toggleEnabled /

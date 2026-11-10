@@ -16,15 +16,43 @@ corner）解决，都得额外记一个操作。本插件用的是「把光标�
 
 ## 用法
 
-输入 `cursorwrap`（或 `wrap` / `环绕`）看状态，**在后面带词直接改设置**：
+输入 `cursorwrap`（或 `wrap` / `环绕`）得到**多行设置列表**——每行一个设置项，
+Enter 就是该行的主操作，不用记组合键：
+
+| 行 | Enter |
+|---|---|
+| `光标回绕：已开启/已关闭` | 开启 / 关闭回绕 |
+| `撞击模式：开/关` | 切换撞击模式 |
+| `撞击速度：<n> px/s` | 下钻到速度子菜单 |
+| `撞击测速区间：<n> px` | 下钻到区间子菜单 |
+| `回绕模式：<模式>` | 循环 双向 → 仅上下 → 仅左右 |
+| `激活方式：<方式>` | 下钻到激活子菜单 |
+| `防震半径：<n> px` | 下钻到半径子菜单 |
+| `边缘阈值：<n> px` | 下钻到阈值子菜单 |
+| `内边容差：<n> px` | 下钻到容差子菜单 |
+| `光标回绕：诊断信息` | 复制诊断全文 |
+| `恢复宿主设置卡` | 清除搜索栏覆盖 |
+
+**子菜单**（下钻后第一行永远是 `← 返回`，其余每行一个可选值，Enter 直接应用）：
+
+| 输入 | 子菜单 |
+|---|---|
+| `cursorwrap impact` / `撞击` | 返回 · 撞击开关 · 撞击速度 · 测速区间 |
+| `cursorwrap speed` / `速度` | 返回 · 500/1000/2000/3000/5000/8000/12000/20000 px/s |
+| `cursorwrap band` / `区间` | 返回 · 50/80/120/150/200/300/500 px |
+| `cursorwrap mode` / `模式` | 返回 · 双向 · 仅上下 · 仅左右 |
+| `cursorwrap activation` / `激活` | 返回 · 总是 · 按住 Ctrl · 按住 Shift |
+| `cursorwrap guard` / `防震` | 返回 · 10/30/50/80/120/200 px |
+| `cursorwrap edge` / `边缘` | 返回 · 1/2/5/10/20 px |
+| `cursorwrap tol` / `容差` | 返回 · 10/30/50/80/120/200 px |
+
+**带数字直接设值**（跳过子菜单）：
 
 | 输入 | 效果 |
 |---|---|
-| `cursorwrap`（留空） | 状态行 |
-| `cursorwrap impact` / `撞击` | 撞击模式开 ↔ 关 |
 | `cursorwrap impact on` / `off` | 直接设撞击模式 |
 | `cursorwrap speed 3000` / `速度 3000` | 撞击门槛（500–20000 px/s，设速度即开撞击） |
-| `cursorwrap mode` / `模式` | 方向循环：双向 → 仅上下 → 仅左右 |
+| `cursorwrap band 300` / `区间 300` | 测速区间（50–500 px） |
 | `cursorwrap mode vertical` / `模式 上下` | 直接设方向 |
 | `cursorwrap ctrl` / `shift` / `always` / `按住` / `总是` | 激活方式 |
 | `cursorwrap guard 120` / `防震 120` | 防震荡半径（10–200 px） |
@@ -35,14 +63,6 @@ corner）解决，都得额外记一个操作。本插件用的是「把光标�
 
 改动**立即生效**，并持久化到插件数据目录（`settings.json`，只存与默认不同的键）；
 宿主设置卡对没被覆盖的键仍然权威，状态行会注明「搜索栏覆盖中」。
-
-| 键 | 效果 |
-|---|---|
-| Enter | 开启 / 关闭回绕 |
-| Ctrl+Enter | 切换模式：双向 → 仅上下 → 仅左右 |
-| Shift+Enter | 撞击模式开 ↔ 关 |
-
-宿主每行最多绑三个键，诊断走 `cursorwrap diag`。
 
 ## 设置
 
@@ -125,7 +145,7 @@ C++ 运行时，目标机器不需要 MinGW。MSVC 构建用静态运行库（`/
 
 ```powershell
 ctest --test-dir build --output-on-failure       # L1：80 用例 + 7 布局 fixture
-python tests/protocol_roundtrip.py               # L3：45 项协议往返检查
+python tests/protocol_roundtrip.py               # L3：63 项协议往返检查
 python tests/live_wrap_probe.py                  # L4 单屏：真实 SetCursorPos 手势
 python tests/validate.py                         # L0：清单/双语文档/打包静态校验
 ```

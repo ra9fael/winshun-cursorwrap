@@ -9,6 +9,27 @@ single source of truth; release tags are `v<version>`.
 
 ## [Unreleased]
 
+### Changed
+
+- **The search bar now returns a multi-row settings list**: `cursorwrap` with no
+  words no longer returns a single status row but an 11-row list — one row per
+  setting, where Enter is that row's main action (toggle / cycle / drill down /
+  copy / reset). Every setting gets its own key, free of the host's
+  three-keys-per-row limit, and there are no Ctrl+Enter / Shift+Enter chords to
+  remember.
+- **Submenu drill-down**: `cursorwrap impact` / `speed` / `band` / `mode` /
+  `activation` / `guard` / `edge` / `tol` open the matching submenu, whose **first
+  row is always `← Back`**; every other row is one choice and Enter applies it.
+  Drill-down uses the row's `setQuery` field (Enter fills the search box), so the
+  vendored `winshun.h` `Item` gained `setQuery` / `withSetQuery()` (the host's
+  `Items.cpp` already parsed that field; the SDK header did not expose it).
+- New keywords `activation` (activation submenu) and `band` (measuring-band
+  submenu).
+- A number still sets the value directly and shows the matching submenu with the
+  new value marked "current": `speed 3000`, `band 300`, `guard 120`, and so on.
+- The unknown-word hint row lists the full vocabulary (including band and
+  activation).
+
 ### Added
 
 - Change settings from the search bar: `cursorwrap impact` (toggle the impact

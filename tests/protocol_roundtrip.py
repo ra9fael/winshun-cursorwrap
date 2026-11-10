@@ -179,48 +179,70 @@ def run(exe: Path) -> int:
         check(init.get("result", {}).get("protocolVersion") == "1",
               "initialize reports protocolVersion 1", json.dumps(init.get("result"))[:200])
 
-        print("query (empty)")
+        print("query (empty) returns the settings list")
         q = drv.query("")
         items = items_of(q)
-        check(len(items) == 1, f"status query returns exactly one row (got {len(items)})")
+        check(len(items) >= 5, f"empty query returns the settings list (got {len(items)})")
         if items:
             row = items[0]
             check(row.get("id") == "cursorwrap.status",
-                  "row id is cursorwrap.status", str(row.get("id")))
-            check(bool(row.get("title")), "row has a title", str(row.get("title")))
-            check(bool(row.get("subtitle")), "row has a subtitle", str(row.get("subtitle")))
+                  "first row is the status row", str(row.get("id")))
+            check(bool(row.get("title")), "status row has a title", str(row.get("title")))
+            check(bool(row.get("subtitle")), "status row has a subtitle", str(row.get("subtitle")))
             actions = row.get("actions") or []
-            check([a.get("id") for a in actions]
-                  == ["toggleEnabled", "cycleMode", "toggleImpact"],
-                  "three actions in Enter/Ctrl+Enter/Shift+Enter order",
+            check([a.get("id") for a in actions] == ["toggleEnabled"],
+                  "status row has only toggleEnabled (Enter)",
                   str([a.get("id") for a in actions]))
-            check("monitor" in json.dumps(row, ensure_ascii=False).lower()
-                  or "屏" in json.dumps(row, ensure_ascii=False),
-                  "status mentions the display count", json.dumps(row, ensure_ascii=False)[:200])
+            ids = [r.get("id") for r in items]
+            for needle in ("cursorwrap.row.impact", "cursorwrap.row.speed",
+                           "cursorwrap.row.band", "cursorwrap.row.mode",
+                           "cursorwrap.row.activation", "cursorwrap.row.guard",
+                           "cursorwrap.row.edge", "cursorwrap.row.tol",
+                           "cursorwrap.diag", "cursorwrap.row.reset"):
+                check(needle in ids, f"settings list contains {needle}", str(ids))
+            # Drill-down rows carry setQuery so Enter fills the search box.
+            for rid in ("cursorwrap.row.speed", "cursorwrap.row.band",
+                        "cursorwrap.row.activation", "cursorwrap.row.guard",
+                        "cursorwrap.row.edge", "cursorwrap.row.tol"):
+                row = next(r for r in items if r.get("id") == rid)
+                check(bool(row.get("setQuery")),
+                      f"{rid} has setQuery for drill-down", str(row.get("setQuery")))
 
         print("query with text is ignored (no side effects)")
         q2 = drv.query("anything")
         check(len(items_of(q2)) == 1, "query with text still returns one row")
 
         print("query: search-bar commands change settings")
-        # The impact gate toggles through the search bar and persists.
+        # `impact` alone opens the submenu (it does not toggle any more).
         q3 = drv.query("impact")
-        row3 = items_of(q3)[0]
-        check("impact" in json.dumps(row3, ensure_ascii=False).lower()
-              or "撞击" in json.dumps(row3, ensure_ascii=False),
-              "the status row shows the impact state", json.dumps(row3, ensure_ascii=False)[:200])
+        items3 = items_of(q3)
+        check(items3 and items3[0].get("id") == "cursorwrap.back",
+              "impact query opens the impact submenu (first row is back)",
+              str([r.get("id") for r in items3]))
+        impact_row = next((r for r in items3 if r.get("id") == "cursorwrap.impact.state"), None)
+        check(impact_row is not None, "impact submenu has the toggle row")
+        # `impact on` / `impact off` set the state directly.
+        drv.query("impact on")
         q4 = drv.query("impact")
-        row4 = items_of(q4)[0]
-        # Two toggles return to the original state.
-        check(("撞击开" in row3["subtitle"] or "impact on" in row3["subtitle"].lower())
-              != ("撞击开" in row4["subtitle"] or "impact on" in row4["subtitle"].lower()),
-              "two impact toggles flip the state twice",
-              row3["subtitle"] + " || " + row4["subtitle"])
-        # A speed command turns the gate on with the given value.
+        impact_on = next((r for r in items_of(q4) if r.get("id") == "cursorwrap.impact.state"), None)
+        check(impact_on is not None and ("开" in impact_on["title"]),
+              "impact on turns the gate on", impact_on["title"] if impact_on else "")
+        drv.query("impact off")
+        q4b = drv.query("impact")
+        impact_off = next((r for r in items_of(q4b) if r.get("id") == "cursorwrap.impact.state"), None)
+        check(impact_off is not None and ("关" in impact_off["title"]),
+              "impact off turns the gate off", impact_off["title"] if impact_off else "")
+        # A speed command turns the gate on with the given value and shows
+        # the speed submenu.
         q5 = drv.query("speed 3500")
-        row5 = items_of(q5)[0]
-        check("3500" in row5.get("subtitle", ""),
-              "speed 3500 shows in the status row", row5.get("subtitle", ""))
+        items5 = items_of(q5)
+        check(items5 and items5[0].get("id") == "cursorwrap.back",
+              "speed 3500 opens the speed submenu", str([r.get("id") for r in items5]))
+        # The status row (back in the list) reports the new speed.
+        q5b = drv.query("")
+        status5 = items_of(q5b)[0]
+        check("3500" in status5.get("subtitle", ""),
+              "speed 3500 shows in the status row", status5.get("subtitle", ""))
         # An unknown word yields an invalid row, not a fake success.
         q6 = drv.query("hello world")
         row6 = items_of(q6)[0]
@@ -228,41 +250,48 @@ def run(exe: Path) -> int:
               "unknown words give an invalid hint row", str(row6)[:200])
         # reset clears the overrides (the status row drops the source note).
         q7 = drv.query("reset")
-        row7 = items_of(q7)[0]
-        check("搜索栏覆盖" not in row7.get("subtitle", "")
-              and "overrides active" not in row7.get("subtitle", ""),
-              "reset clears the override note", row7.get("subtitle", ""))
+        items7 = items_of(q7)
+        status7 = items7[0] if items7 else {}
+        check("搜索栏覆盖" not in status7.get("subtitle", "")
+              and "overrides active" not in status7.get("subtitle", ""),
+              "reset clears the override note", status7.get("subtitle", ""))
 
         print("action: cycleMode x3 returns to both")
-        row = items[0] if items else {"id": "cursorwrap.status", "title": "x"}
+        # The cycleMode action runs on the mode row, not the status row.
+        list_items = items_of(drv.query(""))
+        mode_row = next(r for r in list_items if r.get("id") == "cursorwrap.row.mode")
         modes = []
         for _ in range(3):
-            resp = drv.action("cycleMode", row)
+            resp = drv.action("cycleMode", mode_row)
             effects = (resp.get("result") or {}).get("effects") or []
             types = [e.get("type") for e in effects]
-            check("replace" in types, "cycleMode replaces the row", str(types))
+            check("replace" in types, "cycleMode replaces the list", str(types))
             check("notify" in types, "cycleMode notifies the new mode", str(types))
             notifies = [e.get("text", "") for e in effects if e.get("type") == "notify"]
             modes.append(notifies[0] if notifies else "")
         check(len(set(modes)) == 3, "three cycles report three distinct modes", str(modes))
 
         print("action: toggleEnabled")
-        resp = drv.action("toggleEnabled", row)
+        list_items = items_of(drv.query(""))
+        status_row = list_items[0]
+        resp = drv.action("toggleEnabled", status_row)
         effects = (resp.get("result") or {}).get("effects") or []
         types = [e.get("type") for e in effects]
         check("replace" in types and "notify" in types,
-              "toggleEnabled replaces the row and notifies", str(types))
+              "toggleEnabled replaces the list and notifies", str(types))
         off_items = [e for e in effects if e.get("type") == "replace"]
         if off_items:
-            off_row = off_items[0]["items"][0]
-            check("off" in off_row.get("title", "").lower()
-                  or "关" in off_row.get("title", ""),
-                  "the replaced row says the plugin is off", str(off_row.get("title")))
+            off_status = off_items[0]["items"][0]
+            check("off" in off_status.get("title", "").lower()
+                  or "关" in off_status.get("title", ""),
+                  "the replaced status row says the plugin is off", str(off_status.get("title")))
         # Turn it back on so later checks exercise the enabled path.
-        drv.action("toggleEnabled", row)
+        drv.action("toggleEnabled", off_items[0]["items"][0] if off_items else status_row)
 
         print("action: copyDiagnostics")
-        resp = drv.action("copyDiagnostics", row)
+        list_items = items_of(drv.query(""))
+        status_row = list_items[0]
+        resp = drv.action("copyDiagnostics", status_row)
         effects = (resp.get("result") or {}).get("effects") or []
         copies = [e.get("text", "") for e in effects if e.get("type") == "copy"]
         check(len(copies) == 1, "copyDiagnostics emits one copy effect", str(effects)[:200])
@@ -294,7 +323,7 @@ def run(exe: Path) -> int:
               "诊断 returns the diagnostics row too", str(items_of(qd2)[0].get("id")))
 
         print("action: unknown id")
-        resp = drv.action("nope", row)
+        resp = drv.action("nope", status_row)
         effects = (resp.get("result") or {}).get("effects") or []
         replaced = [e for e in effects if e.get("type") == "replace"]
         check(bool(replaced) and replaced[0]["items"][0].get("valid") is False,
@@ -312,11 +341,13 @@ def run(exe: Path) -> int:
         print("settingsChanged: out-of-range values fall back to defaults")
         drv.settings_changed(default_settings(wrapMode="vertical", edgeThresholdPx=999))
         q4 = drv.query("")
-        check(len(items_of(q4)) == 1, "status still answers after a bad setting value")
+        check(len(items_of(q4)) >= 5, "settings list still answers after a bad setting value")
 
         print("settingsChanged: impact gate on shows in diagnostics")
         drv.settings_changed(default_settings(impactGate=True, impactSpeedPps=3000))
-        resp = drv.action("copyDiagnostics", row)
+        list_items = items_of(drv.query(""))
+        status_row = list_items[0]
+        resp = drv.action("copyDiagnostics", status_row)
         effects = (resp.get("result") or {}).get("effects") or []
         copies = [e.get("text", "") for e in effects if e.get("type") == "copy"]
         check(bool(copies) and "impact gate: on" in copies[0],
@@ -324,7 +355,9 @@ def run(exe: Path) -> int:
         check(bool(copies) and "impact speed: 3000 px/s" in copies[0],
               "diagnostics reports the impact speed", str(copies)[:200])
         drv.settings_changed(default_settings(impactGate=False, impactSpeedPps=99999))
-        resp = drv.action("copyDiagnostics", row)
+        list_items = items_of(drv.query(""))
+        status_row = list_items[0]
+        resp = drv.action("copyDiagnostics", status_row)
         effects = (resp.get("result") or {}).get("effects") or []
         copies = [e.get("text", "") for e in effects if e.get("type") == "copy"]
         check(bool(copies) and "impact gate: off" in copies[0],
@@ -333,7 +366,7 @@ def run(exe: Path) -> int:
         print("cancel tolerance")
         drv.cancel(12345)  # a queryId that was never issued must be harmless
         q5 = drv.query("")
-        check(len(items_of(q5)) == 1, "a stray cancel does not break the next query")
+        check(len(items_of(q5)) >= 5, "a stray cancel does not break the next query")
 
         print("shutdown")
         resp = drv.shutdown()

@@ -23,29 +23,59 @@ Line-by-line comparison against the PowerToys original: [comparison.md](comparis
 
 ## 3 Command (`cursorwrap` / `wrap`)
 
-### Empty text: the status row
+### Empty text: the settings list (multiple rows)
 
-- Title: `Cursor wrap: on` / `Cursor wrap: off`
-- Subtitle: `mode <mode> · activation <mode> · impact on/off [gate] · N display(s)`;
-  when the search bar has overridden settings, ` · search-bar overrides active
-  (reset to fall back)` is appended; when the hook failed to install,
-  ` · hook failed, status only` is appended
-- Actions (order = Enter / Ctrl+Enter / Shift+Enter — the host binds at most
-  three keys per row):
-  - `toggleEnabled` — turn wrapping on/off
-  - `cycleMode` — both → vertical only → horizontal only → both
-  - `toggleImpact` — impact mode on/off
+Empty text returns a **multi-row settings list**, one row per setting, where Enter
+is that row's main action — so every setting has its own key, free of the host's
+three-keys-per-row limit:
 
-### Text: change settings from the search bar
+| Row | Title | Enter |
+|---|---|---|
+| 1 | `Cursor wrap: on/off` | turn wrapping on/off |
+| 2 | `Impact mode: on/off` | toggle impact mode |
+| 3 | `Impact speed: <n> px/s` | drill down to the speed submenu |
+| 4 | `Impact band: <n> px` | drill down to the band submenu |
+| 5 | `Wrap mode: <mode>` | cycle both → vertical → horizontal |
+| 6 | `Activation: <mode>` | drill down to the activation submenu |
+| 7 | `Wrap guard: <n> px` | drill down to the radius submenu |
+| 8 | `Edge threshold: <n> px` | drill down to the threshold submenu |
+| 9 | `Adjacency tolerance: <n> px` | drill down to the tolerance submenu |
+| 10 | `Cursor wrap: diagnostics` | copy the full diagnostics |
+| 11 | `Restore host settings` | clear the search-bar overrides |
 
-`cursorwrap <words>` (case-insensitive, zh and en; the whole text is one command):
+Status-row subtitle: `mode <mode> · activation <mode> · impact on/off [gate] ·
+N display(s)`; when the search bar has overridden settings, ` · search-bar
+overrides active (reset to fall back)` is appended; when the hook failed to
+install, ` · hook failed, status only` is appended.
+
+### Submenus (drill-down)
+
+A drill-down row carries `setQuery`: Enter fills `cursorwrap <word> ` into the
+search box, which re-queries and shows the submenu. **A submenu's first row is
+always `← Back`** (`setQuery` back to `cursorwrap `); every other row is one
+choice, and Enter applies it:
+
+| Input | Submenu |
+|---|---|
+| `impact` | back · impact toggle · impact speed · impact band |
+| `speed` | back · 500/1000/2000/3000/5000/8000/12000/20000 px/s |
+| `band` | back · 50/80/120/150/200/300/500 px |
+| `mode` | back · both · vertical only · horizontal only |
+| `activation` | back · always · while Ctrl · while Shift |
+| `guard` | back · 10/30/50/80/120/200 px |
+| `edge` | back · 1/2/5/10/20 px |
+| `tol` | back · 10/30/50/80/120/200 px |
+
+### With a number: set directly (skip the submenu)
+
+`cursorwrap <word> <number>` sets the value and shows the matching submenu with
+the new value marked "current":
 
 | Input | Effect |
 |---|---|
-| `impact` | toggle impact mode |
-| `impact on` / `impact off` | set it directly |
+| `impact on` / `impact off` | set the impact gate directly |
 | `speed 3000` | the impact gate (500–20000, clamped; setting a speed turns the gate on) |
-| `mode` | cycle the direction: both → vertical → horizontal |
+| `band 300` | the measuring band (50–500) |
 | `mode vertical` etc. | set the direction directly |
 | `ctrl` / `shift` / `always` | the activation mode |
 | `guard 120` | the anti-oscillation radius (10–200) |
@@ -224,7 +254,7 @@ names or user text).
 
 - Unit tests `cw_tests`: 80 cases plus 7 layout fixture files, all green
   (`ctest` 1/1 passed).
-- Protocol round trip `tests/protocol_roundtrip.py`: 45 checks passed
+- Protocol round trip `tests/protocol_roundtrip.py`: 63 checks passed
   (initialize → query → action ×4 → settingsChanged ×2 → cancel → shutdown), exit
   code 0.
 - Build: MinGW-w64 GCC 13.2 / CMake 3.29 / Ninja Release; `cursorwrap.exe` links

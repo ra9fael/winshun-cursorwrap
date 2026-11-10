@@ -15,11 +15,11 @@ CW_TEST(parser_empty_text_shows)
     CW_CHECK(c.kind == CommandKind::Show);
 }
 
-CW_TEST(parser_impact_toggle_and_set)
+CW_TEST(parser_impact_menu_and_set)
 {
-    CW_CHECK(parseCommand("impact").kind == CommandKind::ToggleImpact);
-    CW_CHECK(parseCommand("撞击").kind == CommandKind::ToggleImpact);
-    CW_CHECK(parseCommand("IMPACT").kind == CommandKind::ToggleImpact); // case-insensitive
+    CW_CHECK(parseCommand("impact").kind == CommandKind::MenuImpact);
+    CW_CHECK(parseCommand("撞击").kind == CommandKind::MenuImpact);
+    CW_CHECK(parseCommand("IMPACT").kind == CommandKind::MenuImpact); // case-insensitive
     const auto on = parseCommand("impact on");
     CW_CHECK(on.kind == CommandKind::SetImpact && on.value == 1);
     const auto off = parseCommand("impact off");
@@ -30,7 +30,7 @@ CW_TEST(parser_impact_toggle_and_set)
     CW_CHECK(zhOff.kind == CommandKind::SetImpact && zhOff.value == 0);
 }
 
-CW_TEST(parser_speed_clamps)
+CW_TEST(parser_speed_menu_and_clamps)
 {
     const auto a = parseCommand("speed 3000");
     CW_CHECK(a.kind == CommandKind::SetImpactSpeed && a.value == 3000);
@@ -40,16 +40,29 @@ CW_TEST(parser_speed_clamps)
     CW_CHECK(lo.value == 500);
     const auto hi = parseCommand("speed 99999999"); // above range -> clamped in
     CW_CHECK(hi.value == 20000);
-    const auto noNum = parseCommand("speed");       // no number -> the default
-    CW_CHECK(noNum.kind == CommandKind::SetImpactSpeed && noNum.value == 2000);
-    const auto junk = parseCommand("speed abc");    // a word where the number goes
-    CW_CHECK(junk.kind == CommandKind::SetImpactSpeed && junk.value == 2000);
+    CW_CHECK(parseCommand("speed").kind == CommandKind::MenuSpeed);
+    CW_CHECK(parseCommand("速度").kind == CommandKind::MenuSpeed);
+    // A word where the number goes is not a value: the submenu.
+    const auto junk = parseCommand("speed abc");
+    CW_CHECK(junk.kind == CommandKind::MenuSpeed);
 }
 
-CW_TEST(parser_mode_cycle_and_set)
+CW_TEST(parser_band_menu_and_clamps)
 {
-    CW_CHECK(parseCommand("mode").kind == CommandKind::CycleMode);
-    CW_CHECK(parseCommand("模式").kind == CommandKind::CycleMode);
+    const auto a = parseCommand("band 300");
+    CW_CHECK(a.kind == CommandKind::SetBand && a.value == 300);
+    const auto lo = parseCommand("band 10");  // below 50 -> clamped in
+    CW_CHECK(lo.value == 50);
+    const auto hi = parseCommand("区间 9999"); // above 500 -> clamped in
+    CW_CHECK(hi.value == 500);
+    CW_CHECK(parseCommand("band").kind == CommandKind::MenuBand);
+    CW_CHECK(parseCommand("区间").kind == CommandKind::MenuBand);
+}
+
+CW_TEST(parser_mode_menu_and_set)
+{
+    CW_CHECK(parseCommand("mode").kind == CommandKind::MenuMode);
+    CW_CHECK(parseCommand("模式").kind == CommandKind::MenuMode);
     const auto both = parseCommand("mode both");
     CW_CHECK(both.kind == CommandKind::SetMode && both.value == static_cast<long long>(WrapMode::Both));
     const auto vert = parseCommand("mode vertical");
@@ -85,6 +98,15 @@ CW_TEST(parser_activation_aliases)
 
 CW_TEST(parser_numeric_settings_clamp)
 {
+    // Numeric keywords with a trailing number set the value; bare ones open
+    // their submenu.
+    CW_CHECK(parseCommand("guard").kind == CommandKind::MenuGuard);
+    CW_CHECK(parseCommand("防震").kind == CommandKind::MenuGuard);
+    CW_CHECK(parseCommand("edge").kind == CommandKind::MenuEdge);
+    CW_CHECK(parseCommand("边缘").kind == CommandKind::MenuEdge);
+    CW_CHECK(parseCommand("tol").kind == CommandKind::MenuTolerance);
+    CW_CHECK(parseCommand("容差").kind == CommandKind::MenuTolerance);
+
     const auto guard = parseCommand("guard 120");
     CW_CHECK(guard.kind == CommandKind::SetGuard && guard.value == 120);
     const auto guardLo = parseCommand("防震 1");
@@ -124,10 +146,10 @@ CW_TEST(parser_unknown_and_boundary_gluing)
     CW_CHECK(parseCommand("modes").kind == CommandKind::Unknown);
     // "impacts" glues onto "impact".
     CW_CHECK(parseCommand("impacts").kind == CommandKind::Unknown);
-    // But "impact:" with a colon is fine (a trailing separator).
-    CW_CHECK(parseCommand("impact:").kind == CommandKind::ToggleImpact);
+    // But "impact:" with a colon is fine (a trailing separator) — the menu.
+    CW_CHECK(parseCommand("impact:").kind == CommandKind::MenuImpact);
     // Leading spaces are trimmed.
-    CW_CHECK(parseCommand("  impact  ").kind == CommandKind::ToggleImpact);
+    CW_CHECK(parseCommand("  impact  ").kind == CommandKind::MenuImpact);
     // A zh word followed by more zh characters is not the keyword.
     CW_CHECK(parseCommand("撞击模式").kind == CommandKind::Unknown);
 }

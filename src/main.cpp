@@ -22,6 +22,7 @@
 #include "wrap_logic.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <memory>
 #include <string>
 #include <vector>
@@ -218,7 +219,7 @@ protected:
         const cw::ParsedCommand cmd = cw::parseCommand(q.text);
         switch (cmd.kind) {
         case cw::CommandKind::Show:
-            return { statusRow() };
+            return settingsList();
         case cw::CommandKind::Unknown:
             return { unknownRow(q.text) };
         case cw::CommandKind::CopyDiagnostics:
@@ -226,10 +227,37 @@ protected:
             // returns a diagnostics row: its copy field carries the text,
             // and Enter on it runs the plugin's copyDiag action.
             return { diagnosticsRow() };
+        case cw::CommandKind::MenuImpact:
+            return impactMenu();
+        case cw::CommandKind::MenuSpeed:
+            return speedMenu();
+        case cw::CommandKind::MenuBand:
+            return bandMenu();
+        case cw::CommandKind::MenuMode:
+            return modeMenu();
+        case cw::CommandKind::MenuActivation:
+            return activationMenu();
+        case cw::CommandKind::MenuGuard:
+            return guardMenu();
+        case cw::CommandKind::MenuEdge:
+            return edgeMenu();
+        case cw::CommandKind::MenuTolerance:
+            return toleranceMenu();
         default: {
             // A setting change: apply it, persist it, show the new state.
             applyCommand(cmd);
-            return { statusRow() };
+            // For numeric settings, show the submenu with the new value
+            // marked current — the user just picked it, so the submenu is
+            // the natural next view.
+            switch (cmd.kind) {
+            case cw::CommandKind::SetImpactSpeed: return speedMenu();
+            case cw::CommandKind::SetBand: return bandMenu();
+            case cw::CommandKind::SetGuard: return guardMenu();
+            case cw::CommandKind::SetEdge: return edgeMenu();
+            case cw::CommandKind::SetTolerance: return toleranceMenu();
+            default: break;
+            }
+            return settingsList();
         }
         }
     }
@@ -240,24 +268,79 @@ protected:
         if (a.action == "toggleEnabled") {
             const bool on = !m_hookEnabled;
             setEnabled(on);
-            return { effect::replace({ statusRow() }), effect::keep(),
-                     effect::notify(on ? (chinese ? "光标回绕已开启" : "Cursor wrap on")
-                                       : (chinese ? "光标回绕已关闭" : "Cursor wrap off")) };
+            return listEffects(effect::notify(on ? (chinese ? "光标回绕已开启" : "Cursor wrap on")
+                                                 : (chinese ? "光标回绕已关闭" : "Cursor wrap off")));
         }
         if (a.action == "cycleMode") {
             cycleMode();
             persistOverrides();
             pushSettings();
-            return { effect::replace({ statusRow() }), effect::keep(),
-                     effect::notify(std::string(chinese ? "回绕模式：" : "Wrap mode: ")
-                                    + modeLabel(m_settings.wrapMode, chinese)) };
+            return listEffects(effect::notify(std::string(chinese ? "回绕模式：" : "Wrap mode: ")
+                                              + modeLabel(m_settings.wrapMode, chinese)));
         }
         if (a.action == "toggleImpact") {
             m_settings.impactGate = !m_settings.impactGate;
             persistOverrides();
             pushSettings();
-            return { effect::replace({ statusRow() }), effect::keep(),
-                     effect::notify(impactNotifyText()) };
+            return listEffects(effect::notify(impactNotifyText()));
+        }
+        if (a.action == "setActivationCtrl" || a.action == "setActivationShift"
+            || a.action == "setActivationAlways") {
+            m_settings.activation = a.action == "setActivationCtrl"   ? cw::ActivationMode::WhileCtrl
+                : a.action == "setActivationShift"                    ? cw::ActivationMode::WhileShift
+                                                                      : cw::ActivationMode::Always;
+            persistOverrides();
+            pushSettings();
+            return listEffects(effect::notify(std::string(chinese ? "激活方式：" : "Activation: ")
+                                              + activationLabel(m_settings.activation, chinese)));
+        }
+        if (a.action == "resetDefaults") {
+            const cw::Settings defaults;
+            m_settings.wrapMode = defaults.wrapMode;
+            m_settings.activation = defaults.activation;
+            m_settings.impactGate = defaults.impactGate;
+            m_settings.impactSpeedPps = defaults.impactSpeedPps;
+            m_settings.impactBandPx = defaults.impactBandPx;
+            m_settings.wrapGuardPx = defaults.wrapGuardPx;
+            m_settings.edgeThresholdPx = defaults.edgeThresholdPx;
+            m_settings.adjacencyTolerancePx = defaults.adjacencyTolerancePx;
+            persistOverrides();
+            pushSettings();
+            return listEffects(effect::notify(chinese ? "已恢复宿主设置卡" : "Host settings restored"));
+        }
+        // Numeric value rows: "set:<field>:<value>".
+        if (a.action.rfind("set:", 0) == 0) {
+            const size_t f1 = a.action.find(':', 4);
+            if (f1 != std::string::npos) {
+                const std::string field = a.action.substr(4, f1 - 4);
+                const long long value = std::atoll(a.action.c_str() + f1 + 1);
+                Items after;
+                if (field == "speed") {
+                    m_settings.impactGate = true;
+                    m_settings.impactSpeedPps = static_cast<int>(value);
+                    after = speedMenu();
+                } else if (field == "band") {
+                    m_settings.impactBandPx = static_cast<int>(value);
+                    after = bandMenu();
+                } else if (field == "guard") {
+                    m_settings.wrapGuardPx = static_cast<int>(value);
+                    after = guardMenu();
+                } else if (field == "edge") {
+                    m_settings.edgeThresholdPx = static_cast<int>(value);
+                    after = edgeMenu();
+                } else if (field == "tol") {
+                    m_settings.adjacencyTolerancePx = static_cast<int>(value);
+                    after = toleranceMenu();
+                } else if (field == "mode") {
+                    m_settings.wrapMode = static_cast<cw::WrapMode>(value);
+                    after = modeMenu();
+                }
+                if (!after.empty()) {
+                    persistOverrides();
+                    pushSettings();
+                    return { effect::replace(after), effect::keep() };
+                }
+            }
         }
         if (a.action == "copyDiagnostics") {
             return { effect::copy(diagnosticsText()), effect::keep(),
@@ -361,9 +444,6 @@ private:
     void applyCommand(const cw::ParsedCommand& cmd)
     {
         switch (cmd.kind) {
-        case cw::CommandKind::ToggleImpact:
-            m_settings.impactGate = !m_settings.impactGate;
-            break;
         case cw::CommandKind::SetImpact:
             m_settings.impactGate = cmd.value != 0;
             break;
@@ -371,8 +451,8 @@ private:
             m_settings.impactGate = true; // setting a speed implies wanting the gate
             m_settings.impactSpeedPps = static_cast<int>(cmd.value);
             break;
-        case cw::CommandKind::CycleMode:
-            cycleMode();
+        case cw::CommandKind::SetBand:
+            m_settings.impactBandPx = static_cast<int>(cmd.value);
             break;
         case cw::CommandKind::SetMode:
             m_settings.wrapMode = static_cast<cw::WrapMode>(cmd.value);
@@ -400,6 +480,7 @@ private:
             m_settings.activation = defaults.activation;
             m_settings.impactGate = defaults.impactGate;
             m_settings.impactSpeedPps = defaults.impactSpeedPps;
+            m_settings.impactBandPx = defaults.impactBandPx;
             m_settings.wrapGuardPx = defaults.wrapGuardPx;
             m_settings.edgeThresholdPx = defaults.edgeThresholdPx;
             m_settings.adjacencyTolerancePx = defaults.adjacencyTolerancePx;
@@ -441,10 +522,11 @@ private:
         const bool chinese = winshun::Plugin::chinese();
         Item row("cursorwrap.unknown",
                  chinese ? "不认识的词：" + text : "Unknown words: " + text,
-                 chinese ? "试试：impact 撞击 · speed 3000 速度 · mode 模式 · ctrl/shift/always · "
-                         "guard 防震 · edge 边缘 · tol 容差 · diag 诊断 · reset 恢复"
-                         : "try: impact · speed 3000 · mode · ctrl/shift/always · guard · "
-                         "edge · tol · diag · reset");
+                 chinese ? "试试：impact 撞击 · speed 速度 · band 区间 · mode 模式 · "
+                         "activation 激活 · guard 防震 · edge 边缘 · tol 容差 · "
+                         "diag 诊断 · reset 恢复"
+                         : "try: impact · speed · band · mode · activation · guard · "
+                           "edge · tol · diag · reset");
         row.invalid();
         return row;
     }
@@ -498,10 +580,8 @@ private:
         if (!m_hookEnabled) {
             Item row("cursorwrap.status",
                      chinese ? "光标回绕：已关闭" : "Cursor wrap: off",
-                     chinese ? "按 Enter 开启" : "Press Enter to enable");
-            row.withActions({ {"toggleEnabled", chinese ? "开启" : "Enable", "Enter"},
-                              {"cycleMode", chinese ? "切换模式" : "Cycle mode", "Ctrl+Enter"},
-                              {"toggleImpact", chinese ? "切换撞击" : "Toggle impact", "Shift+Enter"} });
+                     chinese ? "Enter 开启 · 下方逐项设置" : "Enter to enable · per-setting rows below");
+            row.withActions({ {"toggleEnabled", chinese ? "开启" : "Enable", "Enter"} });
             return row;
         }
         std::string subtitle = std::string(chinese ? "模式 " : "mode ")
@@ -519,10 +599,248 @@ private:
             subtitle += chinese ? " · 钩子未安装，仅显示状态" : " · hook failed, status only";
         Item row("cursorwrap.status", chinese ? "光标回绕：已开启" : "Cursor wrap: on",
                  subtitle);
-        row.withActions({ {"toggleEnabled", chinese ? "关闭" : "Disable", "Enter"},
-                          {"cycleMode", chinese ? "切换模式" : "Cycle mode", "Ctrl+Enter"},
-                          {"toggleImpact", chinese ? "切换撞击" : "Toggle impact", "Shift+Enter"} });
+        row.withActions({ {"toggleEnabled", chinese ? "关闭" : "Disable", "Enter"} });
         return row;
+    }
+
+    // --- the settings list and its submenus ---------------------------------
+    //
+    // One row per setting: Enter acts on the row itself (a toggle, a value
+    // pick or a drill-down via setQuery), which keeps every key binding
+    // within the host's three-keys-per-row limit. A submenu's first row goes
+    // back to the list (setQuery "cursorwrap "), then every choice is its
+    // own row.
+
+    Effects listEffects(Json extra)
+    {
+        // Refresh the list after an action; `extra` (a notify) rides along.
+        return { effect::replace(settingsList()), effect::keep(), std::move(extra) };
+    }
+
+    // A drill-down row: Enter fills the search box, which re-queries and
+    // shows the submenu. No action needed — the host treats setQuery as the
+    // row's default Enter.
+    Item drillRow(const char* id, std::string title, std::string subtitle, const char* query)
+    {
+        Item row(id, std::move(title), std::move(subtitle));
+        row.withSetQuery(query);
+        return row;
+    }
+
+    Item backRow()
+    {
+        return drillRow("cursorwrap.back",
+                        winshun::Plugin::chinese() ? "← 返回" : "← Back",
+                        {}, "cursorwrap ");
+    }
+
+    // A value row inside a numeric submenu: Enter applies set:<field>:<v>.
+    Item valueRow(const char* id, std::string title, const char* field, long long value,
+                  bool current)
+    {
+        const bool chinese = winshun::Plugin::chinese();
+        Item row(id, std::move(title),
+                 current ? std::string(chinese ? "当前" : "current") : std::string());
+        row.withActions({ { "set:" + std::string(field) + ":" + intText(value),
+                            chinese ? "设为该值" : "Set", "Enter" } });
+        return row;
+    }
+
+    Items settingsList()
+    {
+        const bool chinese = winshun::Plugin::chinese();
+        Items rows;
+        rows.push_back(statusRow());
+
+        rows.push_back(Item("cursorwrap.row.impact",
+                            std::string(chinese ? "撞击模式：" : "Impact mode: ")
+                                + (m_settings.impactGate
+                                       ? (chinese ? "开" : "on")
+                                       : (chinese ? "关" : "off")),
+                            chinese ? "Enter 切换 · 慢慢挪到边缘不回绕"
+                                    : "Enter to toggle · drifting to the edge does not wrap"));
+        rows.back().withActions({ {"toggleImpact", chinese ? "切换" : "Toggle", "Enter"} });
+
+        rows.push_back(drillRow("cursorwrap.row.speed",
+                                std::string(chinese ? "撞击速度：" : "Impact speed: ")
+                                    + intText(m_settings.impactSpeedPps) + " px/s",
+                                chinese ? "Enter 选择门槛值" : "Enter to pick a threshold",
+                                "cursorwrap speed "));
+
+        rows.push_back(drillRow("cursorwrap.row.band",
+                                std::string(chinese ? "撞击测速区间：" : "Impact band: ")
+                                    + intText(m_settings.impactBandPx) + " px",
+                                chinese ? "Enter 选择区间" : "Enter to pick a band",
+                                "cursorwrap band "));
+
+        rows.push_back(Item("cursorwrap.row.mode",
+                            std::string(chinese ? "回绕模式：" : "Wrap mode: ")
+                                + modeLabel(m_settings.wrapMode, chinese),
+                            chinese ? "Enter 切换 双向→仅上下→仅左右"
+                                    : "Enter to cycle both→vertical→horizontal"));
+        rows.back().withActions({ {"cycleMode", chinese ? "切换" : "Cycle", "Enter"} });
+
+        rows.push_back(drillRow("cursorwrap.row.activation",
+                                std::string(chinese ? "激活方式：" : "Activation: ")
+                                    + activationLabel(m_settings.activation, chinese),
+                                chinese ? "Enter 选择激活方式" : "Enter to pick one",
+                                "cursorwrap activation "));
+
+        rows.push_back(drillRow("cursorwrap.row.guard",
+                                std::string(chinese ? "防震半径：" : "Wrap guard: ")
+                                    + intText(m_settings.wrapGuardPx) + " px",
+                                chinese ? "Enter 选择半径" : "Enter to pick a radius",
+                                "cursorwrap guard "));
+
+        rows.push_back(drillRow("cursorwrap.row.edge",
+                                std::string(chinese ? "边缘阈值：" : "Edge threshold: ")
+                                    + intText(m_settings.edgeThresholdPx) + " px",
+                                chinese ? "Enter 选择阈值" : "Enter to pick one",
+                                "cursorwrap edge "));
+
+        rows.push_back(drillRow("cursorwrap.row.tol",
+                                std::string(chinese ? "内边容差：" : "Adjacency tolerance: ")
+                                    + intText(m_settings.adjacencyTolerancePx) + " px",
+                                chinese ? "Enter 选择容差" : "Enter to pick one",
+                                "cursorwrap tol "));
+
+        rows.push_back(diagnosticsRow());
+
+        Item reset("cursorwrap.row.reset",
+                   chinese ? "恢复宿主设置卡" : "Restore host settings",
+                   chinese ? "Enter 清除搜索栏覆盖" : "Enter to clear search-bar overrides");
+        reset.withActions({ {"resetDefaults", chinese ? "恢复" : "Reset", "Enter"} });
+        rows.push_back(std::move(reset));
+        return rows;
+    }
+
+    Items impactMenu()
+    {
+        const bool chinese = winshun::Plugin::chinese();
+        Items rows;
+        rows.push_back(backRow());
+        rows.push_back(Item("cursorwrap.impact.state",
+                            std::string(chinese ? "撞击模式：" : "Impact mode: ")
+                                + (m_settings.impactGate
+                                       ? (chinese ? "开" : "on")
+                                       : (chinese ? "关" : "off")),
+                            chinese ? "Enter 切换" : "Enter to toggle"));
+        rows.back().withActions({ {"toggleImpact", chinese ? "切换" : "Toggle", "Enter"} });
+        rows.push_back(drillRow("cursorwrap.impact.speed",
+                                std::string(chinese ? "撞击速度：" : "Impact speed: ")
+                                    + intText(m_settings.impactSpeedPps) + " px/s",
+                                chinese ? "Enter 选择门槛值" : "Enter to pick a threshold",
+                                "cursorwrap speed "));
+        rows.push_back(drillRow("cursorwrap.impact.band",
+                                std::string(chinese ? "撞击测速区间：" : "Impact band: ")
+                                    + intText(m_settings.impactBandPx) + " px",
+                                chinese ? "Enter 选择区间" : "Enter to pick a band",
+                                "cursorwrap band "));
+        return rows;
+    }
+
+    Items speedMenu()
+    {
+        Items rows;
+        rows.push_back(backRow());
+        for (const long long v : { 500, 1000, 2000, 3000, 5000, 8000, 12000, 20000 }) {
+            std::string title = intText(v) + " px/s";
+            rows.push_back(valueRow("cursorwrap.speed", std::move(title), "speed", v,
+                                    m_settings.impactSpeedPps == v));
+        }
+        return rows;
+    }
+
+    Items bandMenu()
+    {
+        Items rows;
+        rows.push_back(backRow());
+        for (const long long v : { 50, 80, 120, 150, 200, 300, 500 }) {
+            std::string title = intText(v) + " px";
+            rows.push_back(valueRow("cursorwrap.band", std::move(title), "band", v,
+                                    m_settings.impactBandPx == v));
+        }
+        return rows;
+    }
+
+    Items modeMenu()
+    {
+        const bool chinese = winshun::Plugin::chinese();
+        Items rows;
+        rows.push_back(backRow());
+        const std::pair<cw::WrapMode, const char*> modes[] = {
+            { cw::WrapMode::Both, chinese ? "双向" : "both" },
+            { cw::WrapMode::VerticalOnly, chinese ? "仅上下" : "vertical only" },
+            { cw::WrapMode::HorizontalOnly, chinese ? "仅左右" : "horizontal only" },
+        };
+        for (const auto& [mode, label] : modes) {
+            const bool current = m_settings.wrapMode == mode;
+            Item row("cursorwrap.mode", label,
+                     current ? std::string(chinese ? "当前" : "current")
+                             : std::string(chinese ? "Enter 切换到该模式" : "Enter to switch"));
+            if (!current) {
+                row.withActions({ { "set:mode:" + intText(static_cast<long long>(mode)),
+                                    chinese ? "切换" : "Switch", "Enter" } });
+            }
+            rows.push_back(std::move(row));
+        }
+        return rows;
+    }
+
+    Items activationMenu()
+    {
+        const bool chinese = winshun::Plugin::chinese();
+        Items rows;
+        rows.push_back(backRow());
+        const cw::ActivationMode kinds[] = { cw::ActivationMode::Always,
+            cw::ActivationMode::WhileCtrl, cw::ActivationMode::WhileShift };
+        const char* actions[] = { "setActivationAlways", "setActivationCtrl", "setActivationShift" };
+        for (size_t i = 0; i < 3; ++i) {
+            Item row("cursorwrap.activation", activationLabel(kinds[i], chinese),
+                     m_settings.activation == kinds[i]
+                         ? std::string(chinese ? "当前" : "current")
+                         : std::string(chinese ? "Enter 切换" : "Enter to switch"));
+            if (m_settings.activation != kinds[i])
+                row.withActions({ { actions[i], chinese ? "选择" : "Pick", "Enter" } });
+            rows.push_back(std::move(row));
+        }
+        return rows;
+    }
+
+    Items guardMenu()
+    {
+        Items rows;
+        rows.push_back(backRow());
+        for (const long long v : { 10, 30, 50, 80, 120, 200 }) {
+            std::string title = intText(v) + " px";
+            rows.push_back(valueRow("cursorwrap.guard", std::move(title), "guard", v,
+                                    m_settings.wrapGuardPx == v));
+        }
+        return rows;
+    }
+
+    Items edgeMenu()
+    {
+        Items rows;
+        rows.push_back(backRow());
+        for (const long long v : { 1, 2, 5, 10, 20 }) {
+            std::string title = intText(v) + " px";
+            rows.push_back(valueRow("cursorwrap.edge", std::move(title), "edge", v,
+                                    m_settings.edgeThresholdPx == v));
+        }
+        return rows;
+    }
+
+    Items toleranceMenu()
+    {
+        Items rows;
+        rows.push_back(backRow());
+        for (const long long v : { 10, 30, 50, 80, 120, 200 }) {
+            std::string title = intText(v) + " px";
+            rows.push_back(valueRow("cursorwrap.tol", std::move(title), "tol", v,
+                                    m_settings.adjacencyTolerancePx == v));
+        }
+        return rows;
     }
 
     std::string diagnosticsText() const

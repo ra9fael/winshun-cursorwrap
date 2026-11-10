@@ -595,6 +595,7 @@ struct Item {
     int score = -1; // 0–100; -1: not given
     std::string match;
     std::string autocomplete;
+    std::string setQuery; // Enter puts this text in the search box (drill-down)
     std::string copy;
     std::string preview;
     Json open; // {"path": …} or {"url": …}
@@ -616,6 +617,7 @@ struct Item {
     Item& withScore(int s) { score = s; return *this; }
     Item& withCopy(std::string s) { copy = std::move(s); return *this; }
     Item& withAutocomplete(std::string s) { autocomplete = std::move(s); return *this; }
+    Item& withSetQuery(std::string s) { setQuery = std::move(s); return *this; }
     Item& withPreview(std::string s) { preview = std::move(s); return *this; }
     Item& withPath(std::string path) { open = Json::Object {{"path", std::move(path)}}; return *this; }
     Item& withUrl(std::string url) { open = Json::Object {{"url", std::move(url)}}; return *this; }
@@ -645,6 +647,8 @@ struct Item {
             o["match"] = match;
         if (!autocomplete.empty())
             o["autocomplete"] = autocomplete;
+        if (!setQuery.empty())
+            o["setQuery"] = setQuery;
         if (!copy.empty())
             o["copy"] = copy;
         if (!preview.empty())

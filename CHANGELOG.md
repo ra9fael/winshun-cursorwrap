@@ -9,6 +9,22 @@ single source of truth; release tags are `v<version>`.
 
 ## [Unreleased]
 
+### Changed
+
+- **搜索栏改成多行设置列表**：`cursorwrap` 留空不再只返回一行状态，而是返回
+  11 行设置列表——每行一个设置项，Enter 就是该行的主操作（开关 / 循环 / 下钻 /
+  复制 / 恢复）。这样每个设置都有自己的键位，不再受宿主「每行最多三个键」的限制，
+  也不用记 Ctrl+Enter / Shift+Enter 组合。
+- **子菜单下钻**：`cursorwrap impact` / `speed` / `band` / `mode` / `activation` /
+  `guard` / `edge` / `tol` 打开对应子菜单，**第一行永远是 `← 返回`**，其余每行一个
+  可选值，Enter 直接应用。下钻靠行的 `setQuery` 字段（Enter 填入搜索框），
+  为此给 vendored `winshun.h` 的 `Item` 补了 `setQuery` / `withSetQuery()`
+  （宿主 `Items.cpp` 早已支持该字段，SDK 头没暴露）。
+- 新增关键字 `activation` / `激活`（激活方式子菜单）；`band` / `区间`（测速区间）。
+- 带数字仍然直接设值并显示对应子菜单（新值标「当前」）：`speed 3000`、
+  `band 300`、`guard 120` 等。
+- 未知词提示行更新为完整词表（含 band/区间、activation/激活）。
+
 ### Added
 
 - 搜索栏直接改设置：`cursorwrap impact`（撞击开关）、`cursorwrap speed 3000`

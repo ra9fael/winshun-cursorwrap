@@ -75,16 +75,19 @@ fixture 是**合成几何**，不是真机采集，因此可安全提交（不�
 python tests/protocol_roundtrip.py
 ```
 
-2026-11-10 实跑：**45 项检查全部通过**，进程退出码 0。
+2026-11-10 实跑：**63 项检查全部通过**，进程退出码 0。
 
 | 检查 | 对应 |
 |---|---|
 | `initialize` 无 error、`protocolVersion == "1"` | §8 |
-| 空查询返回且只返回一行，`id == cursorwrap.status`，有标题和副标题 | §3 |
-| 三个动作按 Enter / Ctrl+Enter / Shift+Enter 顺序 | §3 |
+| 空查询返回**多行设置列表**（≥5 行），首行 `id == cursorwrap.status`，含 10 个设置行 id | §3 |
+| 状态行只有 `toggleEnabled` 一个动作（其他设置各占一行） | §3 |
+| 下钻行（speed/band/activation/guard/edge/tol）带 `setQuery` | §3 |
 | 带文字查询仍只返回一行（查询无副作用） | §3 |
+| `impact` 打开子菜单（首行 `← 返回`），`impact on/off` 直接设值 | §3 |
+| `speed 3500` 打开速度子菜单，状态行副标题含 `3500` | §3 |
 | `cycleMode` 三次报告三种不同模式，每次 `replace` + `notify` | §3 |
-| `toggleEnabled` 生效，替换后的行显示「已关闭」 | §3 |
+| `toggleEnabled` 生效，替换后的状态行显示「已关闭」 | §3 |
 | `copyDiagnostics` 产出一条 `copy`，内容含 mode/activation/monitors/outer edges/wraps | §3 |
 | 未知动作返回 `valid: false` 的行，不假装成功 | §10 |
 | `settingsChanged` 合法值立即反映在状态行 | §7 |
