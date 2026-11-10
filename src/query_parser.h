@@ -14,6 +14,7 @@
 //   guard <n> | 防震 <n>        -> Set wrapGuardPx
 //   edge <n> | 边缘 <n>         -> Set edgeThresholdPx
 //   tol <n> | 容差 <n>          -> Set adjacencyTolerancePx
+//   diag | 诊断                 -> Copy diagnostics (CopyDiagnostics)
 //   reset | 恢复默认            -> ResetToDefaults
 //   anything else               -> Unknown (an error row suggests the words)
 #pragma once
@@ -36,6 +37,7 @@ enum class CommandKind {
     SetGuard,       // value: px
     SetEdge,        // value: px
     SetTolerance,   // value: px
+    CopyDiagnostics,
     ResetToDefaults,
     Unknown,
 };

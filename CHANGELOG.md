@@ -17,7 +17,9 @@ single source of truth; release tags are `v<version>`.
   （恢复宿主设置卡）。改动立即生效并持久化到插件数据目录
   （`WS_DATA_DIR\settings.json`，只存与默认不同的键）；宿主设置卡对未覆盖的键
   仍然权威，状态行注明来源。中英文关键词、数字越界夹入、未知词给提示行。
-- 新增动作 `toggleImpact`（Shift+Enter 切换撞击模式；复制诊断移到 Ctrl+Enter）。
+- 新增动作 `toggleImpact`（Shift+Enter 切换撞击模式）。宿主每行键盘最多绑三个
+  动作（Enter/Ctrl+Enter/Shift+Enter，第 4 个没有按键），复制诊断改走搜索栏：
+  `cursorwrap diag` / `诊断` 返回诊断行，Enter 复制全文。
 - 撞击模式（`impactGate` / `impactSpeedPps`）：开启后光标必须以足够速度撞到边缘才
   回绕，防止慢慢挪到边缘（比如去点任务栏）时误触发。速度按 100ms 窗口内垂直于
   边缘的位移计算（500–20000 px/s，默认 2000）；沿边缘平行滑动不算；测不出速度

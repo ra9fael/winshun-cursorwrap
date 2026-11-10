@@ -191,8 +191,8 @@ def run(exe: Path) -> int:
             check(bool(row.get("subtitle")), "row has a subtitle", str(row.get("subtitle")))
             actions = row.get("actions") or []
             check([a.get("id") for a in actions]
-                  == ["toggleEnabled", "cycleMode", "toggleImpact", "copyDiagnostics"],
-                  "four actions in Enter/Ctrl+Enter/Shift+Enter/Ctrl+Enter order",
+                  == ["toggleEnabled", "cycleMode", "toggleImpact"],
+                  "three actions in Enter/Ctrl+Enter/Shift+Enter order",
                   str([a.get("id") for a in actions]))
             check("monitor" in json.dumps(row, ensure_ascii=False).lower()
                   or "屏" in json.dumps(row, ensure_ascii=False),
@@ -271,6 +271,27 @@ def run(exe: Path) -> int:
             for needle in ("wrap mode", "activation", "monitors", "outer edges", "wraps"):
                 check(needle in diag, f"diagnostics contains '{needle}'")
             check("ra9fael.cursorwrap diagnostics" in diag, "diagnostics header present")
+
+        print("query: diag returns a copyable diagnostics row")
+        qd = drv.query("diag")
+        drow = items_of(qd)[0]
+        check(drow.get("id") == "cursorwrap.diag",
+              "diag returns the diagnostics row", str(drow.get("id")))
+        copy_text = drow.get("copy", "")
+        check(copy_text.startswith("ra9fael.cursorwrap diagnostics"),
+              "the row's copy field carries the diagnostics", copy_text[:120])
+        dactions = drow.get("actions") or []
+        check([a.get("id") for a in dactions] == ["copyDiagRow"],
+              "the diagnostics row's Enter runs copyDiagRow", str(dactions))
+        dresp = drv.action("copyDiagRow", drow)
+        deffects = (dresp.get("result") or {}).get("effects") or []
+        dcopies = [e.get("text", "") for e in deffects if e.get("type") == "copy"]
+        check(len(dcopies) == 1 and "wrap mode" in dcopies[0],
+              "copyDiagRow copies the diagnostics", str(deffects)[:200])
+        # 诊断 works the same (zh alias).
+        qd2 = drv.query("诊断")
+        check(items_of(qd2)[0].get("id") == "cursorwrap.diag",
+              "诊断 returns the diagnostics row too", str(items_of(qd2)[0].get("id")))
 
         print("action: unknown id")
         resp = drv.action("nope", row)

@@ -45,6 +45,8 @@ const Token kTokens[] = {
     { "边缘", CommandKind::SetEdge, 0 },
     { "tol", CommandKind::SetTolerance, 0 },
     { "容差", CommandKind::SetTolerance, 0 },
+    { "diag", CommandKind::CopyDiagnostics, 0 },
+    { "诊断", CommandKind::CopyDiagnostics, 0 },
     { "reset", CommandKind::ResetToDefaults, 0 },
     { "恢复默认", CommandKind::ResetToDefaults, 0 },
     { "恢复", CommandKind::ResetToDefaults, 0 },

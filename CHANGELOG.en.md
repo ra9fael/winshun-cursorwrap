@@ -20,8 +20,10 @@ single source of truth; release tags are `v<version>`.
   defaults); the host card stays authoritative for keys not overridden, and the
   status row says which source is active. zh/en keywords, out-of-range numbers
   clamp, unknown words get a hint row.
-- A new `toggleImpact` action (Shift+Enter toggles impact mode; copying
-  diagnostics moved to Ctrl+Enter).
+- A new `toggleImpact` action (Shift+Enter toggles impact mode). The host binds
+  at most three keys per row (Enter/Ctrl+Enter/Shift+Enter — a fourth action has
+  no key), so copying diagnostics moved to the search bar: `cursorwrap diag`
+  returns a diagnostics row and Enter copies the full text.
 - Impact mode (`impactGate` / `impactSpeedPps`): when on, the cursor must hit the
   edge fast enough to wrap, so drifting to the edge (say, toward the taskbar) no
   longer triggers. The speed is the displacement perpendicular to the edge over a

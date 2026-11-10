@@ -29,11 +29,11 @@ Implementation and validation record: [validation.en.md](validation.en.md).
   when the search bar has overridden settings, ` · search-bar overrides active
   (reset to fall back)` is appended; when the hook failed to install,
   ` · hook failed, status only` is appended
-- Actions (order = Enter / Ctrl+Enter / Shift+Enter / Ctrl+Enter):
+- Actions (order = Enter / Ctrl+Enter / Shift+Enter — the host binds at most
+  three keys per row):
   - `toggleEnabled` — turn wrapping on/off
   - `cycleMode` — both → vertical only → horizontal only → both
   - `toggleImpact` — impact mode on/off
-  - `copyDiagnostics` — copy multi-line diagnostics
 
 ### Text: change settings from the search bar
 
@@ -51,6 +51,7 @@ Implementation and validation record: [validation.en.md](validation.en.md).
 | `edge 5` | the edge threshold (1–20) |
 | `tol 80` | the adjacency tolerance (10–200) |
 | `reset` | clear the search-bar overrides; the host card applies again |
+| `diag` | a diagnostics row; Enter copies the full text |
 | anything else | a `valid:false` hint row listing the words |
 
 **Persistence and precedence**: the host has no plugin→host settings channel (the

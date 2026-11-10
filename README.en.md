@@ -37,6 +37,7 @@ change settings right there**:
 | `cursorwrap edge 5` | the edge threshold (1–20 px) |
 | `cursorwrap tol 80` | the adjacency tolerance (10–200 px) |
 | `cursorwrap reset` | clear the search-bar overrides; the host card applies again |
+| `cursorwrap diag` | a diagnostics row; Enter copies the full text |
 
 Changes **apply immediately** and persist in the plugin's data directory
 (`settings.json`, only keys that differ from the defaults); the host's settings card
@@ -48,7 +49,8 @@ are active.
 | Enter | turn wrapping on / off |
 | Ctrl+Enter | cycle the mode: both → vertical only → horizontal only |
 | Shift+Enter | impact mode on ↔ off |
-| Ctrl+Enter | copy diagnostics (mode, display count, outer-edge count, counters, thresholds, layout gaps) |
+
+The host binds at most three keys per row; diagnostics live at `cursorwrap diag`.
 
 ## Settings
 

@@ -220,6 +220,11 @@ protected:
             return { statusRow() };
         case cw::CommandKind::Unknown:
             return { unknownRow(q.text) };
+        case cw::CommandKind::CopyDiagnostics:
+            // The copy effect only runs on action responses, so this query
+            // returns a diagnostics row: its copy field carries the text,
+            // and Enter on it runs the plugin's copyDiag action.
+            return { diagnosticsRow() };
         default: {
             // A setting change: apply it, persist it, show the new state.
             applyCommand(cmd);
@@ -256,6 +261,11 @@ protected:
         if (a.action == "copyDiagnostics") {
             return { effect::copy(diagnosticsText()), effect::keep(),
                      effect::notify(chinese ? "诊断已复制" : "Diagnostics copied") };
+        }
+        if (a.action == "copyDiagRow") {
+            // Enter on the diagnostics row (its copy field already carries
+            // the text, but the plugin action makes the "已复制" flash).
+            return { effect::copy(diagnosticsText()), effect::hide() };
         }
         Item row("cursorwrap.error", chinese ? "未知动作" : "Unknown action", a.action);
         row.invalid();
@@ -378,6 +388,11 @@ private:
         case cw::CommandKind::SetTolerance:
             m_settings.adjacencyTolerancePx = static_cast<int>(cmd.value);
             break;
+        case cw::CommandKind::CopyDiagnostics:
+            // The copy effect only runs on action responses, so this query
+            // returns a diagnostics row: its copy field carries the text,
+            // and Enter on it runs the plugin's copyDiag action.
+            break;
         case cw::CommandKind::ResetToDefaults: {
             const cw::Settings defaults;
             m_settings.wrapMode = defaults.wrapMode;
@@ -426,10 +441,24 @@ private:
         Item row("cursorwrap.unknown",
                  chinese ? "不认识的词：" + text : "Unknown words: " + text,
                  chinese ? "试试：impact 撞击 · speed 3000 速度 · mode 模式 · ctrl/shift/always · "
-                         "guard 防震 · edge 边缘 · tol 容差 · reset 恢复"
+                         "guard 防震 · edge 边缘 · tol 容差 · diag 诊断 · reset 恢复"
                          : "try: impact · speed 3000 · mode · ctrl/shift/always · guard · "
-                         "edge · tol · reset");
+                         "edge · tol · diag · reset");
         row.invalid();
+        return row;
+    }
+
+    // The `cursorwrap diag` row: the diagnostics text rides in the copy
+    // field, Enter runs the plugin's copyDiag action (the copy effect only
+    // applies on action responses, never on query responses).
+    Item diagnosticsRow()
+    {
+        const bool chinese = winshun::Plugin::chinese();
+        Item row("cursorwrap.diag",
+                 chinese ? "光标回绕：诊断信息" : "Cursor wrap: diagnostics",
+                 chinese ? "Enter 复制到剪贴板" : "Press Enter to copy");
+        row.withCopy(diagnosticsText());
+        row.withActions({ {"copyDiagRow", chinese ? "复制诊断" : "Copy diagnostics", "Enter"} });
         return row;
     }
 
@@ -471,8 +500,7 @@ private:
                      chinese ? "按 Enter 开启" : "Press Enter to enable");
             row.withActions({ {"toggleEnabled", chinese ? "开启" : "Enable", "Enter"},
                               {"cycleMode", chinese ? "切换模式" : "Cycle mode", "Ctrl+Enter"},
-                              {"toggleImpact", chinese ? "切换撞击" : "Toggle impact", "Shift+Enter"},
-                              {"copyDiagnostics", chinese ? "复制诊断" : "Copy diagnostics", "Ctrl+Enter"} });
+                              {"toggleImpact", chinese ? "切换撞击" : "Toggle impact", "Shift+Enter"} });
             return row;
         }
         std::string subtitle = std::string(chinese ? "模式 " : "mode ")
@@ -492,8 +520,7 @@ private:
                  subtitle);
         row.withActions({ {"toggleEnabled", chinese ? "关闭" : "Disable", "Enter"},
                           {"cycleMode", chinese ? "切换模式" : "Cycle mode", "Ctrl+Enter"},
-                          {"toggleImpact", chinese ? "切换撞击" : "Toggle impact", "Shift+Enter"},
-                          {"copyDiagnostics", chinese ? "复制诊断" : "Copy diagnostics", "Ctrl+Enter"} });
+                          {"toggleImpact", chinese ? "切换撞击" : "Toggle impact", "Shift+Enter"} });
         return row;
     }
 
