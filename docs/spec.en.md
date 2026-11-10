@@ -86,10 +86,33 @@ and tests are reproducible.
 | `edgeThresholdPx` | number | 1 | 1–20, how close to an outer edge counts as on it |
 | `wrapGuardPx` | number | 50 | 10–200, anti-oscillation radius |
 | `adjacencyTolerancePx` | number | 50 | 10–200, inner-edge tolerance |
+| `impactGate` | bool | false | impact mode: the cursor must hit the edge fast enough to wrap |
+| `impactSpeedPps` | number | 2000 | 500–20000, the impact speed gate (px/s) |
 
 Invalid values (wrong type, out of range, NaN/Inf) fall back to the manifest
 default. A bad settings file must never error out or produce out-of-range
 behaviour. `settingsChanged` merges: fields not present keep their current value.
+
+### Impact mode (`impactGate`)
+
+Off (default): reaching an outer edge wraps, exactly like PowerToys.
+
+On: a wrap must also pass a speed gate — the **perpendicular speed toward the
+edge over the recent 100 ms window** must reach `impactSpeedPps`. Design
+choices:
+
+- A window speed, not per-event acceleration: at 1000 Hz report rates the
+  displacement between adjacent events is pure noise — the same conclusion
+  PowerToys Find My Mouse reached for its `shakeMinSpeed` gate.
+- Only the **perpendicular** axis counts: sliding along the edge (say, toward
+  a taskbar icon) never triggers, however fast.
+- **Unmeasurable speed fails closed**: too few samples in the window, missing
+  or non-monotonic timestamps — no wrap. This blocks programmatic teleports
+  (a big `SetCursorPos` jump) from masquerading as an impact.
+- Timestamps come from `QueryPerformanceCounter` on the hook thread
+  (microseconds), not `MSLLHOOKSTRUCT.time` (millisecond resolution, wraps).
+- The movement history clears after every wrap: the speed of the hit cannot
+  leak into the next decision.
 
 ## 8 Architecture
 
@@ -154,7 +177,7 @@ names or user text).
 
 ### Measured
 
-- Unit tests `cw_tests`: 43 cases plus 6 layout fixture files, all green
+- Unit tests `cw_tests`: 54 cases plus 6 layout fixture files, all green
   (`ctest` 1/1 passed).
 - Protocol round trip `tests/protocol_roundtrip.py`: 32 checks passed
   (initialize → query → action ×4 → settingsChanged ×2 → cancel → shutdown), exit

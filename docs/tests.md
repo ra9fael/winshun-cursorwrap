@@ -15,7 +15,7 @@
 | 打包物含 `plugin.json` / `cursorwrap.exe` / `README.md` / `LICENSE`，无 `build/`、`dist/`、`.git` | §8 | `tools/package.py` + `tools/ci_release.py` |
 | 双语文档锚点互链（`docs/spec*.md`、`docs/tests*.md`、README、CHANGELOG） | — | 通过 |
 
-## L1 — 纯逻辑单测（`cw_tests`，ctest 目标，43 用例 + 6 布局 fixture）
+## L1 — 纯逻辑单测（`cw_tests`，ctest 目标，54 用例 + 6 布局 fixture）
 
 不引 OS 头文件，任何平台可跑。运行：
 
@@ -48,6 +48,7 @@ ctest --test-dir build --output-on-failure
 | 状态机：模式 | VerticalOnly 下横向边忽略、纵向边回绕 | §4 |
 | 设置解析 | 越界回默认、边界值接受、未知枚举保持原值、部分更新合并 | §7 |
 | 设置类型混淆 | 空字符串枚举被忽略、NaN/±Inf 回默认 | §7 |
+| 撞击模式 | 关闭时行为不变；慢速漂移不回绕；快速撞击回绕；只看垂直分量（沿边滑动不触发）；时间戳缺失/混合/程序化瞬移判负；回绕后历史清零；速度门槛边界值 500/20000 接受、499/20001 回默认 | §7 撞击模式 |
 | 诊断结构 | 屏数/外边数/钩子标志/缝隙文本 | §3 |
 | 布局 fixture | `tests/layouts/*.json` 六个合成布局逐条断言 | §5 |
 
@@ -106,6 +107,8 @@ python tests/protocol_roundtrip.py
 - [x] 屏幕中间 → 不回绕
 - [x] 进程干净退出 0
 - [x] 观察钩子确认插件自己的 `SetCursorPos` 不带 `LLMHF_INJECTED`，不会被自己的钩子拒绝
+- [x] 撞击模式（门槛 3000px/s）：快推 ≈5300px/s → 回绕；慢漂 ≈800px/s → 不回绕；
+      单次瞬移 → 不回绕（fail closed）；门槛关闭后行为与 0.1 一致
 
 证据：`tests/layouts/live-wrap-evidence.json`、`tests/layouts/live-single.json`。
 
@@ -156,7 +159,7 @@ python tests/protocol_roundtrip.py
 
 ## 验收标准
 
-- L1 全绿（当前 43 用例 + 7 fixture，含真机采集的 `live-single.json`）
+- L1 全绿（当前 54 用例 + 7 fixture，含真机采集的 `live-single.json`）
 - L3 全通过（当前 32/32）
 - L0 静态校验通过
 - L4 单屏部分已实测通过；**多屏部分全部勾选后**才可宣布 v0.1.0 多屏可发布，

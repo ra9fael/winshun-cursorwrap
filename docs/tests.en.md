@@ -16,7 +16,7 @@ original: [tests.md](tests.md).
 | Package contains `plugin.json` / `cursorwrap.exe` / `README.md` / `LICENSE`, no `build/`, `dist/`, `.git` | §8 | `tools/package.py` + `tools/ci_release.py` |
 | Bilingual anchors cross-link (`docs/spec*.md`, `docs/tests*.md`, README, CHANGELOG) | — | pass |
 
-## L1 — Pure logic unit tests (`cw_tests`, ctest target, 43 cases + 6 layout fixtures)
+## L1 — Pure logic unit tests (`cw_tests`, ctest target, 54 cases + 6 layout fixtures)
 
 No OS headers: runs anywhere. Commands:
 
@@ -49,6 +49,7 @@ ctest --test-dir build --output-on-failure
 | Engine: mode | VerticalOnly ignores horizontal edges and wraps vertical ones | §4 |
 | Settings parsing | out-of-range falls back, boundary values accepted, unknown enums keep the previous value, partial updates merge | §7 |
 | Settings type confusion | empty-string enums ignored; NaN/±Inf fall back | §7 |
+| Impact mode | gate off behaves as before; a slow drift does not wrap; a fast hit wraps; only the perpendicular axis counts (sliding along the edge never triggers); missing/mixed timestamps and programmatic teleports fail closed; history clears after a wrap; the speed boundary values 500/20000 are accepted, 499/20001 fall back | §7 impact mode |
 | Diagnostics shape | display count, outer-edge count, hook flag, gap text | §3 |
 | Layout fixtures | `tests/layouts/*.json` — six synthetic layouts asserted case by case | §5 |
 
@@ -112,6 +113,9 @@ moves and a real hook:
 - [x] The process exits cleanly with code 0
 - [x] The observer hook confirms the plugin's own `SetCursorPos` carries no
       `LLMHF_INJECTED`, so it is not rejected by the plugin's own hook
+- [x] Impact mode (gate at 3000 px/s): a fast push at ≈5300 px/s wraps; a slow
+      drift at ≈800 px/s does not; a single teleport does not (fail closed); gate
+      off behaves exactly like 0.1
 
 Evidence: `tests/layouts/live-wrap-evidence.json`, `tests/layouts/live-single.json`.
 
@@ -161,7 +165,7 @@ Evidence: `tests/layouts/live-wrap-evidence.json`, `tests/layouts/live-single.js
 
 ## Acceptance criteria
 
-- L1 green (currently 43 cases + 7 fixtures, including the captured
+- L1 green (currently 54 cases + 7 fixtures, including the captured
   `live-single.json`)
 - L3 fully passing (currently 32/32)
 - L0 static validation passing

@@ -14,7 +14,7 @@
       "ok": true
     },
     {
-      "check": "push-right-edge-wraps-left",
+      "check": "gate-off-fast-push-wraps",
       "start": [
         960,
         540
@@ -23,36 +23,28 @@
         1919,
         540
       ],
-      "before": [
-        960,
-        538
-      ],
       "after": [
         0,
-        536
+        511
       ],
       "expected_wrap": true,
       "wrapped": true,
       "ok": true,
-      "observed_moves": 15,
+      "observed_moves": 19,
       "injected_seen": 0
     },
     {
-      "check": "push-left-edge-wraps-right",
+      "check": "impact-fast-push-wraps",
       "start": [
         960,
         540
       ],
       "target": [
-        0,
-        540
-      ],
-      "before": [
-        960,
+        1919,
         540
       ],
       "after": [
-        1919,
+        0,
         540
       ],
       "expected_wrap": true,
@@ -62,27 +54,63 @@
       "injected_seen": 0
     },
     {
-      "check": "middle-no-wrap",
+      "check": "impact-slow-drift-no-wrap",
       "start": [
         960,
         540
       ],
       "target": [
-        960,
-        540
-      ],
-      "before": [
-        960,
+        1919,
         540
       ],
       "after": [
-        960,
+        1919,
         540
       ],
       "expected_wrap": false,
       "wrapped": false,
       "ok": true,
-      "observed_moves": 0,
+      "observed_moves": 12,
+      "injected_seen": 0
+    },
+    {
+      "check": "impact-left-fast-wraps",
+      "start": [
+        960,
+        540
+      ],
+      "target": [
+        0,
+        540
+      ],
+      "after": [
+        1919,
+        540
+      ],
+      "expected_wrap": true,
+      "wrapped": true,
+      "ok": true,
+      "observed_moves": 8,
+      "injected_seen": 0
+    },
+    {
+      "check": "impact-single-jump-no-wrap",
+      "start": [
+        300,
+        540
+      ],
+      "target": [
+        1919,
+        540
+      ],
+      "after": [
+        1919,
+        540
+      ],
+      "expected_wrap": false,
+      "wrapped": false,
+      "ok": true,
+      "observed_moves": 1,
       "injected_seen": 0
     },
     {

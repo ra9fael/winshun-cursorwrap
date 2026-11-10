@@ -118,7 +118,20 @@ LRESULT MouseHook::hookProc(int code, WPARAM wp, LPARAM lp)
         if (!(info->flags & LLMHF_INJECTED) && m_engine) {
             const bool modifier = activationKeyHeld(m_settings.activation);
             const bool leftDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
-            const auto [nx, ny] = m_engine->onMouseMove({ info->pt.x, info->pt.y },
+            // QueryPerformanceCounter, not MSLLHOOKSTRUCT.time: that field
+            // is millisecond-resolution and wraps, and the impact gate
+            // measures speeds over a 100 ms window.
+            LARGE_INTEGER now {};
+            QueryPerformanceCounter(&now);
+            static const LARGE_INTEGER freq = [] {
+                LARGE_INTEGER f {};
+                QueryPerformanceFrequency(&f);
+                return f;
+            }();
+            const long long tUs = freq.QuadPart > 0
+                ? now.QuadPart * 1'000'000LL / freq.QuadPart
+                : 0;
+            const auto [nx, ny] = m_engine->onMouseMove({ info->pt.x, info->pt.y, tUs },
                                                         modifier, leftDown);
             if (nx != info->pt.x || ny != info->pt.y) {
                 if (SetCursorPos(static_cast<int>(nx), static_cast<int>(ny))) {

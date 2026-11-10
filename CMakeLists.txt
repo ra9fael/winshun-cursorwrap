@@ -54,6 +54,7 @@ add_executable(cw_tests
     tests/test_wrap_topology.cpp
     tests/test_wrap_logic.cpp
     tests/test_edge_cases.cpp
+    tests/test_impact_gate.cpp
     src/wrap_topology.cpp
     src/wrap_logic.cpp
 )

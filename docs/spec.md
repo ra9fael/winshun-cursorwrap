@@ -72,9 +72,27 @@
 | `edgeThresholdPx` | number | 1 | 1–20，离外边多近算到达 |
 | `wrapGuardPx` | number | 50 | 10–200，防震荡半径 |
 | `adjacencyTolerancePx` | number | 50 | 10–200，内边判定容差 |
+| `impactGate` | bool | false | 撞击模式：光标必须以足够速度撞到边缘才回绕 |
+| `impactSpeedPps` | number | 2000 | 500–20000，撞击速度门槛（px/s） |
 
 非法值（类型不对、越界、NaN/Inf）一律回落到清单默认值，绝不报错、绝不产生越界行为。
 `settingsChanged` 按部分更新合并：未给出的字段保留当前值。
+
+### 撞击模式（impactGate）
+
+关闭时（默认）：到达外边即回绕，与 PowerToys 原版一致。
+
+开启后，回绕多一道门槛：**最近 100ms 窗口内、垂直于所撞边缘方向的速度**
+必须 ≥ `impactSpeedPps`。设计取舍：
+
+- 用「窗口速度」而不是单事件加速度——1000Hz 报点率下相邻两事件的位移差是纯噪声；
+  这与 findmouse v0.2 的 `shakeMinSpeed` 结论一致。
+- 只看**垂直分量**：沿边缘平行滑动（比如滑过去点任务栏图标）速度再快也不触发。
+- **测不出速度就判负**（fail closed）：窗口内样本不足、时间戳缺失或倒退，都不回绕。
+  这挡住程序化瞬移（`SetCursorPos` 大跳）伪装成撞击。
+- 时间戳用钩子线程的 `QueryPerformanceCounter`（微秒），不用 `MSLLHOOKSTRUCT.time`
+  （毫秒精度且会回绕）。
+- 回绕发生后移动历史清零：撞出去那一把的速度不会泄漏到下一次判定。
 
 ## 8 架构
 
@@ -135,7 +153,7 @@
 
 ### 已实测
 
-- 单元测试 `cw_tests`：43 个用例 + 6 个布局 fixture 文件全绿（`ctest` 1/1 通过）。
+- 单元测试 `cw_tests`：54 个用例 + 6 个布局 fixture 文件全绿（`ctest` 1/1 通过）。
 - 协议往返 `tests/protocol_roundtrip.py`：32 项检查全通过（initialize → query →
   action ×4 → settingsChanged ×2 → cancel → shutdown），进程退出码 0。
 - 构建：MinGW-w64 GCC 13.2 / CMake 3.29 / Ninja Release，`cursorwrap.exe` 静态链接

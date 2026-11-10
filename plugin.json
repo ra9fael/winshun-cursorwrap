@@ -98,6 +98,20 @@
       "title": {"zh": "邻接容差（像素）", "en": "Adjacency tolerance (px)"},
       "hint": {"zh": "10–200，默认 50；两条边差多少像素以内算相邻（内边不回绕）", "en": "10–200, default 50; edges closer than this count as adjacent (inner edges never wrap)"},
       "default": 50
+    },
+    {
+      "key": "impactGate",
+      "type": "bool",
+      "title": {"zh": "撞击模式", "en": "Impact mode"},
+      "hint": {"zh": "开启后光标必须以足够速度撞到边缘才回绕；慢慢挪到边缘（比如去点任务栏）不会触发", "en": "when on, the cursor must hit the edge fast enough to wrap; drifting to the edge (say, toward the taskbar) does not trigger"},
+      "default": false
+    },
+    {
+      "key": "impactSpeedPps",
+      "type": "number",
+      "title": {"zh": "撞击速度门槛（像素/秒）", "en": "Impact speed gate (px/s)"},
+      "hint": {"zh": "500–20000，默认 2000；按 100ms 窗口内垂直于边缘的速度判定，沿边缘平行滑动不算", "en": "500–20000, default 2000; judged by the speed perpendicular to the edge over a 100 ms window — sliding along the edge does not count"},
+      "default": 2000
     }
   ]
 }

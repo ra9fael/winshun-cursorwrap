@@ -9,6 +9,16 @@ single source of truth; release tags are `v<version>`.
 
 ## [Unreleased]
 
+### Added
+
+- 撞击模式（`impactGate` / `impactSpeedPps`）：开启后光标必须以足够速度撞到边缘才
+  回绕，防止慢慢挪到边缘（比如去点任务栏）时误触发。速度按 100ms 窗口内垂直于
+  边缘的位移计算（500–20000 px/s，默认 2000）；沿边缘平行滑动不算；测不出速度
+  （时间戳缺失/倒退、程序化瞬移）判负不回绕。真机验证：快推 ≈5300px/s 回绕、
+  慢漂 ≈800px/s 与单次瞬移不回绕。
+- 工程修复：`WrapEngine` 现在内部带互斥锁（此前被协议线程与钩子线程无锁共享）；
+  钩子回调改用 `QueryPerformanceCounter` 时间戳（撞击模式测速用）。
+
 ## [0.1.0] - 2026-11-10
 
 ### Added

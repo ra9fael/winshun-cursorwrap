@@ -152,6 +152,8 @@ def default_settings(**overrides) -> dict:
         "edgeThresholdPx": 1,
         "wrapGuardPx": 50,
         "adjacencyTolerancePx": 50,
+        "impactGate": False,
+        "impactSpeedPps": 2000,
     }
     s.update(overrides)
     return s
@@ -259,6 +261,22 @@ def run(exe: Path) -> int:
         drv.settings_changed(default_settings(wrapMode="vertical", edgeThresholdPx=999))
         q4 = drv.query("")
         check(len(items_of(q4)) == 1, "status still answers after a bad setting value")
+
+        print("settingsChanged: impact gate on shows in diagnostics")
+        drv.settings_changed(default_settings(impactGate=True, impactSpeedPps=3000))
+        resp = drv.action("copyDiagnostics", row)
+        effects = (resp.get("result") or {}).get("effects") or []
+        copies = [e.get("text", "") for e in effects if e.get("type") == "copy"]
+        check(bool(copies) and "impact gate: on" in copies[0],
+              "diagnostics reports the impact gate state", str(copies)[:200])
+        check(bool(copies) and "impact speed: 3000 px/s" in copies[0],
+              "diagnostics reports the impact speed", str(copies)[:200])
+        drv.settings_changed(default_settings(impactGate=False, impactSpeedPps=99999))
+        resp = drv.action("copyDiagnostics", row)
+        effects = (resp.get("result") or {}).get("effects") or []
+        copies = [e.get("text", "") for e in effects if e.get("type") == "copy"]
+        check(bool(copies) and "impact gate: off" in copies[0],
+              "the gate can be turned off again", str(copies)[:200])
 
         print("cancel tolerance")
         drv.cancel(12345)  # a queryId that was never issued must be harmless

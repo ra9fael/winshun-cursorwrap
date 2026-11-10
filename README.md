@@ -35,6 +35,8 @@ corner）解决，都得额外记一个操作。本插件用的是「把光标�
 | `edgeThresholdPx` | 1 | 1–20，离外边多近算到达 |
 | `wrapGuardPx` | 50 | 10–200，回绕落点周围的防震荡半径 |
 | `adjacencyTolerancePx` | 50 | 10–200，两条边差多少像素内算相邻（内边） |
+| `impactGate` | false | 撞击模式：光标必须以足够速度撞到边缘才回绕；慢慢挪到边缘不触发 |
+| `impactSpeedPps` | 2000 | 500–20000，撞击速度门槛（px/s，垂直于边缘、100ms 窗口） |
 
 非法值一律回落到默认，不会报错。
 
@@ -101,7 +103,7 @@ C++ 运行时，目标机器不需要 MinGW。MSVC 构建用静态运行库（`/
 ## 测试
 
 ```powershell
-ctest --test-dir build --output-on-failure       # L1：43 用例 + 7 布局 fixture
+ctest --test-dir build --output-on-failure       # L1：54 用例 + 7 布局 fixture
 python tests/protocol_roundtrip.py               # L3：32 项协议往返检查
 python tests/live_wrap_probe.py                  # L4 单屏：真实 SetCursorPos 手势
 python tests/validate.py                         # L0：清单/双语文档/打包静态校验

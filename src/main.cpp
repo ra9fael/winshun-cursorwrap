@@ -98,6 +98,8 @@ cw::RawSettings rawFromJson(const Json& s)
     numberField("edgeThresholdPx", raw.edgeThresholdPx, raw.hasEdgeThreshold);
     numberField("wrapGuardPx", raw.wrapGuardPx, raw.hasWrapGuard);
     numberField("adjacencyTolerancePx", raw.adjacencyTolerancePx, raw.hasAdjacency);
+    boolField("impactGate", raw.impactGate, raw.hasImpactGate);
+    numberField("impactSpeedPps", raw.impactSpeedPps, raw.hasImpactSpeed);
     return raw;
 }
 
@@ -155,7 +157,7 @@ protected:
         log(hookOk && m_watcherOk ? "info" : "warn",
             std::string("cursorwrap: hook ") + (hookOk ? "installed" : "FAILED")
                 + ", watcher " + (m_watcherOk ? "started" : "FAILED")
-                + ", " + intText(static_cast<long long>(m_engine->topology().monitorCount()))
+                + ", " + intText(static_cast<long long>(m_engine->monitorCount()))
                 + " monitor(s)");
     }
 
@@ -295,6 +297,9 @@ private:
         text += "edge threshold: " + intText(d.settings.edgeThresholdPx) + " px\n";
         text += "wrap guard: " + intText(d.settings.wrapGuardPx) + " px\n";
         text += "adjacency tolerance: " + intText(d.settings.adjacencyTolerancePx) + " px\n";
+        text += std::string("impact gate: ") + (d.settings.impactGate ? "on" : "off") + "\n";
+        if (d.settings.impactGate)
+            text += "impact speed: " + intText(d.settings.impactSpeedPps) + " px/s\n";
         for (const std::string& gap : d.gaps)
             text += "gap: " + gap + "\n";
         return text;

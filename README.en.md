@@ -40,6 +40,8 @@ Type `cursorwrap` (or `wrap`) with no argument to see the status row:
 | `edgeThresholdPx` | 1 | 1–20, how close to an outer edge counts as on it |
 | `wrapGuardPx` | 50 | 10–200, anti-oscillation radius around the landing point |
 | `adjacencyTolerancePx` | 50 | 10–200, how close two edges must be to count as adjacent (inner) |
+| `impactGate` | false | impact mode: the cursor must hit the edge fast enough to wrap; drifting there does not trigger |
+| `impactSpeedPps` | 2000 | 500–20000, the impact speed gate (px/s, perpendicular to the edge, 100 ms window) |
 
 Invalid values fall back to the defaults; nothing errors out.
 
@@ -115,7 +117,7 @@ MinGW. MSVC builds use the static runtime (`/MT`) and likewise ship no external 
 ## Tests
 
 ```powershell
-ctest --test-dir build --output-on-failure       # L1: 43 cases + 7 layout fixtures
+ctest --test-dir build --output-on-failure       # L1: 54 cases + 7 layout fixtures
 python tests/protocol_roundtrip.py               # L3: 32 protocol round-trip checks
 python tests/live_wrap_probe.py                  # L4 single display: real SetCursorPos gestures
 python tests/validate.py                         # L0: manifest / bilingual docs / packaging checks

@@ -2,13 +2,20 @@
 //
 // Ported from PowerToys CursorWrap CursorWrapCore.{h,cpp} (MIT, Microsoft
 // Corporation). Decides, per mouse-move sample, whether the cursor should
-// wrap and where. No OS headers: pointer position, movement direction,
-// button state and modifier state are all parameters, so the whole decision
-// path unit-tests on any platform.
+// wrap and where. No OS headers: pointer position, timestamp, button state
+// and modifier state are all parameters, so the whole decision path
+// unit-tests on any platform.
+//
+// Thread model: one engine is shared by the protocol thread
+// (setSettings / rebuild / resetState / diagnostics / stats) and the hook
+// thread (onMouseMove). Every public method takes the internal mutex, so
+// the hot path costs one uncontended lock per event and the settings a wrap
+// decision reads are always consistent.
 #pragma once
 
 #include "wrap_topology.h"
 
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -24,6 +31,13 @@ struct Settings {
     int edgeThresholdPx = 1;        // 1..20
     int wrapGuardPx = 50;           // 10..200
     int adjacencyTolerancePx = 50;  // 10..200
+    // Impact gate: wrap only when the pointer reaches the edge fast enough.
+    // The speed is the displacement perpendicular to the edge over a 100 ms
+    // window; per-event acceleration is noise at 1000 Hz report rates, so
+    // the knob is a speed floor (the same conclusion PowerToys Find My Mouse
+    // reached for its shake gate).
+    bool impactGate = false;
+    int impactSpeedPps = 2000;      // 500..20000 px/s
 };
 
 // Parsed-setting values straight from the host JSON, already type-checked.
@@ -37,6 +51,8 @@ struct RawSettings {
     double edgeThresholdPx = 1;
     double wrapGuardPx = 50;
     double adjacencyTolerancePx = 50;
+    bool impactGate = false;
+    double impactSpeedPps = 2000;
     bool hasWrapMode = false;
     bool hasActivation = false;
     bool hasDrag = false;
@@ -44,6 +60,8 @@ struct RawSettings {
     bool hasEdgeThreshold = false;
     bool hasWrapGuard = false;
     bool hasAdjacency = false;
+    bool hasImpactGate = false;
+    bool hasImpactSpeed = false;
 };
 
 // Apply RawSettings onto Settings. Every bad value falls back to the default
@@ -51,17 +69,21 @@ struct RawSettings {
 // file must never break the plugin. Pure; unit-tested.
 void applySettings(const RawSettings& raw, Settings& out, bool merge);
 
-// One mouse-move sample in pointer space.
+// One mouse-move sample in pointer space. tUs is the event timestamp in
+// microseconds (QueryPerformanceCounter at the hook). 0 means unknown: the
+// sample still drives the state machine, but the impact gate cannot measure
+// a speed from it and fails closed (no wrap).
 struct Sample {
     int64_t x = 0;
     int64_t y = 0;
+    long long tUs = 0;
 };
 
 // Statistics for the status row and diagnostics copy.
 struct Stats {
     long long moves = 0;      // all WM_MOUSEMOVE events seen
     long long wraps = 0;      // wraps performed
-    long long suppressed = 0; // recognized-but-skipped (guard, drag, single, activation)
+    long long suppressed = 0; // recognized-but-skipped (guard, drag, single, activation, impact)
     long long rebuilt = 0;    // topology rebuilds
 };
 
@@ -83,11 +105,10 @@ public:
     explicit WrapEngine(Settings settings = {});
 
     void setSettings(const Settings& settings);
-    const Settings& settings() const { return m_settings; }
+    Settings settings() const;
 
     // Rebuild topology from a monitor snapshot (on WM_DISPLAYCHANGE etc).
     void rebuild(const std::vector<MonitorBox>& monitors);
-    const Topology& topology() const { return m_topology; }
 
     // Forget movement history (after enabling/re-enabling or a rebuild).
     void resetState();
@@ -99,18 +120,31 @@ public:
     std::pair<int64_t, int64_t> onMouseMove(const Sample& sample, bool modifierHeld,
                                             bool leftButtonHeld);
 
-    const Stats& stats() const { return m_stats; }
+    Stats stats() const;
     Diagnostics diagnostics(bool hookOk) const;
 
+    // Locked topology sizes (the hook thread may rebuild concurrently).
+    size_t monitorCount() const;
+    size_t outerEdgeCount() const;
+
     static constexpr int64_t kNever = INT64_MIN;
+    // The impact speed is measured over this window of recent samples.
+    static constexpr long long kImpactWindowUs = 100 * 1000; // 100 ms
+    static constexpr size_t kHistoryMax = 32;
 
 private:
     bool withinGuard(int64_t x, int64_t y) const;
     CursorDirection direction(const Sample& s) const;
+    // Signed approach speed toward `edge` over the recent window, px/s;
+    // 0 when it cannot be measured. The mutex is held by the caller.
+    long long approachSpeedPps(EdgeType edge) const;
+    void noteSample(const Sample& sample); // mutex held by the caller
 
+    mutable std::mutex m_mutex;
     Settings m_settings;
     Topology m_topology;
     Stats m_stats;
+    std::vector<Sample> m_history;
     Sample m_previous { kNever, kNever };
     bool m_hasPrevious = false;
     Sample m_lastWrap { kNever, kNever };

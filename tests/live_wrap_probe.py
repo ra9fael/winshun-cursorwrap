@@ -174,47 +174,69 @@ def main() -> int:
             "settings": {"wrapMode": "both", "activationMode": "always",
                          "disableDuringDrag": True, "disableOnSingleMonitor": False,
                          "edgeThresholdPx": 1, "wrapGuardPx": 50,
-                         "adjacencyTolerancePx": 50}}))
+                         "adjacencyTolerancePx": 50,
+                         "impactGate": False, "impactSpeedPps": 2000}}))
         checks.append({"check": "initialize", "ok": "error" not in init})
 
         if not install_observer():
             print("error: could not install the observer hook", file=sys.stderr)
             return 2
 
-        def run_case(name: str, start: tuple[int, int], target: tuple[int, int],
-                     expect_wrap: bool) -> None:
+        def push(settings: dict, name: str, start: tuple[int, int], target: tuple[int, int],
+                 steps: int, step_ms: int, expect_wrap: bool) -> None:
+            drv.notify("settingsChanged", {"settings": settings})
+            time.sleep(0.15)
+            pump(50)
             observed.clear()
             move_to(*start)
-            pump(120)
-            before = cursor_pos()
+            pump(150)
             observed.clear()
-            # A burst of small real moves toward the target edge, like a hand push.
             sx, sy = start
             tx, ty = target
-            steps = 12
             for i in range(1, steps + 1):
                 nx = sx + (tx - sx) * i // steps
                 ny = sy + (ty - sy) * i // steps
                 move_to(nx, ny)
-                pump(15)
-            pump(200)
+                pump(step_ms)
+            pump(250)
             after = cursor_pos()
             wrapped = (after[0] != tx or after[1] != ty)
             checks.append({
                 "check": name, "start": list(start), "target": list(target),
-                "before": list(before), "after": list(after),
-                "expected_wrap": expect_wrap, "wrapped": wrapped,
+                "after": list(after), "expected_wrap": expect_wrap, "wrapped": wrapped,
                 "ok": wrapped == expect_wrap,
                 "observed_moves": len(observed),
                 "injected_seen": sum(1 for o in observed if o["injected"]),
             })
 
-        # 1. Push to the right edge: the plugin should wrap to the left edge.
-        run_case("push-right-edge-wraps-left", (960, mid_y), (right_edge, mid_y), True)
-        # 2. Push to the left edge: wraps back to the right edge.
-        run_case("push-left-edge-wraps-right", (960, mid_y), (left_edge, mid_y), True)
-        # 3. Middle of the screen: no wrap.
-        run_case("middle-no-wrap", (960, mid_y), (960, mid_y), False)
+        base = {"wrapMode": "both", "activationMode": "always", "disableDuringDrag": True,
+                "disableOnSingleMonitor": False, "edgeThresholdPx": 1, "wrapGuardPx": 50,
+                "adjacencyTolerancePx": 50, "impactGate": False, "impactSpeedPps": 2000}
+
+        # --- gate off: the 0.1 behaviour ---
+        push(base, "gate-off-fast-push-wraps", (960, mid_y), (right_edge, mid_y), 12, 15, True)
+
+        # The observer must have seen events; 0 means the probe itself is
+        # broken (the hook is thread-attached to this Python thread and needs
+        # its pump, which push() runs). Bail out rather than report nonsense.
+        if checks[-1]["observed_moves"] == 0:
+            print("error: the observer hook saw no events; probe broken",
+                  file=sys.stderr)
+            uninstall_observer()
+            return 3
+
+        # --- gate on at 3000 px/s ---
+        fast = dict(base, impactGate=True, impactSpeedPps=3000)
+
+        # A fast push: 12 steps over ~180 ms across ~960 px ≈ 5300 px/s. Wraps.
+        push(fast, "impact-fast-push-wraps", (960, mid_y), (right_edge, mid_y), 12, 15, True)
+        # A slow drift: 12 steps over ~1.2 s ≈ 800 px/s. Must NOT wrap.
+        push(fast, "impact-slow-drift-no-wrap", (960, mid_y), (right_edge, mid_y), 12, 100, False)
+        # Left edge, fast: wraps to the right edge.
+        push(fast, "impact-left-fast-wraps", (960, mid_y), (left_edge, mid_y), 12, 15, True)
+        # Untimed teleports (a single big jump) must not wrap: move far away
+        # first, then one jump onto the edge.
+        push(fast, "impact-single-jump-no-wrap", (300, mid_y), (right_edge, mid_y), 1, 200, False)
 
         uninstall_observer()
         drv.notify("shutdown", {})
