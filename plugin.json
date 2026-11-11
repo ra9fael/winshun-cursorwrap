@@ -28,7 +28,7 @@
       "keyword": ["cursorwrap", "wrap", "环绕"],
       "title": {"zh": "光标回绕", "en": "Cursor wrap"},
       "hint": {"zh": "留空看状态；不需要输入文字", "en": "empty shows status; no text needed"},
-      "icon": "glyph:U+E8F0",
+      "icon": "glyph:U+E8DE",
       "actions": [
         {"id": "toggleEnabled", "title": {"zh": "开启 / 关闭回绕", "en": "Toggle wrapping"}, "key": "Enter"},
         {"id": "cycleMode", "title": {"zh": "切换回绕模式", "en": "Cycle wrap mode"}, "key": "Ctrl+Enter"},

@@ -24,13 +24,13 @@
         540
       ],
       "after": [
-        0,
-        540
+        1094,
+        478
       ],
       "expected_wrap": true,
       "wrapped": true,
       "ok": true,
-      "observed_moves": 12,
+      "observed_moves": 65,
       "injected_seen": 0
     },
     {
@@ -44,13 +44,13 @@
         540
       ],
       "after": [
-        0,
-        540
+        1911,
+        550
       ],
       "expected_wrap": true,
       "wrapped": true,
       "ok": true,
-      "observed_moves": 10,
+      "observed_moves": 18,
       "injected_seen": 0
     },
     {
@@ -70,7 +70,7 @@
       "expected_wrap": false,
       "wrapped": false,
       "ok": true,
-      "observed_moves": 12,
+      "observed_moves": 0,
       "injected_seen": 0
     },
     {
@@ -90,7 +90,7 @@
       "expected_wrap": false,
       "wrapped": false,
       "ok": true,
-      "observed_moves": 12,
+      "observed_moves": 0,
       "injected_seen": 0
     },
     {
@@ -104,13 +104,13 @@
         540
       ],
       "after": [
-        1919,
+        0,
         540
       ],
       "expected_wrap": true,
-      "wrapped": true,
-      "ok": true,
-      "observed_moves": 9,
+      "wrapped": false,
+      "ok": false,
+      "observed_moves": 0,
       "injected_seen": 0
     },
     {
@@ -130,7 +130,7 @@
       "expected_wrap": false,
       "wrapped": false,
       "ok": true,
-      "observed_moves": 1,
+      "observed_moves": 0,
       "injected_seen": 0
     },
     {
