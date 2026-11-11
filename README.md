@@ -60,9 +60,28 @@ Enter 就是该行的主操作，不用记组合键：
 | `cursorwrap tol 80` / `容差 80` | 邻接容差（10–200 px） |
 | `cursorwrap reset` / `恢复` | 清掉搜索栏覆盖，宿主设置卡重新生效 |
 | `cursorwrap diag` / `诊断` | 返回诊断行，Enter 复制全文 |
+| `cursorwrap tune` / `调参` | 开/关调参可视化覆盖层（见下） |
 
 改动**立即生效**，并持久化到插件数据目录（`settings.json`，只存与默认不同的键）；
 宿主设置卡对没被覆盖的键仍然权威，状态行会注明「搜索栏覆盖中」。
+
+## 调参可视化
+
+撞击参数不好凭感觉设——`cursorwrap tune` / `调参` 在每块屏的边缘画一层
+**点击穿透的覆盖层**，边甩边看：
+
+- **测速区间带**：每条边一条 `impactBandPx` 宽的半透明带，区间大小一目了然；
+- **速度读数**：光标撞到边缘时边缘中央显示 `测得/门槛`（如 `21/20`，即
+  2100/2000 px/s 的缩写）、`wrap`（通过回绕）或 `edge`（撞击关闭）——
+  你甩得到底多快直接照着读数设 `speed`；
+- **防震圈**：回绕落点画一圈 `wrapGuardPx` 半径的圆，走出圆才能再次触发；
+- **状态色**：绿 = 通过；黄 = 速度不足被拦；白 = 撞击关闭时的到达。
+
+覆盖层不抢焦点、不进 Alt+Tab，颜色跟随宿主主题。再输一次 `tune` 关闭；
+开关不持久化，宿主重启后默认关闭。
+
+**顺带的丝滑度修复**：回绕落点从"对边边缘线"改为**内缩 1px**——落点本身就在
+判定带上会让防震圈被迫吞掉一次触发，内缩后落点干净地落在屏内。
 
 ## 设置
 
@@ -144,7 +163,7 @@ C++ 运行时，目标机器不需要 MinGW。MSVC 构建用静态运行库（`/
 ## 测试
 
 ```powershell
-ctest --test-dir build --output-on-failure       # L1：80 用例 + 7 布局 fixture
+ctest --test-dir build --output-on-failure       # L1：86 用例 + 7 布局 fixture
 python tests/protocol_roundtrip.py               # L3：63 项协议往返检查
 python tests/live_wrap_probe.py                  # L4 单屏：真实 SetCursorPos 手势
 python tests/validate.py                         # L0：清单/双语文档/打包静态校验

@@ -9,7 +9,28 @@ single source of truth; release tags are `v<version>`.
 
 ## [Unreleased]
 
+### Added
+
+- **Tuning overlay** (`cursorwrap tune`, or the "Tuning overlay" row in the
+  settings list): a click-through overlay along every monitor's edges — the
+  measuring band (`impactBandPx` wide), a live speed readout at the edge
+  (`measured/threshold` shorthand, `wrap` or `edge`), a guard circle around the
+  last landing point (`wrapGuardPx` radius) and a state colour (green = wrapped,
+  amber = blocked, white = no gate). Repainted every 30 ms from a verdict
+  snapshot taken by the hook thread (`WrapEngine::lastVerdict()`, new
+  `EdgeVerdict` struct) — the hook's hot path never paints. Colours follow the
+  host theme's `accent`/`text`. The toggle does not persist.
+
 ### Changed
+
+- **The wrap landing is now one pixel inside** the destination edge (`left+1` /
+  `right-2` / `top+1` / `bottom-2`) instead of on its line. A landing inside the
+  detection band made the guard eat an immediate re-trigger; the inset lands
+  cleanly inside the monitor and back-to-back wraps feel smoother.
+- The multi-row settings list gained a "Tuning overlay" toggle row
+  (`cursorwrap.row.tuner`).
+
+### Changed (previous)
 
 - **The search bar now returns a multi-row settings list**: `cursorwrap` with no
   words no longer returns a single status row but an 11-row list — one row per

@@ -15,7 +15,7 @@
 | 打包物含 `plugin.json` / `cursorwrap.exe` / `README.md` / `LICENSE`，无 `build/`、`dist/`、`.git` | §8 | `tools/package.py` + `tools/ci_release.py` |
 | 双语文档锚点互链（`docs/spec*.md`、`docs/tests*.md`、README、CHANGELOG） | — | 通过 |
 
-## L1 — 纯逻辑单测（`cw_tests`，ctest 目标，80 用例 + 7 布局 fixture）
+## L1 — 纯逻辑单测（`cw_tests`，ctest 目标，86 用例 + 7 布局 fixture）
 
 不引 OS 头文件，任何平台可跑。运行：
 
@@ -50,6 +50,7 @@ ctest --test-dir build --output-on-failure
 | 设置类型混淆 | 空字符串枚举被忽略、NaN/±Inf 回默认 | §7 |
 | 撞击模式 | 关闭时行为不变；慢速漂移不回绕；快速撞击回绕；只看垂直分量（沿边滑动不触发）；时间戳缺失/混合/程序化瞬移判负；回绕后历史清零；速度门槛边界值 500/20000 接受、499/20001 回默认 | §7 撞击模式 |
 | 撞击测速区间与去抖 | 远处冲刺后贴边慢行不回绕（区间截断）；远处冲刺后区间内减速也不回绕；贴边 2px 抖动判负（位移下限）；折返后只量最后一段（快回弹判正、慢回判负）；停顿超过窗口重新起算；区间 20px 整位移恰好通过；左右/上下边缘对称；区间边界值 50/500 接受、49/501 回默认 | §7 撞击模式 |
+| 调参判定快照 | 关门槛时 verdict 标 `gateOff`/`wrapped` 且带落点；门槛拦截时带测得速度与门槛值；快速通过时带落点坐标；guard 吸收不产生新 verdict；`resetState` 清空 verdict | §7 调参可视化 |
 | 诊断结构 | 屏数/外边数/钩子标志/缝隙文本 | §3 |
 | 布局 fixture | `tests/layouts/*.json` 六个合成布局逐条断言 | §5 |
 
@@ -163,7 +164,7 @@ python tests/protocol_roundtrip.py
 
 ## 验收标准
 
-- L1 全绿（当前 80 用例 + 7 fixture，含真机采集的 `live-single.json`）
+- L1 全绿（当前 86 用例 + 7 fixture，含真机采集的 `live-single.json`）
 - L3 全通过（当前 32/32）
 - L0 静态校验通过
 - L4 单屏部分已实测通过；**多屏部分全部勾选后**才可宣布 v0.1.0 多屏可发布，

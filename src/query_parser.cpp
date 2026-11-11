@@ -51,6 +51,8 @@ const Token kTokens[] = {
     { "容差", CommandKind::MenuTolerance, 0 },
     { "diag", CommandKind::CopyDiagnostics, 0 },
     { "诊断", CommandKind::CopyDiagnostics, 0 },
+    { "tune", CommandKind::ToggleTuner, 0 },
+    { "调参", CommandKind::ToggleTuner, 0 },
     { "reset", CommandKind::ResetToDefaults, 0 },
     { "恢复默认", CommandKind::ResetToDefaults, 0 },
     { "恢复", CommandKind::ResetToDefaults, 0 },

@@ -336,9 +336,10 @@ std::pair<int64_t, int64_t> Topology::wrapDestination(int index, int64_t x, int6
         return {x, y};
     }
     if (horizontal(edge))
-        return {opposite.edge.position,
+        return {opposite.edge.position + (edge == EdgeType::Left ? -1 : 1),
                 opposite.projection ? opposite.projectedCoordinate : y};
-    return {opposite.projection ? opposite.projectedCoordinate : x, opposite.edge.position};
+    return {opposite.projection ? opposite.projectedCoordinate : x,
+            opposite.edge.position + (edge == EdgeType::Top ? -1 : 1)};
 }
 
 std::vector<Topology::Gap> Topology::detectGaps(int64_t gapThreshold) const

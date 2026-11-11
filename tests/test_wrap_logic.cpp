@@ -91,7 +91,7 @@ CW_TEST(guard_cleared_far_away)
     CW_CHECK_EQ(e.stats().wraps, 1);
     e.onMouseMove({ 960, 540 }, false, false); // far from the wrap point
     const auto [wx, wy] = e.onMouseMove({ 1919, 540 }, false, false);
-    CW_CHECK_EQ(wx, 0);
+    CW_CHECK_EQ(wx, 1);
     CW_CHECK_EQ(e.stats().wraps, 2);
 }
 
@@ -129,7 +129,7 @@ CW_TEST(engine_direction_feeds_edge_priority)
     // Top edge of monitor 1 is outer and wraps to the outer Bottom edge with
     // the largest position (1079).
     CW_CHECK_EQ(x, 3839);
-    CW_CHECK_EQ(y, 1079);
+    CW_CHECK_EQ(y, 1078);
 }
 
 CW_TEST(diagnostics_counts_and_gaps)

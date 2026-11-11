@@ -51,6 +51,7 @@ ctest --test-dir build --output-on-failure
 | Settings type confusion | empty-string enums ignored; NaN/±Inf fall back | §7 |
 | Impact mode | gate off behaves as before; a slow drift does not wrap; a fast hit wraps; only the perpendicular axis counts (sliding along the edge never triggers); missing/mixed timestamps and programmatic teleports fail closed; history clears after a wrap; the speed boundary values 500/20000 are accepted, 499/20001 fall back | §7 impact mode |
 | Impact band and de-jitter | a distant sprint then a slow crawl does not wrap (band cut); a distant sprint with braking inside the band does not wrap; edge jitter over 2 px fails (minimal travel); after a reversal only the last stroke counts (fast return wraps, slow return fails); a pause over the window restarts the stroke; exactly 20 px of travel passes; left/right/top/bottom edge symmetry; band boundary values 50/500 are accepted, 49/501 fall back | §7 impact mode |
+| Tuning verdict snapshot | with the gate off the verdict flags `gateOff`/`wrapped` and carries the landing; a gate block carries the measured speed and threshold; a fast hit carries the landing coordinates; a guard absorption produces no new verdict; `resetState` clears the verdict | §7 tuning overlay |
 | Diagnostics shape | display count, outer-edge count, hook flag, gap text | §3 |
 | Layout fixtures | `tests/layouts/*.json` — six synthetic layouts asserted case by case | §5 |
 
@@ -169,7 +170,7 @@ Evidence: `tests/layouts/live-wrap-evidence.json`, `tests/layouts/live-single.js
 
 ## Acceptance criteria
 
-- L1 green (currently 80 cases + 7 fixtures, including the captured
+- L1 green (currently 86 cases + 7 fixtures, including the captured
   `live-single.json`)
 - L3 fully passing (currently 63/63)
 - L0 static validation passing

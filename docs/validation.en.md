@@ -29,7 +29,7 @@ New repository `ra9fael.cursorwrap`, v0.1.0:
 | `src/monitor_watcher.{h,cpp}` | message-only window, 500 ms debounced topology rebuild |
 | `src/main.cpp` | derives `winshun::Plugin`; the `cursorwrap` keyword plus three actions |
 | `plugin.json` | resident / eager / `ui` permission / 7 settings |
-| `tests/` | 80 unit cases, 7 layout fixtures (6 synthetic + 1 captured), 63-check protocol round trip, L0 static validation |
+| `tests/` | 86 unit cases, 7 layout fixtures (6 synthetic + 1 captured), 63-check protocol round trip, L0 static validation |
 | `docs/` | bilingual spec and test plan, including the not-tested list |
 
 ## Measured
@@ -56,7 +56,7 @@ $ .\build\cw_tests.exe .\tests\layouts
 all tests passed (0 failures)
 ```
 
-All 80 cases are green, covering single display, two side by side, two stacked,
+All 86 cases are green, covering single display, two side by side, two stacked,
 L-shape with three displays, non-overlap projection, three in a row, mixed DPI,
 negative coordinates, extreme coordinates, zero-area displays, adjacency tolerance,
 gap diagnostics, all three modes, all three activation modes, drag suppression,

@@ -66,11 +66,36 @@ row is one choice, and Enter applies it):
 | `cursorwrap tol 80` | the adjacency tolerance (10–200 px) |
 | `cursorwrap reset` | clear the search-bar overrides; the host card applies again |
 | `cursorwrap diag` | a diagnostics row; Enter copies the full text |
+| `cursorwrap tune` | toggle the tuning overlay |
 
 Changes **apply immediately** and persist in the plugin's data directory
 (`settings.json`, only keys that differ from the defaults); the host's settings card
 stays authoritative for keys not overridden, and the status row says when overrides
 are active.
+
+## Tuning overlay
+
+Impact parameters are hard to set by feel — `cursorwrap tune` draws a
+**click-through overlay** along every monitor's edges so you can watch while you
+push:
+
+- **Measuring band**: a translucent `impactBandPx`-wide strip along each edge —
+  the band's size at a glance;
+- **Speed readout**: on arrival, the edge centre shows `measured/threshold`
+  (e.g. `21/20` for 2100/2000 px/s), `wrap` (passed) or `edge` (gate off) —
+  set `speed` straight from what your flicks actually measure;
+- **Guard circle**: a circle of `wrapGuardPx` radius around the last landing
+  point — leave the circle before another wrap can fire;
+- **State colour**: green = wrapped; amber = gate blocked; white = arrival with
+  the gate off.
+
+The overlay never takes focus and has no Alt+Tab entry; colours follow the host
+theme. Run `tune` again to turn it off; the toggle does not persist across
+restarts.
+
+**A smoothness fix that came with this**: the wrap landing moved from "on the
+destination edge line" to **one pixel inside** — a landing inside the detection
+band made the guard eat an immediate re-trigger.
 
 ## Settings
 
@@ -161,7 +186,7 @@ MinGW. MSVC builds use the static runtime (`/MT`) and likewise ship no external 
 ## Tests
 
 ```powershell
-ctest --test-dir build --output-on-failure       # L1: 80 cases + 7 layout fixtures
+ctest --test-dir build --output-on-failure       # L1: 86 cases + 7 layout fixtures
 python tests/protocol_roundtrip.py               # L3: 63 protocol round-trip checks
 python tests/live_wrap_probe.py                  # L4 single display: real SetCursorPos gestures
 python tests/validate.py                         # L0: manifest / bilingual docs / packaging checks

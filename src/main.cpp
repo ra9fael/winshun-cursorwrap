@@ -17,6 +17,7 @@
 
 #include "monitor_watcher.h"
 #include "mouse_hook.h"
+#include "overlay.h"
 #include "query_parser.h"
 #include "settings_store.h"
 #include "wrap_logic.h"
@@ -203,8 +204,12 @@ protected:
                 m_engine->rebuild(enumerateMonitors());
                 if (m_hook)
                     m_hook->updateSettings(m_engine->settings());
+                // The overlay windows must follow the new layout.
+                if (m_tunerOn)
+                    m_overlay.start(m_engine->monitorsSnapshot());
             }
         });
+        m_overlay.setEngine(m_engine.get());
 
         log(hookOk && m_watcherOk ? "info" : "warn",
             std::string("cursorwrap: hook ") + (hookOk ? "installed" : "FAILED")
@@ -227,6 +232,15 @@ protected:
             // returns a diagnostics row: its copy field carries the text,
             // and Enter on it runs the plugin's copyDiag action.
             return { diagnosticsRow() };
+        case cw::CommandKind::ToggleTuner: {
+            // Toggle the overlay and refresh the list (the row shows on/off).
+            m_tunerOn = !m_tunerOn;
+            if (m_tunerOn && m_engine)
+                m_overlay.start(m_engine->monitorsSnapshot());
+            else
+                m_overlay.stop();
+            return settingsList();
+        }
         case cw::CommandKind::MenuImpact:
             return impactMenu();
         case cw::CommandKind::MenuSpeed:
@@ -342,6 +356,17 @@ protected:
                 }
             }
         }
+        if (a.action == "toggleTuner") {
+            m_tunerOn = !m_tunerOn;
+            if (m_tunerOn && m_engine)
+                m_overlay.start(m_engine->monitorsSnapshot());
+            else
+                m_overlay.stop();
+            const bool chinese = winshun::Plugin::chinese();
+            return listEffects(effect::notify(
+                m_tunerOn ? (chinese ? "调参可视化已开启：甩到边缘看速度读数" : "Tuning overlay on: push to an edge and watch the readout")
+                          : (chinese ? "调参可视化已关闭" : "Tuning overlay off")));
+        }
         if (a.action == "copyDiagnostics") {
             return { effect::copy(diagnosticsText()), effect::keep(),
                      effect::notify(chinese ? "诊断已复制" : "Diagnostics copied") };
@@ -373,6 +398,7 @@ protected:
 
     void shuttingDown() override
     {
+        m_overlay.stop();
         if (m_hook) {
             m_hook->stop();
             m_hook.reset();
@@ -382,6 +408,37 @@ protected:
             m_watcher.reset();
         }
         m_engine.reset();
+    }
+
+    void appearanceChanged() override
+    {
+        // The overlay paints in the host's accent/text colours.
+        const Json look = appearance()["nativeLook"];
+        if (!look.isObject())
+            return;
+        auto parseARGB = [&look](const char* key, COLORREF fallback) -> COLORREF {
+            const Json v = look[key];
+            if (!v.isString())
+                return fallback;
+            const std::string s = v.toString();
+            if (s.size() != 9 || s[0] != '#')
+                return fallback;
+            const auto hex = [&s](size_t i) -> int {
+                const char c = s[i];
+                if (c >= '0' && c <= '9') return c - '0';
+                if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+                if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+                return 0;
+            };
+            // #AARRGGBB: skip alpha, take RRGGBB.
+            return RGB(hex(3) * 16 + hex(4), hex(5) * 16 + hex(6), hex(7) * 16 + hex(8));
+        };
+        cw::Overlay::Colors colors;
+        colors.accent = parseARGB("accent", colors.accent);
+        colors.text = parseARGB("text", colors.text);
+        colors.background = parseARGB("background", colors.background);
+        colors.dark = theme() == "dark";
+        m_overlay.setColors(colors);
     }
 
 private:
@@ -704,6 +761,14 @@ private:
                                 chinese ? "Enter 选择容差" : "Enter to pick one",
                                 "cursorwrap tol "));
 
+        Item tuner("cursorwrap.row.tuner",
+                   std::string(chinese ? "调参可视化：" : "Tuning overlay: ")
+                       + (m_tunerOn ? (chinese ? "开" : "on") : (chinese ? "关" : "off")),
+                   chinese ? "Enter 切换 · 贴边显示测速区间/速度/防震圈"
+                           : "Enter to toggle · shows the band/speed/guard on the edges");
+        tuner.withActions({ {"toggleTuner", chinese ? "切换" : "Toggle", "Enter"} });
+        rows.push_back(std::move(tuner));
+
         rows.push_back(diagnosticsRow());
 
         Item reset("cursorwrap.row.reset",
@@ -877,6 +942,8 @@ private:
     std::unique_ptr<cw::WrapEngine> m_engine;
     std::unique_ptr<cw::MouseHook> m_hook;
     std::unique_ptr<cw::MonitorWatcher> m_watcher;
+    cw::Overlay m_overlay; // the tuning overlay (off until the user turns it on)
+    bool m_tunerOn = false;
     bool m_hookOk = false;
     bool m_watcherOk = false;
     bool m_hookEnabled = true;

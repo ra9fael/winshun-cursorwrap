@@ -91,6 +91,22 @@ struct Stats {
     long long rebuilt = 0;    // topology rebuilds
 };
 
+// One edge-arrival verdict, for the tuning overlay and diagnostics: what the
+// gate measured the last time the pointer reached an outer edge.
+struct EdgeVerdict {
+    long long tUs = 0;         // when the verdict was made (0 = none yet)
+    int monitorIndex = -1;
+    EdgeType edge = EdgeType::Left;
+    int64_t edgeCoord = 0;     // the edge line's coordinate (x for Left/Right)
+    long long measuredPps = 0; // the approach speed the gate measured
+    long long thresholdPps = 0; // the configured gate (0 = gate off)
+    bool wrapped = false;      // the move wrapped
+    bool gateOff = false;      // impact gate disabled: arrival wraps outright
+    bool guardBlocked = false; // suppressed by the anti-oscillation guard
+    int64_t destX = 0;         // the wrap destination (valid when wrapped)
+    int64_t destY = 0;
+};
+
 // Diagnostic snapshot for the Shift+Enter copy row.
 struct Diagnostics {
     bool enabled = true;
@@ -127,6 +143,13 @@ public:
     Stats stats() const;
     Diagnostics diagnostics(bool hookOk) const;
 
+    // The most recent edge-arrival verdict (for the tuning overlay). Never
+    // blocks: a small struct copied under the engine mutex.
+    EdgeVerdict lastVerdict() const;
+
+    // A copy of the current monitor boxes (the overlay windows cover them).
+    std::vector<MonitorBox> monitorsSnapshot() const;
+
     // Locked topology sizes (the hook thread may rebuild concurrently).
     size_t monitorCount() const;
     size_t outerEdgeCount() const;
@@ -160,6 +183,7 @@ private:
     bool m_hasPrevious = false;
     Sample m_lastWrap { kNever, kNever };
     bool m_hasLastWrap = false;
+    EdgeVerdict m_verdict; // the latest edge arrival, for the overlay
 };
 
 } // namespace cw

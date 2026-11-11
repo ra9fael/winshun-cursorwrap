@@ -29,6 +29,7 @@ add_executable(WinShunCursorWrap WIN32
     src/settings_store.cpp
     src/mouse_hook.cpp
     src/monitor_watcher.cpp
+    src/overlay.cpp
     cursorwrap.rc
 )
 if(MSVC)
@@ -57,6 +58,7 @@ add_executable(cw_tests
     tests/test_wrap_logic.cpp
     tests/test_edge_cases.cpp
     tests/test_impact_gate.cpp
+    tests/test_tuner.cpp
     tests/test_query_parser.cpp
     tests/test_settings_store.cpp
     src/wrap_topology.cpp

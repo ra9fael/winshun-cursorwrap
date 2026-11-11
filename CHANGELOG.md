@@ -9,7 +9,23 @@ single source of truth; release tags are `v<version>`.
 
 ## [Unreleased]
 
+### Added
+
+- **调参可视化**（`cursorwrap tune` / `调参`，或设置列表里的"调参可视化"行）：在
+  每块屏的边缘画一层点击穿透的覆盖层——测速区间带（`impactBandPx` 宽）、边缘中央
+  的实时速度读数（`测得/门槛` 缩写、`wrap` 或 `edge`）、最近回绕落点的防震圈
+  （`wrapGuardPx` 半径）、状态色（绿=通过/黄=被拦/白=无门槛）。30ms 重绘，从钩子
+  线程的判定快照读取（`WrapEngine::lastVerdict()`，新增 `EdgeVerdict` 结构），
+  钩子热路径不画图；颜色跟随宿主主题 `accent`/`text`。开关不持久化。
+
 ### Changed
+
+- **回绕落点内缩 1px**：从"对边边缘线"改为屏内 1px（`left+1` / `right-2` /
+  `top+1` / `bottom-2`）。落点本身在判定带上会让防震圈被迫吞掉一次触发；
+  内缩后落点干净地落在屏内，连穿更顺。
+- 搜索栏多行设置列表新增"调参可视化"开关行（`cursorwrap.row.tuner`）。
+
+### Changed (previous)
 
 - **搜索栏改成多行设置列表**：`cursorwrap` 留空不再只返回一行状态，而是返回
   11 行设置列表——每行一个设置项，Enter 就是该行的主操作（开关 / 循环 / 下钻 /

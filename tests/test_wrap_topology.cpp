@@ -53,14 +53,14 @@ CW_TEST(topology_single_monitor_wraps_within_itself)
     // The destination is the opposite edge's position (right-1 / bottom-1);
     // the 50px guard in WrapEngine is what stops the bounce-back.
     const auto [x, y] = t.wrapDestination(0, 0, 540, EdgeType::Left, WrapMode::Both);
-    CW_CHECK_EQ(x, 1919);
+    CW_CHECK_EQ(x, 1918);
     CW_CHECK_EQ(y, 540);
     const auto [x2, y2] = t.wrapDestination(0, 1919, 540, EdgeType::Right, WrapMode::Both);
-    CW_CHECK_EQ(x2, 0);
+    CW_CHECK_EQ(x2, 1);
     const auto [x3, y3] = t.wrapDestination(0, 960, 0, EdgeType::Top, WrapMode::Both);
-    CW_CHECK_EQ(y3, 1079);
+    CW_CHECK_EQ(y3, 1078);
     const auto [x4, y4] = t.wrapDestination(0, 960, 1079, EdgeType::Bottom, WrapMode::Both);
-    CW_CHECK_EQ(y4, 0);
+    CW_CHECK_EQ(y4, 1);
 }
 
 // -------------------------------------------------- grid scenarios (PowerToys)
@@ -78,12 +78,12 @@ CW_TEST(grid_dual_horizontal)
     // Monitor 1's right edge is outer; the wrap target is the outer Left
     // edge with the smallest position — monitor 0's left edge (pos 0).
     const auto [x, y] = t.wrapDestination(1, 1919, 540, EdgeType::Right, WrapMode::Both);
-    CW_CHECK_EQ(x, 0);
+    CW_CHECK_EQ(x, 1);
     CW_CHECK_EQ(y, 540);
     // Monitor 0's left edge wraps to the outer Right edge with the largest
     // position — monitor 1's right edge (pos 3839).
     const auto [x2, y2] = t.wrapDestination(0, 0, 540, EdgeType::Left, WrapMode::Both);
-    CW_CHECK_EQ(x2, 3839);
+    CW_CHECK_EQ(x2, 3838);
     // A's left edge is outer; B's right edge is outer.
     CW_CHECK(t.onOuterEdge(1, 3839, 540, edge, WrapMode::Both, &right));
     CW_CHECK(edge == EdgeType::Right);
@@ -104,11 +104,11 @@ CW_TEST(grid_dual_vertical)
     // Top monitor's top edge wraps to the outer Bottom edge with the largest
     // position — the bottom monitor's bottom edge (pos 2159).
     const auto [x, y] = t.wrapDestination(0, 960, 0, EdgeType::Top, WrapMode::Both);
-    CW_CHECK_EQ(y, 2159);
+    CW_CHECK_EQ(y, 2158);
     // Bottom monitor's bottom edge wraps to the outer Top edge with the
     // smallest position — the top monitor's top edge (pos 0).
     const auto [x2, y2] = t.wrapDestination(1, 960, 2159, EdgeType::Bottom, WrapMode::Both);
-    CW_CHECK_EQ(y2, 0);
+    CW_CHECK_EQ(y2, 1);
 }
 
 CW_TEST(grid_triple_l_shape)
@@ -129,7 +129,7 @@ CW_TEST(grid_triple_l_shape)
     // Right-bottom's top edge is outer (nothing above it); the wrap target
     // is the outer Bottom edge with the largest position (2559).
     const auto [x, y] = t.wrapDestination(1, 2000, 0, EdgeType::Top, WrapMode::Both);
-    CW_CHECK_EQ(y, 2559);
+    CW_CHECK_EQ(y, 2558);
     CW_CHECK_EQ(x, 2000);
 }
 
@@ -142,11 +142,11 @@ CW_TEST(grid_non_overlapping_vertical_projection)
     t.initialize({ box(0, 0, 1920, 1080, true), box(960, 1080, 2880, 2160) });
     const auto [x1, y1] = t.wrapDestination(1, 2000, 2159, EdgeType::Bottom, WrapMode::Both);
     CW_CHECK_EQ(x1, 1919); // clamped into the top edge's span [0..1920)
-    CW_CHECK_EQ(y1, 0);    // the top edge's position
+    CW_CHECK_EQ(y1, 1);    // the top edge's position
     // Inside the overlap: x preserved.
     const auto [x2, y2] = t.wrapDestination(1, 1500, 2159, EdgeType::Bottom, WrapMode::Both);
     CW_CHECK_EQ(x2, 1500);
-    CW_CHECK_EQ(y2, 0);
+    CW_CHECK_EQ(y2, 1);
     // Touching edges between the two displays are inner.
     EdgeType edge;
     CursorDirection down { 0, 5 };
@@ -252,7 +252,7 @@ CW_TEST(topology_dpi_mixed_layout)
     // Right monitor's right edge is outer; the wrap target is the outer Left
     // edge with the smallest position — the primary's left edge (pos 0).
     const auto [x, y] = t.wrapDestination(1, 4479, 700, EdgeType::Right, WrapMode::Both);
-    CW_CHECK_EQ(x, 0);
+    CW_CHECK_EQ(x, 1);
 }
 
 // ---------------------------------------------------- engine state machine
@@ -264,7 +264,7 @@ CW_TEST(engine_wraps_and_records_guard)
     // Move to the right edge with the guard inactive: wrap to the opposite
     // (left) edge position.
     const auto [wx, wy] = e.onMouseMove({ 1919, 540 }, false, false);
-    CW_CHECK_EQ(wx, 0);
+    CW_CHECK_EQ(wx, 1);
     CW_CHECK_EQ(wy, 540);
     CW_CHECK_EQ(e.stats().wraps, 1);
     // Within the 50px guard: no second wrap even though this is an edge.
@@ -274,7 +274,7 @@ CW_TEST(engine_wraps_and_records_guard)
     // Leaving the guard clears it; a wrap can happen again.
     e.onMouseMove({ 300, 540 }, false, false);
     const auto [wx2, wy2] = e.onMouseMove({ 1919, 540 }, false, false);
-    CW_CHECK_EQ(wx2, 0);
+    CW_CHECK_EQ(wx2, 1);
     CW_CHECK_EQ(e.stats().wraps, 2);
 }
 
@@ -298,7 +298,7 @@ CW_TEST(engine_drag_suppression)
     CW_CHECK_EQ(e.stats().wraps, 0);
     // Button released: wrap happens (to the left edge, x = 0).
     const auto [x2, y2] = e.onMouseMove({ 1919, 540 }, false, false);
-    CW_CHECK_EQ(x2, 0);
+    CW_CHECK_EQ(x2, 1);
 }
 
 CW_TEST(engine_activation_gate)
@@ -310,7 +310,7 @@ CW_TEST(engine_activation_gate)
     const auto [x, y] = e.onMouseMove({ 1919, 540 }, false, false);
     CW_CHECK_EQ(x, 1919); // Ctrl not held: no wrap
     const auto [x2, y2] = e.onMouseMove({ 1919, 540 }, true, false);
-    CW_CHECK_EQ(x2, 0);   // Ctrl held: wrap to the opposite edge
+    CW_CHECK_EQ(x2, 1);   // Ctrl held: wrap to the opposite edge
 }
 
 CW_TEST(engine_mode_vertical_only)
@@ -322,7 +322,7 @@ CW_TEST(engine_mode_vertical_only)
     const auto [x, y] = e.onMouseMove({ 1919, 540 }, false, false);
     CW_CHECK_EQ(x, 1919); // horizontal edge ignored
     const auto [x2, y2] = e.onMouseMove({ 960, 1079 }, false, false);
-    CW_CHECK_EQ(y2, 0);   // bottom edge wraps to the top edge position
+    CW_CHECK_EQ(y2, 1);   // bottom edge wraps to the top edge position
 }
 
 CW_TEST(engine_settings_roundtrip_and_clamps)

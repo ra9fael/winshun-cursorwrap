@@ -65,6 +65,7 @@ choice, and Enter applies it:
 | `guard` | back · 10/30/50/80/120/200 px |
 | `edge` | back · 1/2/5/10/20 px |
 | `tol` | back · 10/30/50/80/120/200 px |
+| `tune` | toggle the tuning overlay (see "Tuning overlay" below) |
 
 ### With a number: set directly (skip the submenu)
 
@@ -83,6 +84,7 @@ the new value marked "current":
 | `tol 80` | the adjacency tolerance (10–200) |
 | `reset` | clear the search-bar overrides; the host card applies again |
 | `diag` | a diagnostics row; Enter copies the full text |
+| `tune` | toggle the tuning overlay |
 | anything else | a `valid:false` hint row listing the words |
 
 **Persistence and precedence**: the host has no plugin→host settings channel (the
@@ -149,6 +151,28 @@ and tests are reproducible.
 | `impactGate` | bool | false | impact mode: the cursor must hit the edge fast enough to wrap |
 | `impactSpeedPps` | number | 2000 | 500–20000, the impact speed gate (px/s) |
 | `impactBandPx` | number | 150 | 50–500, the impact measuring band (how close to the edge counts as approach) |
+
+The wrap **landing is one pixel inside** the destination edge (`left+1` /
+`right-2` / `top+1` / `bottom-2`), not on its line — a landing inside the
+detection band would make the guard eat an immediate re-trigger.
+
+### Tuning overlay
+
+Search-bar `tune` (or the "Tuning overlay" row in the settings list, Enter to
+toggle) draws one overlay per monitor along the edges, so the user can pick
+parameters by watching the real edge:
+
+| Visualization | What is drawn |
+|---|---|
+| Measuring band | a translucent `impactBandPx`-wide strip along every edge (gate on) |
+| Speed readout | at the edge, `measured/threshold` (pps/100 shorthand), `wrap` (passed) or `edge` (gate off) |
+| Guard circle | a circle of `wrapGuardPx` radius around the last wrap's landing point |
+| State colour | green = wrapped; amber = gate blocked; white = arrival with the gate off |
+
+The overlay is a layered window (click-through, never activates, no Alt+Tab
+entry) repainted every 30 ms from a verdict snapshot taken by the hook thread
+(the hook's hot path never paints). Colours follow the host theme's `accent` /
+`text`. The toggle is not persisted: the overlay starts off after a restart.
 
 Invalid values (wrong type, out of range, NaN/Inf) fall back to the manifest
 default. A bad settings file must never error out or produce out-of-range
@@ -252,7 +276,7 @@ names or user text).
 
 ### Measured
 
-- Unit tests `cw_tests`: 80 cases plus 7 layout fixture files, all green
+- Unit tests `cw_tests`: 86 cases plus 7 layout fixture files, all green
   (`ctest` 1/1 passed).
 - Protocol round trip `tests/protocol_roundtrip.py`: 63 checks passed
   (initialize → query → action ×4 → settingsChanged ×2 → cancel → shutdown), exit

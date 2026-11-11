@@ -53,6 +53,7 @@ void WrapEngine::resetState()
     m_hasLastWrap = false;
     m_previous = { kNever, kNever };
     m_lastWrap = { kNever, kNever };
+    m_verdict = {};
 }
 
 CursorDirection WrapEngine::direction(const Sample& s) const
@@ -162,8 +163,10 @@ std::pair<int64_t, int64_t> WrapEngine::onMouseMove(const Sample& sample, bool m
         return skip();
     if (m_settings.activation != ActivationMode::Always && !modifierHeld)
         return skip();
-    if (withinGuard(sample.x, sample.y))
+    if (withinGuard(sample.x, sample.y)) {
+        m_verdict.guardBlocked = true;
         return skip();
+    }
     if (m_hasLastWrap && !withinGuard(sample.x, sample.y))
         m_hasLastWrap = false;
 
@@ -191,12 +194,37 @@ std::pair<int64_t, int64_t> WrapEngine::onMouseMove(const Sample& sample, bool m
             ? (edge == EdgeType::Left ? box.left : box.top)
             : (edge == EdgeType::Right ? box.right - 1 : box.bottom - 1);
         const long long pps = approachSpeedPps(edge, edgeCoord);
+        m_verdict.tUs = sample.tUs;
+        m_verdict.monitorIndex = index;
+        m_verdict.edge = edge;
+        m_verdict.edgeCoord = edgeCoord;
+        m_verdict.measuredPps = pps;
+        m_verdict.thresholdPps = m_settings.impactSpeedPps;
+        m_verdict.gateOff = false;
+        m_verdict.wrapped = false;
+        m_verdict.guardBlocked = false;
         if (pps < m_settings.impactSpeedPps)
             return skip();
+        m_verdict.wrapped = true;
+    } else {
+        m_verdict.tUs = sample.tUs;
+        m_verdict.monitorIndex = index;
+        m_verdict.edge = edge;
+        const MonitorBox box = m_topology.monitors()[static_cast<size_t>(index)];
+        m_verdict.edgeCoord = (edge == EdgeType::Left) ? box.left
+            : (edge == EdgeType::Right) ? box.right - 1
+            : (edge == EdgeType::Top) ? box.top : box.bottom - 1;
+        m_verdict.measuredPps = 0;
+        m_verdict.thresholdPps = 0;
+        m_verdict.gateOff = true;
+        m_verdict.wrapped = true;
+        m_verdict.guardBlocked = false;
     }
 
     const auto [nx, ny] = m_topology.wrapDestination(index, sample.x, sample.y, edge,
                                                      m_settings.wrapMode);
+    m_verdict.destX = nx;
+    m_verdict.destY = ny;
     m_previous = sample;
     m_hasPrevious = true;
     if (nx != sample.x || ny != sample.y) {
@@ -213,6 +241,18 @@ Stats WrapEngine::stats() const
 {
     std::lock_guard lock(m_mutex);
     return m_stats;
+}
+
+EdgeVerdict WrapEngine::lastVerdict() const
+{
+    std::lock_guard lock(m_mutex);
+    return m_verdict;
+}
+
+std::vector<MonitorBox> WrapEngine::monitorsSnapshot() const
+{
+    std::lock_guard lock(m_mutex);
+    return m_topology.monitors();
 }
 
 Diagnostics WrapEngine::diagnostics(bool hookOk) const

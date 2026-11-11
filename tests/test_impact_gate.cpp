@@ -34,7 +34,7 @@ CW_TEST(impact_off_by_default_fast_still_wraps)
     WrapEngine e;
     e.rebuild({ box(0, 0, 1920, 1080, true) });
     const auto [x, y] = e.onMouseMove({ 1919, 540, 1000 }, false, false);
-    CW_CHECK_EQ(x, 0);
+    CW_CHECK_EQ(x, 1);
     CW_CHECK_EQ(e.stats().wraps, 1);
 }
 
@@ -69,7 +69,7 @@ CW_TEST(impact_fast_hit_wraps)
     const auto [x, y] = e.onMouseMove({ 1919, 540, t }, false, false);
     // In-band stroke: 1800 -> 1919 = 119 px in 2 ms. The gate only sees the
     // in-band part; either way it is far over the 2000 px/s gate.
-    CW_CHECK_EQ(x, 0); // wrapped
+    CW_CHECK_EQ(x, 1); // wrapped
     CW_CHECK_EQ(e.stats().wraps, 1);
 }
 
@@ -143,12 +143,12 @@ CW_TEST(impact_history_resets_after_wrap)
     e.onMouseMove({ 1800, 540, t }, false, false);
     t += 2000; // 119 px in 2 ms inside the band: a fast hit
     const auto [x1, y1] = e.onMouseMove({ 1919, 540, t }, false, false);
-    CW_CHECK_EQ(x1, 0); // fast hit wraps
+    CW_CHECK_EQ(x1, 1); // fast hit wraps
     // Immediately push to the left edge with slow samples: no wrap, and the
     // previous burst must not count (history was cleared at the wrap).
     t += 100'000;
     const auto [x2, y2] = e.onMouseMove({ 0, 540, t }, false, false);
-    CW_CHECK_EQ(x2, 0); // at the left edge...
+    CW_CHECK_EQ(x2, 0); // slow after the wrap: the gate blocks, no wrap
     // ...but a second slow sample at the edge is guarded anyway; the point
     // of this test is that nothing wrapped from stale history.
     CW_CHECK_EQ(e.stats().wraps, 1);
@@ -291,7 +291,7 @@ CW_TEST(impact_bounce_then_hit_measures_last_stroke)
     t += 2000;
     // Final stroke: 1880 -> 1919 = 39 px in 2 ms = 19500 px/s > gate.
     const auto [x, y] = e.onMouseMove({ 1919, 540, t }, false, false);
-    CW_CHECK_EQ(x, 0);
+    CW_CHECK_EQ(x, 1);
     CW_CHECK_EQ(e.stats().wraps, 1);
 }
 
@@ -346,7 +346,7 @@ CW_TEST(impact_left_edge_band_symmetry)
     t += 2000;
     const auto [x, y] = e.onMouseMove({ 0, 540, t }, false, false);
     // Stroke: 120 px in 2 ms = 60000 px/s: wraps.
-    CW_CHECK_EQ(x, 1919);
+    CW_CHECK_EQ(x, 1918);
     CW_CHECK_EQ(e.stats().wraps, 1);
 }
 
@@ -359,7 +359,7 @@ CW_TEST(impact_top_edge_band_symmetry)
     e.onMouseMove({ 960, 100, t }, false, false);
     t += 2000;
     const auto [x, y] = e.onMouseMove({ 960, 0, t }, false, false);
-    CW_CHECK_EQ(y, 1079);
+    CW_CHECK_EQ(y, 1078);
     CW_CHECK_EQ(e.stats().wraps, 1);
 }
 
@@ -373,7 +373,7 @@ CW_TEST(impact_exactly_minimal_travel_passes)
     e.onMouseMove({ 1899, 540, t }, false, false); // 20 px from the edge
     t += 4000; // 20 px in 4 ms = 5000 px/s
     const auto [x, y] = e.onMouseMove({ 1919, 540, t }, false, false);
-    CW_CHECK_EQ(x, 0);
+    CW_CHECK_EQ(x, 1);
     CW_CHECK_EQ(e.stats().wraps, 1);
 }
 

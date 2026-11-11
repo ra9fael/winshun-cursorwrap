@@ -44,7 +44,7 @@ CW_TEST(edge_monitor_with_negative_coordinates)
     CursorDirection left { -5, 0 };
     CW_CHECK(t.onOuterEdge(1, -1920, 540, edge, WrapMode::Both, &left));
     const auto [x, y] = t.wrapDestination(1, -1920, 540, EdgeType::Left, WrapMode::Both);
-    CW_CHECK_EQ(x, 1919); // the primary's right edge position
+    CW_CHECK_EQ(x, 1918); // the primary's right edge position
     CW_CHECK_EQ(y, 540);
 }
 
@@ -57,7 +57,7 @@ CW_TEST(edge_extreme_coordinates_no_overflow)
     const bool on = t.onOuterEdge(0, 2147482999, 0, edge, WrapMode::Both, &right);
     CW_CHECK(on);
     const auto [x, y] = t.wrapDestination(0, 2147482999, 0, EdgeType::Right, WrapMode::Both);
-    CW_CHECK_EQ(x, -2147483000);
+    CW_CHECK_EQ(x, -2147482999); // lands one pixel inside the left edge
     (void)y;
 }
 
@@ -75,7 +75,7 @@ CW_TEST(edge_three_in_a_row_middle_wraps_nowhere_horizontally)
     CW_CHECK_EQ(t.outerEdges().size(), size_t(8));
     // The outermost right edge wraps to the outermost left edge.
     const auto [x, y] = t.wrapDestination(2, 5759, 540, EdgeType::Right, WrapMode::Both);
-    CW_CHECK_EQ(x, 0);
+    CW_CHECK_EQ(x, 1);
     CW_CHECK_EQ(y, 540);
 }
 
@@ -89,7 +89,7 @@ CW_TEST(edge_horizontal_mode_vertical_layout_still_wraps_within)
     const auto [x, y] = t.wrapDestination(0, 0, 540, EdgeType::Left, WrapMode::VerticalOnly);
     // wrapDestination honours the mode only through onOuterEdge; direct
     // destination queries return the geometric opposite.
-    CW_CHECK_EQ(x, 1919);
+    CW_CHECK_EQ(x, 1918);
     (void)y;
 }
 
@@ -119,7 +119,7 @@ CW_TEST(engine_edge_threshold_widens_the_band)
     WrapEngine wide(s);
     wide.rebuild({ box(0, 0, 1920, 1080, true) });
     const auto [x2, y2] = wide.onMouseMove({ 1914, 540 }, false, false);
-    CW_CHECK_EQ(x2, 0); // now on the edge: wraps
+    CW_CHECK_EQ(x2, 1); // now on the edge: wraps
     (void)y1;
     (void)y2;
 }
@@ -152,7 +152,7 @@ CW_TEST(engine_alternating_edges_guard_prevents_ping_pong)
     WrapEngine e;
     e.rebuild({ box(0, 0, 1920, 1080, true) });
     const auto [x1, y1] = e.onMouseMove({ 1919, 540 }, false, false);
-    CW_CHECK_EQ(x1, 0);
+    CW_CHECK_EQ(x1, 1);
     const auto [x2, y2] = e.onMouseMove({ 0, 540 }, false, false); // same spot, in guard
     CW_CHECK_EQ(x2, 0);
     CW_CHECK_EQ(e.stats().wraps, 1);
@@ -167,7 +167,7 @@ CW_TEST(engine_shift_activation)
     const auto [x1, y1] = e.onMouseMove({ 1919, 540 }, false, false);
     CW_CHECK_EQ(x1, 1919); // Shift not held
     const auto [x2, y2] = e.onMouseMove({ 1919, 540 }, true, false);
-    CW_CHECK_EQ(x2, 0); // Shift held
+    CW_CHECK_EQ(x2, 1); // Shift held
 }
 
 CW_TEST(engine_toggle_enabled_resets_guard)
@@ -179,7 +179,7 @@ CW_TEST(engine_toggle_enabled_resets_guard)
     e.resetState(); // what the plugin's toggle action calls
     // Guard cleared: an immediate wrap can happen again.
     const auto [x, y] = e.onMouseMove({ 1919, 540 }, false, false);
-    CW_CHECK_EQ(x, 0);
+    CW_CHECK_EQ(x, 1);
     CW_CHECK_EQ(e.stats().wraps, 2);
 }
 

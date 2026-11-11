@@ -21,6 +21,7 @@
 //   tol | 容差                  -> MenuTolerance (submenu) when no value follows
 //   tol <n> | 容差 <n>          -> Set adjacencyTolerancePx
 //   diag | 诊断                 -> Copy diagnostics (CopyDiagnostics)
+//   tune | 调参                 -> Toggle the tuning overlay (ToggleTuner)
 //   reset | 恢复默认            -> ResetToDefaults
 //   anything else               -> Unknown (an error row suggests the words)
 #pragma once
@@ -53,6 +54,7 @@ enum class CommandKind {
     SetEdge,        // value: px
     SetTolerance,   // value: px
     CopyDiagnostics,
+    ToggleTuner,
     ResetToDefaults,
     Unknown,
 };
