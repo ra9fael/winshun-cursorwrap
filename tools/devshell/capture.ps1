@@ -25,9 +25,20 @@ $donePath = "$scenarioPath.done"
 Remove-Item $donePath -Force -ErrorAction SilentlyContinue
 
 $log = [System.IO.Path]::GetTempFileName()
-$proc = Start-Process -FilePath $exePath `
-    -ArgumentList @("gui", "--script", $scenarioPath) `
-    -PassThru -RedirectStandardOutput $log
+# Start the shell through .NET rather than Start-Process: Start-Process with
+# -RedirectStandardOutput hands the child a pipe whose contents PowerShell only
+# flushes on exit, which made the captured output unreadable when the point of
+# the run is to READ the scenario report.
+$psi = New-Object System.Diagnostics.ProcessStartInfo
+$psi.FileName = $exePath
+$psi.Arguments = @("gui", "--script", "`"$scenarioPath`"") -join " "
+$psi.WorkingDirectory = $root
+$psi.UseShellExecute = $false
+$psi.RedirectStandardOutput = $true
+$psi.RedirectStandardError = $false
+$psi.CreateNoWindow = $true
+$proc = [System.Diagnostics.Process]::Start($psi)
+$stdoutTask = $proc.StandardOutput.ReadToEndAsync()
 try {
     Start-Sleep -Milliseconds $SettleMs
 
@@ -49,6 +60,15 @@ try {
     }
     Remove-Item $donePath -Force -ErrorAction SilentlyContinue
     Write-Host "--- devshell output:"
-    Get-Content $log | Select-Object -Last 20
+    $captured = ""
+    if ($stdoutTask.Wait(2000)) {
+        $captured = $stdoutTask.Result
+    }
+    if ($captured) {
+        $captured.TrimEnd().Split("`n") | Select-Object -Last 30 |
+            ForEach-Object { Write-Host "    $($_.TrimEnd())" }
+    } else {
+        Write-Host "    (no output)"
+    }
     Remove-Item $log -Force -ErrorAction SilentlyContinue
 }

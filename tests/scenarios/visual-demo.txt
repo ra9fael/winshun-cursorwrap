@@ -32,5 +32,5 @@ expect no-wrap
 brake 1200 4000 250 right 8
 
 dump
-# Hold the windows open; the caller writes <script>.done when it has captured.
-wait 30000
+# `gui --script` holds the windows up and waits for <script>.done, so there is
+# no wait command here: it would only delay the caller's screenshot.

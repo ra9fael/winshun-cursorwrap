@@ -766,8 +766,28 @@ int runGui(const std::string& scriptPath)
         }
         Scenario scenario(&engine, &pointer, &overlay, &dataWindow);
         std::string line;
-        while (std::getline(file, line))
-            scenario.run(line);
+        while (std::getline(file, line)) {
+            const std::string t = trim(line);
+            // The layout is fixed for the run (the windows are already up), and
+            // settings go through the engine so the windows follow them — the
+            // same contract as the `run` mode and the plugin.
+            if (t.rfind("set ", 0) == 0) {
+                const auto parts = split(t, ' ');
+                Settings next = engine.settings();
+                std::string error;
+                if (parts.size() >= 3 && applySetting(next, parts[1], parts[2], error)) {
+                    engine.setSettings(next);
+                    scenario.syncWindows();
+                    std::printf("set %s = %s\n", parts[1].c_str(), parts[2].c_str());
+                } else {
+                    std::printf("FAIL set %s: %s\n", t.c_str(), error.c_str());
+                }
+                continue;
+            }
+            if (t.rfind("monitor ", 0) == 0)
+                continue; // the real layout is the point of gui mode
+            scenario.run(t);
+        }
         for (const std::string& entry : scenario.log())
             std::printf("%s\n", entry.c_str());
         std::printf("\n%d checks, %d failure(s)\n", scenario.checks(), scenario.failures());
