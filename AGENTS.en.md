@@ -60,6 +60,38 @@ only appears with "long uptime + gate on", and the unit tests all start their
 clocks near zero so they can never hit it — **new clock-related cases must use
 counter values from weeks of uptime**.
 
+Measure elapsed time **only** through `elapsedUs()`, which considers both
+`QueryPerformanceCounter` (`Sample::tUs`, read inside the callback) and
+`MSLLHOOKSTRUCT.time` (`Sample::osMs`, the tick the driver produced the event) and
+takes the **larger** span. Using only the former is fooled by queued delivery:
+Windows batches queued events, so positions differing by real distance carry
+timestamps microseconds apart and the reading is absurd (measured: a real
+2500 px/s reads 40000). Taking the larger span means a queue can only make a
+reading slower — and slower fails closed, which is the safe direction.
+
+## What the impact gate means
+
+The gate judges the speed **at the moment of arrival**, not the average over the
+flight. The user's words: "it should accelerate at the edge". So
+`approachSpeedPps` walks back from the arrival and takes the **shortest** window
+that still carries enough distance to represent a speed.
+
+Two coupled constraints — do not break them:
+
+- `impactBandPx` is a **hard** limit: an outside sample takes no part in the
+  measurement. When the in-band travel is under 20 px the stroke is unmeasurable and
+  fails closed — pulling an outside sample in would put the flight back into the
+  number, which is the defect this release fixes. The band is a user-facing setting:
+  widen it when a coarse polling mouse leaves too little in-band travel (live:
+  band 100 → 0 px/s, 250 → 3587).
+- Windows clamps the pointer at the edge, so the arrival step is shortened
+  (measured 15 px against a normal 16–17 px), dragging a genuine hit under the
+  gate. The test is "the arrival sits on the edge line and its step is shorter
+  than the previous one"; on a match the measurement ends at the last free sample.
+
+New impact cases must cover both directions: braking into the edge must NOT wrap,
+a uniform fast push MUST wrap, and both must hold from 1000 Hz to 125 Hz.
+
 ## Debugging boundary
 
 Any investigation that moves the real cursor or installs a real global hook —

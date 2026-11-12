@@ -111,6 +111,22 @@ follow the host theme, and panels sit inside `rcWork` so the taskbar cannot cut
 them. The switch is the `tuningOverlay` setting: the settings page and the search
 bar write the same field, and it survives a restart.
 
+### What the impact gate actually measures
+
+It measures the speed **at the moment the pointer reaches the edge**. The fast
+distant part of a flight does not count, so "flicked over but already slow at the
+edge" does not wrap — that is exactly what "accelerate at the edge" means. So:
+
+- to wrap on a flick, set `speed` slightly below your hand speed at the edge;
+- `band` is the sampling range used for the measurement (150 px default) and is a
+  **hard** limit: the fast distant part of the flight never counts. When the
+  in-band travel is under 20 px nothing can be measured and the gate does not
+  wrap — widen the band in that case (200–300 is worth trying for a coarse
+  polling mouse or a more sensitive gate);
+- the readout can no longer show absurd numbers: event times come from the driver,
+  so queued delivery can only make a reading lower (lower means no wrap, the safe
+  direction), and there is a 20000 px/s ceiling.
+
 ## Data window
 
 The tuning overlay draws on the edges and only has content at the instant of a
@@ -272,7 +288,7 @@ MinGW. MSVC builds use the static runtime (`/MT`) and likewise ship no external 
 ## Tests
 
 ```powershell
-ctest --test-dir build --output-on-failure       # L1: 125 cases + 6 layout fixtures
+ctest --test-dir build --output-on-failure       # L1: 131 cases + 6 layout fixtures
 python tests/protocol_roundtrip.py               # L3: 118 protocol round-trip checks
 python tests/repeat_push_probe.py                # L4 single display / RDP: multi-round real SetCursorPos pushes
 python tests/injected_wrap_probe.py              # L4: injected input (LLMHF_INJECTED) still wraps

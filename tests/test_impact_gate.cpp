@@ -5,6 +5,10 @@
 #include "qpc_time.h"
 #include "wrap_logic.h"
 
+#include <algorithm>
+#include <utility>
+#include <vector>
+
 using namespace cw;
 
 namespace {
@@ -931,4 +935,149 @@ CW_TEST(impact_gate_still_wraps_with_a_long_running_clock)
     CW_CHECK_EQ(nx, 1); // wrapped
     CW_CHECK_EQ(e.stats().wraps, 1);
     CW_CHECK(e.lastVerdict().measuredPps >= 2000);
+}
+
+// --- regression: the speed must be measured AT the edge ---------------------
+//
+// The user reported two things about the impact gate: a fast flight from far
+// away that BRAKES into the edge still wrapped ("but the speed was not fast"),
+// and readings in the tens of thousands ("the wrap speed is counted"). Both
+// were real. The measurement used to average the whole approach band, and the
+// hook stamped events when they were DELIVERED, so queued events covering real
+// distance microseconds apart read as absurd speeds.
+
+namespace {
+// A hand that decelerates linearly in DISTANCE from v0 at x0 to v1 at the edge.
+// Returns every whole-pixel position with its timestamp, which is what the OS
+// actually reports.
+std::vector<std::pair<int64_t, long long>> brakingStroke(double v0, double v1,
+                                                         long long dtUs)
+{
+    std::vector<std::pair<int64_t, long long>> out;
+    const double x0 = 1700.0, x1 = 1919.0;
+    double x = x0;
+    long long t = 0;
+    int64_t lastPx = (int64_t)x;
+    while (x < x1) {
+        const double frac = std::min(1.0, (x - x0) / (x1 - x0));
+        const double v = v0 + (v1 - v0) * frac;
+        x += v * (double)dtUs / 1'000'000.0;
+        t += dtUs;
+        const int64_t px = static_cast<int64_t>(x > x1 ? x1 : x);
+        if (px != lastPx) {
+            out.push_back({ px, t });
+            lastPx = px;
+        }
+    }
+    return out;
+}
+
+bool wrapsStroke(const std::vector<std::pair<int64_t, long long>>& stroke, int band)
+{
+    WrapEngine e(gateOn(2000, band));
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    for (const auto& [x, t] : stroke) {
+        const auto [nx, ny] = e.onMouseMove({ x, 540, 1'000'000 + t }, false, false);
+        if (nx != x)
+            return true;
+    }
+    return false;
+}
+} // namespace
+
+CW_TEST(impact_braking_into_the_edge_does_not_wrap)
+{
+    // The user's first complaint. The hand travels at 4000 px/s far out but is
+    // at 250 px/s by the time it reaches the edge. It is not a hit at the edge
+    // and must not wrap, whatever the flight speed was.
+    for (long long dt : { 1000LL, 2000LL, 4000LL, 8000LL })
+        CW_CHECK(!wrapsStroke(brakingStroke(4000, 250, dt), 100));
+
+    // Same with a wider band: the band must no longer decide this at all.
+    for (int band : { 50, 100, 150, 250 })
+        CW_CHECK(!wrapsStroke(brakingStroke(6000, 150, 8000), band));
+}
+
+CW_TEST(impact_uniform_fast_flight_still_wraps_at_every_polling_rate)
+{
+    // The counterpart: a hand that is genuinely fast AT the edge still wraps,
+    // from 1000 Hz down to 125 Hz. Widening the measuring window until it is
+    // meaningful is what makes the coarse rates work.
+    for (long long dt : { 1000LL, 2000LL, 4000LL, 8000LL }) {
+        const auto stroke = brakingStroke(3000, 3000, dt); // constant 3000 px/s
+        CW_CHECK(!stroke.empty());
+        CW_CHECK(wrapsStroke(stroke, 100));
+    }
+}
+
+CW_TEST(impact_uniform_slow_approach_never_wraps)
+{
+    for (long long dt : { 1000LL, 4000LL, 8000LL })
+        CW_CHECK(!wrapsStroke(brakingStroke(900, 900, dt), 100));
+}
+
+CW_TEST(impact_speed_is_clamped_to_a_plausible_maximum)
+{
+    // The user's second complaint: readings in the tens of thousands. Whatever
+    // the timestamps say, the number shown must stay plausible.
+    WrapEngine e(gateOn());
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    long long t = 1'000'000;
+    e.onMouseMove({ 1800, 540, t }, false, false);
+    t += 1000;
+    e.onMouseMove({ 1899, 540, t }, false, false); // 99 px in 1 ms
+    t += 1000;
+    e.onMouseMove({ 1919, 540, t }, false, false);
+    CW_CHECK(e.lastVerdict().measuredPps <= WrapEngine::kImpactSpeedMaxPps);
+    CW_CHECK(e.lastVerdict().measuredPps > 0);
+}
+
+CW_TEST(impact_queued_delivery_uses_the_driver_timestamp)
+{
+    // Events that sat in a queue carry near-identical delivery timestamps while
+    // their positions cover real distance: 20 px per event, delivered 500 us
+    // apart, is 40000 px/s on paper for a hand doing 2500 px/s. osMs is the
+    // driver's own tick and must win, so the reading is the hand's speed.
+    Settings s = gateOn();
+    WrapEngine e(s);
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    long long t = 1'000'000;
+    long long os = 500'000;
+    int64_t x = 1919 - 20 * 5;
+    for (int i = 0; i < 5; ++i) {
+        e.onMouseMove({ x, 540, t, os }, false, false);
+        x += 20;
+        t += 500;   // delivery 0.5 ms apart
+        os += 8;    // driver 8 ms apart -> 2500 px/s
+    }
+    const auto [nx, ny] = e.onMouseMove({ 1919, 540, t, os }, false, false);
+    CW_CHECK_EQ(nx, 1);
+    CW_CHECK(e.lastVerdict().measuredPps <= 3000);
+    CW_CHECK(e.lastVerdict().measuredPps >= 2000);
+}
+
+CW_TEST(impact_driver_timestamp_can_only_lower_the_speed)
+{
+    // A stale or wrapped osMs value must never inflate a reading: the elapsed
+    // time is the LARGER of the two spans, so the driver tick can only help.
+    Settings s = gateOn();
+    WrapEngine e(s);
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    long long t = 1'000'000;
+    // osMs going BACKWARDS across the 32-bit wrap must not produce a negative
+    // or enormous window. 0xFFFFFFF0 -> 0x00000010 is a 32 ms real gap.
+    long long os = 0xFFFFFFF0LL;
+    int64_t x = 1700;
+    while (x < 1919) {
+        e.onMouseMove({ x, 540, t, os }, false, false);
+        x = x + 20 > 1919 ? 1919 : x + 20;
+        t += 8000;
+        os += 8;
+        if (os > 0xFFFFFFFFLL)
+            os -= 0x100000000LL;
+    }
+    // The final sample is the arrival at the edge.
+    e.onMouseMove({ x, 540, t, os }, false, false);
+    CW_CHECK(e.lastVerdict().measuredPps > 0);
+    CW_CHECK(e.lastVerdict().measuredPps <= WrapEngine::kImpactSpeedMaxPps);
 }

@@ -254,8 +254,12 @@ LRESULT MouseHook::hookProc(int code, WPARAM wp, LPARAM lp)
     // overflows int64 after ~10.7 days of uptime and turns every timestamp
     // negative, which made the impact gate refuse every wrap.
     const long long tUs = counterToUs(now.QuadPart, freq.QuadPart);
-    const auto [nx, ny] = m_engine->onMouseMove({ info->pt.x, info->pt.y, tUs },
-                                               modifier, leftDown);
+    // MSLLHOOKSTRUCT.time is when the DRIVER produced the event; tUs is when
+    // this callback ran. They differ when events were queued, and the engine
+    // needs the larger span so a queue cannot inflate the measured speed.
+    const auto [nx, ny] = m_engine->onMouseMove(
+        { info->pt.x, info->pt.y, tUs, static_cast<long long>(info->time) }, modifier,
+        leftDown);
     if (nx == info->pt.x && ny == info->pt.y)
         return CallNextHookEx(nullptr, code, wp, lp);
     if (SetCursorPos(static_cast<int>(nx), static_cast<int>(ny))) {

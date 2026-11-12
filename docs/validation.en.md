@@ -277,6 +277,71 @@ consecutive mismatches. After a successful `SetCursorPos` the landing point is
 recorded as "the last position" immediately, so the watchdog cannot mistake the
 plugin's own wrap for a dead hook.
 
+### v0.2.2 speed-measurement fix on real hardware (2026-11-13)
+
+The user reported two things: "a fast travel from far away that has already slowed
+down at the edge still triggers", and "readings are sometimes in the tens of
+thousands, which cannot be right". Both reproduced, both are fixed.
+
+**Defect one: it measured the average over the whole flight, not the speed at
+arrival.** Swept 400 braking cases through the pure engine (start x=1700,
+deceleration linear in distance, bands 50/75/100/150/250, polling 1000–125 Hz): the
+old implementation had 109 cases of "already slow at the edge but still wrapped",
+and it got **worse as the band widened** (43 of 80 at band 250). Typical case: a
+hand braking 4000 → 250 px/s into the edge read 2020–3129 px/s, cleared the
+2000 px/s gate and wrapped. Measuring the shortest window walked back from the
+arrival instead drops the same 400 cases to 30 false positives with no dependence
+on the band, and the 4000→250 case reads 312 px/s.
+
+**Defect two: readings in the tens of thousands — events were stamped when
+DELIVERED.** Windows queues mouse events and hands the hook a batch, so positions
+differing by real distance carry timestamps microseconds apart. Measured: a real
+2500 px/s hand whose 16 ms of travel is delivered in 200 µs reads 40000 px/s.
+`Sample` now carries `MSLLHOOKSTRUCT.time` (the driver's tick) and `elapsedUs()`
+takes the **larger** of the two spans:
+
+| Scenario | Without the driver timestamp | With it |
+|---|---|---|
+| 20 px per event, delivered 500 µs apart, driver 8 ms apart (a real 2500 px/s) | `20000 px/s` (hits the clamp) | **`2500 px/s`** (the true value) |
+
+A queue can only make a reading slower (failing closed is the safe direction),
+never faster; readings are additionally clamped at 20000 px/s.
+
+**Two coupled defects fixed along the way:**
+
+1. **The clamped arrival step is shorter** (measured 15 px against a normal 16–17 px
+   step), which dragged a genuine hit under the gate and **refused real fast
+   impacts**. Now detected as "the arrival sits on the edge line and its step is
+   shorter than the previous one", measuring from the last free sample.
+2. **The band was briefly made expandable**: to stay measurable under coarse
+   sampling the walk was allowed to step outside the band, but that puts the flight
+   back into the number — defect one itself. It stays a **hard** limit: not enough
+   in-band travel means "unmeasurable, no wrap". Measured live: band 100 →
+   `0 px/s`, 250 → `3587 px/s`, 500 → `7266 px/s` — that is the evidence for
+   widening the band, which is a user-facing setting for exactly this reason.
+
+**Real-machine results** (RDP single display, gate 2000 px/s, band 250):
+
+| Gesture | Result | Verdict |
+|---|---|---|
+| fast flick, 6 × 15 ms | `10000 px/s`, wrapped | ✓ |
+| fast flick, 8 × 15 ms | `6875 px/s`, wrapped | ✓ |
+| slow drift, 8 × 60 ms | `1815 px/s`, refused | ✓ |
+| very slow, 8 × 120 ms | unmeasurable, refused | ✓ |
+
+**The trade-off that remains**: an extreme stop (10000 → 1500 px/s, deceleration
+almost invisible to the eye) can still exceed the gate and wrap. That is the
+granularity of the shortest window — a longer window would regain strictness but
+lose the "accelerate at the edge" sensitivity the user asked for. With the current
+parameters only 30 of 400 braking cases sit on that boundary.
+
+**A real-machine probe trap**: when a script drives the pointer, Windows coalesces
+the events — of 24 `SetCursorPos` pushes only 8 may reach the hook, and the one
+that lands on the edge is often the one dropped, so the probe reports "the plugin
+does not wrap". A probe must push the edge once more at the end with a generous
+gap (see `tests/repeat_push_probe.py`). And if the user moves their own mouse, `y`
+drifts and that round is void.
+
 ### v0.2.1 Remote Desktop single-display verification (2026-11-13)
 
 The user switched to Remote Desktop, so there is one virtual display (1920×1080,
@@ -351,7 +416,7 @@ have no real-machine wrap confirmation.
 
 | Item | Result |
 |---|---|
-| `cw_tests` | **125 cases + 6 布局 fixtures green** (14 new in v0.2.0; 5 further `rdp_*` cases plus 4 clock-overflow cases in v0.2.1) |
+| `cw_tests` | **131 cases + 6 布局 fixtures green** (14 new in v0.2.0; 5 `rdp_*` plus 4 clock-overflow cases in v0.2.1, 6 speed cases in v0.2.2) |
 | `protocol_roundtrip.py` | **118/118 checks passed**, exit code 0 (15 new: the twelve manifest settings key by key, the `data` submenu, the settings list agreeing with the submenu, the `window` alias, diagnostics carrying the skip split and hook health) |
 | `tests/validate.py` | static validation passed (including the new `[0.2.0]` CHANGELOG heading matching `plugin.json`) |
 | The user's real configuration | dual displays `[-2560,0..0,1440] + [0,0..2560,1440]`, `wrapMode=horizontal`, `guard=100`, `tol=10`: with the gate off both directions land correctly (`x=-2559` / `x=2558`); inner edges never wrap; a 5000 px/s hit wraps with the gate on; a slow drift is refused by **only** `impact-gate` (every other reason counts 0) |

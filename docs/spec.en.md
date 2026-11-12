@@ -263,23 +263,33 @@ behaviour. `settingsChanged` merges: fields not present keep their current value
 
 Off (default): reaching an outer edge wraps, exactly like PowerToys.
 
-On: a wrap must also pass a speed gate — the **speed of the last continuous
-approach stroke toward the edge, measured inside the band** must reach
-`impactSpeedPps`. The stroke is traced backwards from the newest sample and cut
-at the first of:
+On: a wrap must also pass a speed gate — the speed **at the moment of arrival**
+must reach `impactSpeedPps`. Measurement walks back from the arrival and stops
+as soon as the window carries enough distance to represent a speed, cutting at
+the first of:
 
-- a sample farther than `impactBandPx` from the edge — a distant sprint does
-  not count toward the measurement;
 - a reversal of the approach direction — after a bounce, only the last hit
   counts;
 - a gap over the 100 ms window — after a pause the stroke restarts;
 - missing or non-monotonic timestamps — unmeasurable speed fails closed.
 
+`impactBandPx` is a **hard** limit: samples outside it take no part in the
+measurement. When the in-band travel is under `kImpactMinTravelPx` (20 px) the
+stroke genuinely cannot be measured and the gate fails closed — pulling an
+outside sample in would put the flight back into the number, which is exactly the
+defect this release fixes. The band is a user-facing setting for precisely this
+case: with a coarse polling rate, widen it (measured live: band 100 → `0 px/s`,
+band 250 → `3587 px/s`, band 500 → `7266 px/s`).
+
 Design choices:
 
-- The **last in-band stroke**, not a whole-window average: a fast distant
-  flight dilutes the braking near the edge, so "fly over, then crawl in" would
-  pass as a hit. Cutting at the band measures only what happened close to it.
+- **The speed at arrival, not the average over the flight.** This is exactly what
+  the user asked for ("it should accelerate at the edge"). The averaging
+  counter-example, measured: a hand braking from 4000 px/s to 250 px/s into the
+  edge read 312–2020 px/s, cleared the 2000 px/s gate and wrapped — and it got
+  worse as the band widened (43 of 80 combinations at band 250). With the
+  shortest window the false positives across the same 400 braking cases fell from
+  109 to 30 and no longer scale with the band.
 - A minimal-travel bar (20 px): edge jitter over 2 px reaches thousands of px/s
   instantaneously, but such a stroke is not a hit — a net displacement below
   20 px fails outright. Same conclusion PowerToys Find My Mouse reached for its
@@ -289,8 +299,27 @@ Design choices:
   a taskbar icon) never triggers, however fast.
 - **Unmeasurable speed fails closed**: this blocks programmatic teleports
   (a big `SetCursorPos` jump) from masquerading as an impact.
-- Timestamps come from `QueryPerformanceCounter` on the hook thread
-  (microseconds), not `MSLLHOOKSTRUCT.time` (millisecond resolution, wraps).
+- **The clamped arrival step must be recognised**: Windows clamps the pointer at
+  the edge, so that last step covers less distance than the hand moved (measured
+  15 px against a normal 16–17 px step), dragging a genuine hit below the gate and
+  **refusing fast impacts**. The test is "the arrival sits on the edge line and
+  its step is shorter than the previous one"; on a match the measurement ends at
+  the last free sample instead.
+- **The approach band must stay in the measurement**: an outside sample cannot take
+  part, or the flight goes back into the number — the very defect this release
+  fixes. When the in-band travel is under 20 px the stroke is genuinely
+  unmeasurable and fails closed; the band is a user-facing setting for that case
+  (measured live: band 100 → 0 px/s, 250 → 3587).
+- **Queued delivery must not inflate the speed**: `tUs` is read inside the hook
+  callback, so a batch of events that sat in a queue carries near-identical
+  timestamps while their positions cover real distance — a six-digit reading
+  (measured: a real 2500 px/s hand whose 16 ms of travel is delivered in 200 µs
+  reads `40000 px/s`). `Sample` therefore also carries `MSLLHOOKSTRUCT.time` (the
+  driver's own tick) and `elapsedUs()` takes the **larger** of the two spans, so
+  a queue can only make a reading slower (failing closed is the safe direction),
+  never faster. Same scenario measured: `20000 px/s` without the driver
+  timestamp, `2500 px/s` with it (the true value). Readings are additionally
+  clamped to a 20000 px/s ceiling.
 - The movement history clears after every wrap: the speed of the hit cannot
   leak into the next decision.
 

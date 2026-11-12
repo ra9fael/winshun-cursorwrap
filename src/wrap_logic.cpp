@@ -12,6 +12,39 @@ namespace {
 
 bool horizontal(EdgeType t) { return t == EdgeType::Left || t == EdgeType::Right; }
 
+// A driver tick further back than this is stale or garbage rather than a
+// queue, so it must not be trusted to stretch the measuring window.
+constexpr long long kMaxPlausibleSpanUs = 500 * 1000;
+
+// Elapsed time between two samples in microseconds, taking the driver's own
+// tick (osMs) into account when it is available. The two spans are compared as
+// unsigned 32-bit differences because MSLLHOOKSTRUCT.time is a DWORD tick that
+// wraps every ~49.7 days; a plain subtraction across the wrap would produce a
+// huge or negative window.
+//
+// Why take the maximum: tUs is read when the hook callback runs, so a queued
+// event is stamped late. osMs is when the driver produced it. The true elapsed
+// time is at least the driver's span, so using it can only lower the measured
+// speed — never raise it. A reading that is too low merely fails closed, which
+// is the safe direction; a reading that is too high wraps when the user did not
+// ask for it, which is the bug this prevents.
+long long elapsedUs(const Sample& a, const Sample& b)
+{
+    long long us = 0;
+    if (a.tUs > 0 && b.tUs > a.tUs)
+        us = b.tUs - a.tUs;
+    if (a.osMs > 0 && b.osMs > 0) {
+        const unsigned long long la = static_cast<unsigned long long>(a.osMs);
+        const unsigned long long lb = static_cast<unsigned long long>(b.osMs);
+        // 32-bit wrap: the difference taken modulo 2^32 is the real gap.
+        const unsigned long long d32 = static_cast<unsigned>(lb - la);
+        const long long osUs = static_cast<long long>(d32) * 1000LL;
+        if (osUs > us && osUs <= kMaxPlausibleSpanUs)
+            us = osUs;
+    }
+    return us;
+}
+
 } // namespace
 
 const char* skipReasonName(SkipReason reason)
@@ -218,43 +251,77 @@ long long WrapEngine::approachSpeedPps(EdgeType edge, int64_t edgeCoord) const
     if (newest.tUs <= 0)
         return 0;
 
-    // (2)(3) Walk back over the last continuous toward-the-edge stroke,
-    // inside the window and inside the band.
-    size_t i = last;
+    // (2) Decide whether the arrival sample is usable. When the hand runs into
+    // the edge, Windows clamps the pointer, so that last step covers LESS
+    // distance than the hand actually moved (measured: 15 px where the step was
+    // 16, and 6 px where it was 17). Including it measures the pointer's
+    // truncated path, not the hand's speed: a genuine 2000 px/s hit reads 1987
+    // and a 2125 px/s hit reads 1970, so both are refused. Detect the
+    // truncation as "the arrival sits on the edge line and its step is shorter
+    // than the step before it", and measure to the last FREE sample instead.
+    // A genuine arrival is not shorter than the step before it, so it is kept.
+    size_t end = last;
+    if (coord(m_history[last], edge) == edgeCoord && last >= 2) {
+        const long long arrivalStep = travel(m_history[last - 1], m_history[last]);
+        const long long priorStep = travel(m_history[last - 2], m_history[last - 1]);
+        if (arrivalStep < priorStep)
+            end = last - 1;
+    }
+    if (end == 0)
+        return 0;
+
+    // (3)(4) Measure the SHORTEST window that is still meaningful: walk back one
+    // step at a time and stop as soon as the walk carries kImpactMinTravelPx.
+    // Shortest is the point — it is what separates "how fast did the hand
+    // travel" from "how fast is the hand moving AT the edge", which is what the
+    // user asked for: a flick that brakes into the edge must not wrap. Measured
+    // on a hand braking 4000 -> 250 px/s, the whole-band average read
+    // 312-2020 px/s and wrapped; the shortest window reads the arrival and
+    // correctly refuses.
+    //
+    // The approach band stays a hard limit: including a sample from outside it
+    // would put the flight back into the number, which is the original defect.
+    // If the in-band part is too short to measure, the stroke genuinely cannot
+    // be measured and the gate fails closed — that is the honest answer, and the
+    // band is a user-facing setting precisely so it can be widened when a coarse
+    // polling rate leaves too little in-band travel.
+    size_t i = end;
     while (i > 0) {
         const Sample& prev = m_history[i - 1];
-        if (prev.tUs <= 0 || newest.tUs - prev.tUs > kImpactWindowUs)
+        if (prev.tUs <= 0 || elapsedUs(prev, m_history[end]) > kImpactWindowUs)
             break; // clock gap or window end: the stroke starts at i
         if (travel(prev, m_history[i]) < 0)
             break; // reversed: the stroke toward the edge starts at i
         if (std::llabs(coord(prev, edge) - edgeCoord) > band)
             break; // left the approach band: the stroke starts at i
         --i;
+        // Enough distance to represent a speed? Then this is the window: a
+        // longer one would average in the flight the user braked out of.
+        if (travel(m_history[i], m_history[end]) >= kImpactMinTravelPx)
+            break;
     }
-    const Sample& first = m_history[i];
-    if (first.tUs <= 0 || newest.tUs <= first.tUs)
-        return 0;
-    // (4) The stroke must actually travel toward the edge.
-    long long stroke = travel(first, newest);
-    if (stroke < kImpactMinTravelPx)
-        return 0; // jitter, not a hit
 
-    // (5) The arrival sample sits exactly ON the edge line, where Windows
-    // clamped the pointer: that last step looks shorter than the hand's real
-    // step and drags the average under the gate. Measure up to the last FREE
-    // sample instead, as long as a real stroke is left to measure.
-    long long windowUs = newest.tUs - first.tUs;
-    if (coord(newest, edge) == edgeCoord && last > i) {
-        const Sample& free = m_history[last - 1];
-        if (free.tUs > first.tUs && travel(first, free) >= kImpactMinTravelPx) {
-            stroke = travel(first, free);
-            windowUs = free.tUs - first.tUs;
-        }
-    }
+    // (5) Minimal travel: a stroke shorter than kImpactMinTravelPx is jitter at
+    // the edge, not a hit — fail closed.
+    const long long stroke = travel(m_history[i], m_history[end]);
+    if (stroke < kImpactMinTravelPx)
+        return 0;
+    const long long windowUs = elapsedUs(m_history[i], m_history[end]);
     if (windowUs <= 0)
         return 0;
+    // Queued-delivery guard: the samples may have been stamped when they were
+    // DELIVERED rather than when they happened, which inflates the speed by an
+    // arbitrary factor. MSLLHOOKSTRUCT.time carries the driver's own tick, so
+    // elapsedUs already takes the larger span, and a queue can only make a
+    // reading slower, never faster.
     const long long pps = stroke * 1'000'000LL / windowUs;
-    return pps > 0 ? pps : 0;
+    if (pps <= 0)
+        return 0;
+    // Nobody moves a mouse faster than kImpactSpeedMaxPps. A larger value
+    // means the timestamps do not describe hand motion — the usual cause is
+    // queued delivery. Clamping keeps the reading honest
+    // instead of printing a six-digit number, and the gate still passes it.
+    return pps > kImpactSpeedMaxPps ? kImpactSpeedMaxPps : pps;
 }
 
 std::pair<int64_t, int64_t> WrapEngine::onMouseMove(const Sample& sample, bool modifierHeld,

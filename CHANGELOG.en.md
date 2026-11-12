@@ -9,6 +9,53 @@ single source of truth; release tags are `v<version>`.
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-11-13
+
+### Fixed
+
+- **The impact speed was the average over the whole flight, not the speed AT the
+  edge**: the user reported that a fast travel from far away that has already
+  slowed down at the edge still wrapped. That was real: the average over the
+  whole approach band (`impactBandPx`, default 150) was inflated by the fast
+  flight. Measured: a hand braking from 4000 px/s to 250 px/s into the edge read
+  312–2020 px/s, over the 2000 px/s gate, and wrapped; the wider the band the
+  worse it got (43 of 80 combinations at band 250). It now measures the
+  **shortest window walked back from the arrival that still carries enough
+  distance to represent a speed** (`kImpactMinTravelPx`) — the speed at the
+  moment of impact. Across the same 400 braking cases the false positives fell
+  from 109 to 30 and no longer scale with the band; the 4000→250 case now reads
+  312 px/s and is refused.
+  Cost: an extreme stop (10000→1500, almost invisible to the eye) can still
+  exceed the gate — that is the granularity the shortest window has.
+- **Readings in the tens of thousands: events were stamped when DELIVERED, not
+  when they happened**: Windows queues mouse events and hands a batch to the
+  hook, so positions differing by real distance carry timestamps microseconds
+  apart. Measured: a real 2500 px/s hand whose 16 ms of travel is delivered in
+  200 µs reads 40000 px/s. `Sample` now carries `osMs`
+  (`MSLLHOOKSTRUCT.time`, the tick the driver produced the event) and
+  `elapsedUs()` takes the **larger** of the two spans — a queue can only make a
+  reading slower (failing closed is the safe direction), never faster. Same
+  scenario measured: 20000 px/s without the driver timestamp, 2500 px/s with it
+  (the true value). Readings are additionally clamped to a 20000 px/s ceiling, so
+  a six-digit number can no longer appear at all.
+- Fixed a coupled defect found along the way: the arrival step is often shortened
+  by Windows clamping the pointer at the edge (measured 15 px against a normal
+  16–17 px step), which dragged a genuine hit below the gate and **refused fast
+  impacts**. The clamped step is now detected as "the arrival sits on the edge
+  line and its step is shorter than the previous one" and measured from the last
+  free sample instead.
+- The approach band **stays a hard** limit: an outside sample takes no part in the
+  measurement (or the flight goes back into the number). When the in-band travel is
+  under 20 px the stroke is unmeasurable and fails closed; measured live, band 100
+  → 0 px/s, 250 → 3587 px/s, 500 → 7266 px/s, which is the guidance to widen the
+  band under coarse sampling — that is what a user-facing band setting is for.
+
+### Verified on real hardware
+
+Real machine (RDP single display, gate 2000 px/s, band 250): fast flick 6×15 ms →
+`10000 px/s` wraps; 8×15 ms → `6875 px/s` wraps; slow drift 8×60 ms → `1815 px/s`
+refused; very slow 8×120 ms → refused. All as intended.
+
 ## [0.2.1] - 2026-11-13
 
 ### Added

@@ -87,10 +87,20 @@ void applySettings(const RawSettings& raw, Settings& out, bool merge);
 // microseconds (QueryPerformanceCounter at the hook). 0 means unknown: the
 // sample still drives the state machine, but the impact gate cannot measure
 // a speed from it and fails closed (no wrap).
+//
+// osMs is MSLLHOOKSTRUCT.time, the millisecond tick at which the DRIVER
+// produced the event — not when the hook received it. It exists for one
+// reason: `tUs` is read inside the callback, so events that sat in a queue are
+// all stamped microseconds apart even though their positions cover real
+// distance, and distance over microseconds is an arbitrary number (measured:
+// a real 16 ms of hand travel delivered in 200 us reads as 40000 px/s instead
+// of 2500). The engine takes max(tUs span, osMs span) as the elapsed time, so
+// a queue can only ever make the reading slower, never faster. 0 = unknown.
 struct Sample {
     int64_t x = 0;
     int64_t y = 0;
     long long tUs = 0;
+    long long osMs = 0;
 };
 
 // Why a move did not wrap. A single "suppressed" total is useless when the
@@ -256,9 +266,19 @@ public:
     size_t outerEdgeCount() const;
 
     static constexpr int64_t kNever = INT64_MIN;
-    // The impact speed is measured over the last continuous stroke toward
-    // the edge, at most this long (older samples are irrelevant anyway).
-    static constexpr long long kImpactWindowUs = 100 * 1000; // 100 ms
+    // The impact speed is measured over the TRAILING part of the stroke:
+    // roughly the last kImpactTrailingUs before the arrival, never more than
+    // kImpactWindowUs. A wide average cannot see deceleration — measured on a
+    // hand braking from 4000 to 1500 px/s into a 100 px band, the average was
+    // 2020-3129 px/s and wrapped although the hand was under the 2000 px/s
+    // gate at the edge. The user's requirement is "accelerate AT the edge",
+    // so the number has to come from the edge, not from the flight.
+    static constexpr long long kImpactTrailingUs = 30 * 1000; // 30 ms
+    static constexpr long long kImpactWindowUs = 100 * 1000;  // hard ceiling
+    // Nobody moves a mouse faster than this; a larger reading means the
+    // timestamps are untrustworthy (a burst-delivered queue), so the value is
+    // clamped here rather than shown as an absurd number.
+    static constexpr long long kImpactSpeedMaxPps = 20000;
     // 1000 Hz gaming mice: 32 samples were only 32 ms; 128 covers the
     // window with headroom for a busy hook chain.
     static constexpr size_t kHistoryMax = 128;
