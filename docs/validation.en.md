@@ -208,6 +208,7 @@ directly rather than through the host; **the mouse was not moved**:
 | Clean stop | 0 windows after `stop()` |
 | Trace histogram | after injecting 28 arrivals (14 slow ≈600 px/s, 14 fast ≈5000 px/s) the panel draws two humps with `gate 2000` and `best 2800` in the gap between them, header `28 hits · 14 wrap` |
 | Taskbar does not cut it | placed inside `rcWork`, fully visible |
+| The panel keeps updating | 12 slow arrivals drew one hump; 12 fast ones then produced the second hump, the `best 2800` line, and the header `24 hits · 12 wrap` (the timer is re-armed after the strips are rebuilt, so it does not freeze) |
 
 **This proves the overlay is no longer a screen-covering sheet**: nothing is drawn in
 the middle of a monitor, only narrow strips along the outer edges.

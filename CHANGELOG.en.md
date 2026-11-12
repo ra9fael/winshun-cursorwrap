@@ -58,6 +58,13 @@ single source of truth; release tags are `v<version>`.
   more.
 - The tuning panel was cut in half by the taskbar; it is now placed inside
   `rcArea`/`rcWork`.
+- **The tuning panel froze after its first paint**: rebuilding the edge strips
+  destroyed the window that owned the repaint timer, so the timer went with it.
+  The timer is now re-armed on the new first strip, and a changed gate value also
+  triggers a histogram redraw (otherwise the gate line never moved). Verified on
+  hardware: 12 slow arrivals drew one hump, then 12 fast ones added the second
+  hump, the `best 2800` line appeared, and the header went from `12 hits` to
+  `24 hits · 12 wrap`.
 
 ### Changed
 

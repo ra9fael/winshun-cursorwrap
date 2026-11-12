@@ -115,6 +115,7 @@ private:
     bool m_readoutShown = false;
     size_t m_drawnArrivals = 0; // rebuild the trace only when this grows
     long long m_drawnSuggest = -1;
+    long long m_drawnGate = -1; // the gate the trace was drawn with
 
     std::mutex m_colorsMutex;
     Colors m_colors;

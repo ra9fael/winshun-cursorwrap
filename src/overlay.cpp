@@ -653,6 +653,7 @@ void Overlay::buildTrace(const std::vector<Arrival>& arrivals, const Settings& s
     present(layer);
     m_drawnArrivals = arrivals.size();
     m_drawnSuggest = suggestion;
+    m_drawnGate = settings.impactSpeedPps;
 }
 
 void Overlay::repaint(const Settings& settings, const Colors& colors)
@@ -675,13 +676,22 @@ void Overlay::repaint(const Settings& settings, const Colors& colors)
             }
         }
     }
-    if (stale)
+    if (stale) {
         rebuildStrips(settings, colors);
+        // rebuildStrips destroys the windows that owned the repaint timer:
+        // re-arm it on the new first strip, or the panel freezes forever.
+        if (!m_strips.empty())
+            SetTimer(m_strips.front().layer.hwnd, kTimerId, kRepaintMs, nullptr);
+    }
 
-    // The trace panel changes only when the recorded arrivals do.
+    // The trace panel changes when the arrivals change, or when a moving part
+    // it draws (the gate line) changes.
     const std::vector<Arrival> arrivals = m_engine->arrivals();
-    if (!arrivals.empty() && (arrivals.size() != m_drawnArrivals
-                              || m_drawnSuggest != suggestGate(arrivals)))
+    const long long suggestion = suggestGate(arrivals);
+    const bool traceStale = !arrivals.empty()
+        && (arrivals.size() != m_drawnArrivals || suggestion != m_drawnSuggest
+            || settings.impactSpeedPps != m_drawnGate);
+    if (traceStale)
         buildTrace(arrivals, settings, colors);
     else if (arrivals.empty())
         hideTrace();
