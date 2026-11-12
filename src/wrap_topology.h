@@ -87,9 +87,14 @@ public:
     const std::vector<MonitorEdge>& outerEdges() const { return m_outerEdges; }
     size_t monitorCount() const { return m_monitors.size(); }
 
-    // Index of the monitor containing (x, y), or the nearest one;
-    // -1 when there are no monitors.
+    // Index of the monitor containing (x, y), or -1 when none does.
     int monitorAt(int64_t x, int64_t y) const;
+
+    // Index of the monitor a POINTER should be considered to be on: the one
+    // containing it, else the nearest (never -1 unless there are no
+    // monitors). The wrap path uses this so a sample outside the union of the
+    // rects cannot disable wrapping.
+    int nearestMonitor(int64_t x, int64_t y) const;
 
     bool monitorRect(int index, MonitorBox& out) const;
 

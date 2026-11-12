@@ -148,6 +148,32 @@ int Topology::monitorAt(int64_t x, int64_t y) const
     return -1;
 }
 
+int Topology::nearestMonitor(int64_t x, int64_t y) const
+{
+    // For a pointer that is inside no monitor. `monitorAt` answers "which
+    // rect contains this point" (exact, -1 outside — what the layout tests
+    // and gap detection need); the wrap path needs "which monitor is this
+    // pointer on", and a real pointer can be outside the union of the rects
+    // on a stale topology, at a seam during a hot-plug, or on a display
+    // Windows reports with a gap. Returning -1 there refused to wrap
+    // everywhere: a real-machine run logged 1008 such samples.
+    if (m_monitors.empty())
+        return -1;
+    int best = 0;
+    int64_t bestDistance = std::numeric_limits<int64_t>::max();
+    for (size_t i = 0; i < m_monitors.size(); ++i) {
+        const MonitorBox& m = m_monitors[i];
+        const int64_t dx = x < m.left ? m.left - x : (x >= m.right ? x - (m.right - 1) : 0);
+        const int64_t dy = y < m.top ? m.top - y : (y >= m.bottom ? y - (m.bottom - 1) : 0);
+        const int64_t distance = dx * dx + dy * dy;
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            best = static_cast<int>(i);
+        }
+    }
+    return best;
+}
+
 bool Topology::monitorRect(int index, MonitorBox& out) const
 {
     if (index < 0 || index >= static_cast<int>(m_monitors.size()))
