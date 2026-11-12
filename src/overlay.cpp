@@ -1,14 +1,15 @@
 // overlay.cpp — see overlay.h.
 //
-// One thread owns all overlay windows and a 30 ms repaint timer. Each
-// repaint polls the engine's last verdict and current settings (cheap,
-// locked copies), draws into a per-pixel-alpha 32bpp DIB and hands it to
-// UpdateLayeredWindow. The windows are click-through, non-activating tool
-// windows: they never take focus or input.
+// One thread owns all overlay windows and a 30 ms repaint timer. Painting is
+// plain GDI through SetLayeredWindowAttributes(LWA_COLORKEY): the windows
+// fill with an unlikely key colour, everything drawn over it shows, the key
+// stays invisible. That keeps memory flat (no per-frame DIBs — a 4K monitor's
+// 32bpp surface would be ~33 MB and the plugin's job caps memory) and the
+// repaint is a handful of GDI calls. The windows are click-through,
+// non-activating tool windows.
 #include "overlay.h"
 
 #include <cmath>
-#include <cstring>
 
 namespace cw {
 namespace {
@@ -17,60 +18,19 @@ constexpr UINT kRepaintTimerId = 1;
 constexpr UINT kRepaintMs = 30;
 
 const wchar_t kClassName[] = L"WinShunCursorWrapOverlay";
+// The colour key: an unlikely deep-teal black nobody draws on purpose.
+const COLORREF kKey = RGB(0x01, 0x02, 0x03);
 
 std::atomic<Overlay*> g_overlay = nullptr; // one instance per process
 
-struct Rgba {
-    BYTE b, g, r, a;
-};
-
-// A 32bpp top-down straight-alpha surface.
-struct Surface {
-    int w = 0;
-    int h = 0;
-    std::vector<Rgba> px;
-
-    Surface(int width, int height)
-        : w(width), h(height), px(static_cast<size_t>(width) * static_cast<size_t>(height))
-    {
-    }
-
-    void blend(int x, int y, COLORREF c, BYTE alpha)
-    {
-        if (x < 0 || y < 0 || x >= w || y >= h || alpha == 0)
-            return;
-        Rgba& p = px[static_cast<size_t>(y) * static_cast<size_t>(w)
-                     + static_cast<size_t>(x)];
-        const BYTE sr = GetRValue(c);
-        const BYTE sg = GetGValue(c);
-        const BYTE sb = GetBValue(c);
-        const BYTE inv = static_cast<BYTE>(255 - alpha);
-        p.r = static_cast<BYTE>((sr * alpha + p.r * inv) / 255);
-        p.g = static_cast<BYTE>((sg * alpha + p.g * inv) / 255);
-        p.b = static_cast<BYTE>((sb * alpha + p.b * inv) / 255);
-        if (alpha > p.a)
-            p.a = alpha;
-    }
-
-    void rect(int x0, int y0, int x1, int y1, COLORREF c, BYTE alpha)
-    {
-        for (int y = y0; y < y1; ++y)
-            for (int x = x0; x < x1; ++x)
-                blend(x, y, c, alpha);
-    }
-
-    void circleOutline(int cx, int cy, int r, COLORREF c, BYTE alpha)
-    {
-        for (int a = 0; a < 360; a += 2) {
-            const double rad = a * 3.14159265358979323846 / 180.0;
-            const int px = cx + static_cast<int>(r * std::cos(rad));
-            const int py = cy + static_cast<int>(r * std::sin(rad));
-            for (int t = -1; t <= 1; ++t)
-                for (int u = -1; u <= 1; ++u)
-                    blend(px + t, py + u, c, alpha);
-        }
-    }
-};
+void circleOutline(HDC dc, int cx, int cy, int r, COLORREF c)
+{
+    HGDIOBJ oldPen = SelectObject(dc, CreatePen(PS_SOLID, 2, c));
+    HGDIOBJ oldBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
+    Arc(dc, cx - r, cy - r, cx + r, cy + r, 0, 0, 0, 0);
+    SelectObject(dc, oldBrush);
+    DeleteObject(SelectObject(dc, oldPen));
+}
 
 } // namespace
 
@@ -113,6 +73,7 @@ void Overlay::run()
     wc.lpfnWndProc = &Overlay::wndProcStatic;
     wc.hInstance = GetModuleHandleW(nullptr);
     wc.hCursor = nullptr;
+    wc.hbrBackground = CreateSolidBrush(kKey);
     wc.lpszClassName = kClassName;
     RegisterClassExW(&wc); // stays registered; Windows cleans up at exit
 
@@ -126,6 +87,9 @@ void Overlay::run()
                                     nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
         if (!hwnd)
             continue;
+        // Colour-key transparency: kKey pixels are invisible, everything
+        // else opaque. No per-pixel alpha, so no per-frame big allocations.
+        SetLayeredWindowAttributes(hwnd, kKey, 0, LWA_COLORKEY);
         ShowWindow(hwnd, SW_SHOWNOACTIVATE);
         SetTimer(hwnd, kRepaintTimerId, kRepaintMs, nullptr);
         m_windows.push_back(hwnd);
@@ -169,8 +133,6 @@ LRESULT Overlay::wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         return 0;
     case WM_NCHITTEST:
         return HTTRANSPARENT; // clicks fall through
-    case WM_PAINT:
-        return 0; // all painting is UpdateLayeredWindow on the timer
     default:
         return DefWindowProcW(hwnd, msg, wp, lp);
     }
@@ -188,18 +150,20 @@ void Overlay::paintWindow(HWND hwnd, const MonitorBox& box)
         colors = m_colors;
     }
 
+    HDC dc = GetDC(hwnd);
     const int w = static_cast<int>(box.width());
     const int h = static_cast<int>(box.height());
-    Surface s(w, h);
 
     // 1. The impact measuring band along every edge (gate on only).
     if (settings.impactGate) {
-        const int band = settings.impactBandPx;
-        const COLORREF bandColor = colors.accent;
-        s.rect(0, 0, band, h, bandColor, 55);          // left
-        s.rect(w - band, 0, w, h, bandColor, 55);      // right
-        s.rect(0, 0, w, band, bandColor, 55);          // top
-        s.rect(0, h - band, w, h, bandColor, 55);      // bottom
+        const int band = static_cast<int>(settings.impactBandPx);
+        HBRUSH b = CreateSolidBrush(colors.accent);
+        RECT r;
+        r = { 0, 0, band, h };        FillRect(dc, &r, b); // left
+        r = { w - band, 0, w, h };    FillRect(dc, &r, b); // right
+        r = { 0, 0, w, band };        FillRect(dc, &r, b); // top
+        r = { 0, h - band, w, h };    FillRect(dc, &r, b); // bottom
+        DeleteObject(b);
     }
 
     // 2. The guard circle around the last wrap's landing point.
@@ -210,7 +174,8 @@ void Overlay::paintWindow(HWND hwnd, const MonitorBox& box)
     if (verdict.wrapped && verdict.tUs > 0 && verdictOnThisMonitor) {
         const int cx = static_cast<int>(verdict.destX - box.left);
         const int cy = static_cast<int>(verdict.destY - box.top);
-        s.circleOutline(cx, cy, settings.wrapGuardPx, RGB(0xe0, 0xa0, 0x20), 170);
+        circleOutline(dc, cx, cy, static_cast<int>(settings.wrapGuardPx),
+                      RGB(0xe0, 0xa0, 0x20));
     }
 
     // 3. The live verdict readout, centred on the edge it came from.
@@ -224,102 +189,35 @@ void Overlay::paintWindow(HWND hwnd, const MonitorBox& box)
             label = L"wrap";
             state = RGB(0x30, 0xc0, 0x60);
         } else {
-            // pps/100 keeps the number short (e.g. 2143/2000 -> 21/20).
+            // pps/100 keeps the number short (2143/2000 -> 21/20).
             label = std::to_wstring(verdict.measuredPps / 100) + L"/"
                 + std::to_wstring(verdict.thresholdPps / 100);
             state = RGB(0xe0, 0xa0, 0x20);
         }
     }
     if (!label.empty()) {
-        // Draw the label with GDI into a scratch DIB keyed on (1,1,2), then
-        // copy the non-key pixels onto the surface as opaque text.
-        BITMAPINFO info {};
-        info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-        info.bmiHeader.biWidth = w;
-        info.bmiHeader.biHeight = -h;
-        info.bmiHeader.biPlanes = 1;
-        info.bmiHeader.biBitCount = 32;
-        info.bmiHeader.biCompression = BI_RGB;
-        void* bitsPtr = nullptr;
-        HDC screen = GetDC(nullptr);
-        HBITMAP bmp = CreateDIBSection(screen, &info, DIB_RGB_COLORS, &bitsPtr, nullptr, 0);
-        if (bmp && bitsPtr) {
-            HDC mem = CreateCompatibleDC(screen);
-            HGDIOBJ oldBmp = SelectObject(mem, bmp);
-            HBRUSH key = CreateSolidBrush(RGB(1, 1, 2));
-            RECT full { 0, 0, w, h };
-            FillRect(mem, &full, key);
-            DeleteObject(key);
-            HFONT font = CreateFontW(-22, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
-                                     DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                                     CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-            HGDIOBJ oldFont = SelectObject(mem, font);
-            SetBkMode(mem, TRANSPARENT);
-            SetTextColor(mem, state);
-            SIZE sz {};
-            GetTextExtentPoint32W(mem, label.c_str(), static_cast<int>(label.size()), &sz);
-            int tx = w / 2 - sz.cx / 2;
-            int ty = h / 2 - sz.cy / 2;
-            switch (verdict.edge) {
-            case EdgeType::Left: tx = 8; ty = h / 2 - sz.cy / 2; break;
-            case EdgeType::Right: tx = w - sz.cx - 8; ty = h / 2 - sz.cy / 2; break;
-            case EdgeType::Top: tx = w / 2 - sz.cx / 2; ty = 6; break;
-            case EdgeType::Bottom: tx = w / 2 - sz.cx / 2; ty = h - sz.cy - 6; break;
-            }
-            TextOutW(mem, tx, ty, label.c_str(), static_cast<int>(label.size()));
-            SelectObject(mem, oldFont);
-            DeleteObject(font);
-            SelectObject(mem, oldBmp);
-            // Blit: every pixel not near the key colour is text.
-            const Rgba* src = reinterpret_cast<const Rgba*>(bitsPtr);
-            for (int y = 0; y < h; ++y) {
-                for (int x = 0; x < w; ++x) {
-                    const Rgba& p = src[static_cast<size_t>(y) * static_cast<size_t>(w)
-                                        + static_cast<size_t>(x)];
-                    if (p.r <= 0x10 && p.g <= 0x10 && p.b >= 0xf0)
-                        continue; // the key
-                    s.blend(x, y, RGB(p.r, p.g, p.b), 255);
-                }
-            }
-            DeleteObject(bmp);
-            DeleteDC(mem);
+        HFONT font = CreateFontW(-24, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+                                 DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                 CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+        HGDIOBJ oldFont = SelectObject(dc, font);
+        SetBkMode(dc, TRANSPARENT);
+        SetTextColor(dc, state);
+        SIZE sz {};
+        GetTextExtentPoint32W(dc, label.c_str(), static_cast<int>(label.size()), &sz);
+        int tx = w / 2 - sz.cx / 2;
+        int ty = h / 2 - sz.cy / 2;
+        switch (verdict.edge) {
+        case EdgeType::Left: tx = 8; ty = h / 2 - sz.cy / 2; break;
+        case EdgeType::Right: tx = w - sz.cx - 8; ty = h / 2 - sz.cy / 2; break;
+        case EdgeType::Top: tx = w / 2 - sz.cx / 2; ty = 6; break;
+        case EdgeType::Bottom: tx = w / 2 - sz.cx / 2; ty = h - sz.cy - 6; break;
         }
-        ReleaseDC(nullptr, screen);
+        TextOutW(dc, tx, ty, label.c_str(), static_cast<int>(label.size()));
+        SelectObject(dc, oldFont);
+        DeleteObject(font);
     }
 
-    // Upload: pre-multiply for UpdateLayeredWindow's AC_SRC_ALPHA.
-    BITMAPINFO info {};
-    info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    info.bmiHeader.biWidth = w;
-    info.bmiHeader.biHeight = -h;
-    info.bmiHeader.biPlanes = 1;
-    info.bmiHeader.biBitCount = 32;
-    info.bmiHeader.biCompression = BI_RGB;
-    void* bitsPtr = nullptr;
-    HDC screen = GetDC(nullptr);
-    HBITMAP bmp = CreateDIBSection(screen, &info, DIB_RGB_COLORS, &bitsPtr, nullptr, 0);
-    if (bmp && bitsPtr) {
-        Rgba* dst = reinterpret_cast<Rgba*>(bitsPtr);
-        for (size_t i = 0; i < s.px.size(); ++i) {
-            const Rgba& src = s.px[i];
-            Rgba d;
-            d.r = static_cast<BYTE>(src.r * src.a / 255);
-            d.g = static_cast<BYTE>(src.g * src.a / 255);
-            d.b = static_cast<BYTE>(src.b * src.a / 255);
-            d.a = src.a;
-            dst[i] = d;
-        }
-        HDC mem = CreateCompatibleDC(screen);
-        HGDIOBJ oldBmp = SelectObject(mem, bmp);
-        POINT zero { 0, 0 };
-        SIZE size { w, h };
-        BLENDFUNCTION blend { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
-        UpdateLayeredWindow(hwnd, screen, nullptr, &size, mem, &zero, 0, &blend, ULW_ALPHA);
-        SelectObject(mem, oldBmp);
-        DeleteDC(mem);
-    }
-    DeleteObject(bmp);
-    ReleaseDC(nullptr, screen);
+    ReleaseDC(hwnd, dc);
 }
 
 } // namespace cw

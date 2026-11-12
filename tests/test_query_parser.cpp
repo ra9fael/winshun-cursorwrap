@@ -129,6 +129,12 @@ CW_TEST(parser_numeric_settings_clamp)
     CW_CHECK(tolHi.value == 200);
 }
 
+CW_TEST(parser_tuner_commands)
+{
+    CW_CHECK(parseCommand("tune").kind == CommandKind::ToggleTuner);
+    CW_CHECK(parseCommand("调参").kind == CommandKind::ToggleTuner);
+}
+
 CW_TEST(parser_reset)
 {
     CW_CHECK(parseCommand("reset").kind == CommandKind::ResetToDefaults);

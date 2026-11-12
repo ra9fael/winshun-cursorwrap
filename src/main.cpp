@@ -221,7 +221,18 @@ protected:
 
     Items query(const Query& q) override
     {
-        const cw::ParsedCommand cmd = cw::parseCommand(q.text);
+        // Some host builds expose only the full raw query. In keyword mode,
+        // remove the matched alias before parsing the command tail.
+        std::string input = q.text;
+        if (input.empty()) {
+            input = q.raw;
+            if (q.trigger == "keyword" && !q.keyword.empty()
+                && cw::asciiLower(input).compare(0, cw::asciiLower(q.keyword).size(),
+                                                  cw::asciiLower(q.keyword)) == 0) {
+                input.erase(0, q.keyword.size());
+            }
+        }
+        const cw::ParsedCommand cmd = cw::parseCommand(input);
         switch (cmd.kind) {
         case cw::CommandKind::Show:
             return settingsList();
@@ -920,6 +931,15 @@ private:
         text += "wrap mode: " + modeLabel(m_settings.wrapMode, false) + "\n";
         text += "activation: " + activationLabel(m_settings.activation, false) + "\n";
         text += "monitors: " + intText(d.monitors) + "\n";
+        if (m_engine) {
+            const auto monitors = m_engine->monitorsSnapshot();
+            for (size_t i = 0; i < monitors.size(); ++i) {
+                const auto& monitor = monitors[i];
+                text += "display " + intText(static_cast<long long>(i)) + ": ["
+                    + intText(monitor.left) + "," + intText(monitor.top) + ".."
+                    + intText(monitor.right) + "," + intText(monitor.bottom) + "]\n";
+            }
+        }
         text += "outer edges: " + intText(d.outerEdges) + "\n";
         text += "moves: " + intText(d.stats.moves) + "\n";
         text += "wraps: " + intText(d.stats.wraps) + "\n";
@@ -952,6 +972,9 @@ private:
 
 int main()
 {
+    // Keep EnumDisplayMonitors, low-level hook coordinates, and SetCursorPos
+    // in the same physical-pixel coordinate space on mixed-DPI desktops.
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     CursorWrapPlugin plugin;
     return plugin.serve();
 }

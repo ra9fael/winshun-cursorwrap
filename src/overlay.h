@@ -16,12 +16,10 @@
 #include "wrap_logic.h"
 
 #include <atomic>
-#include <memory>
 #include <mutex>
 #include <thread>
 #include <vector>
 #include <windows.h>
-
 namespace cw {
 
 class Overlay {
@@ -50,7 +48,6 @@ public:
 
 private:
     void run();
-    void createWindows();
     void paintWindow(HWND hwnd, const MonitorBox& box);
     static LRESULT CALLBACK wndProcStatic(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
     LRESULT wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
