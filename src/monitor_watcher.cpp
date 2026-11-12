@@ -32,6 +32,10 @@ bool MonitorWatcher::start(RebuildSink onRebuild)
 {
     if (m_running.load())
         return true;
+    // A previous start() that failed leaves a joinable thread behind; joining it
+    // here is the only safe way to reuse this object (see stop()).
+    if (m_thread.joinable())
+        m_thread.join();
     m_onRebuild = std::move(onRebuild);
     m_running.store(true);
     m_thread = std::thread([this] { run(); });
@@ -40,11 +44,12 @@ bool MonitorWatcher::start(RebuildSink onRebuild)
 
 void MonitorWatcher::stop()
 {
-    if (!m_running.exchange(false))
-        return;
-    if (m_window) {
+    // Join whatever is joinable, never depend on m_running: run() clears it when
+    // the window cannot be created, and a joinable std::thread reaches
+    // std::terminate in its destructor.
+    m_running.store(false);
+    if (m_window)
         PostMessage(m_window, WM_CLOSE, 0, 0);
-    }
     if (m_thread.joinable())
         m_thread.join();
     m_window = nullptr;

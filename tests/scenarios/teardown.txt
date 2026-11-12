@@ -1,0 +1,61 @@
+# Teardown: opening and closing the windows repeatedly must not crash.
+#
+# The bug this pins down crashed the real plugin:
+#
+#   ra9fael.cursorwrap stderr: terminate called without an active exception
+#   ra9fael.cursorwrap: 退出（代码 1）
+#
+# A joinable std::thread destroyed without join() calls std::terminate. Every
+# component here cleared its own `m_running` flag when it stopped itself — the
+# data window's X button, a failed CreateWindowEx, a failed hook install — and
+# stop() then short-circuited on `!m_running.exchange(false)` and returned
+# WITHOUT joining. The window was already gone, so nothing looked wrong until
+# the object was destroyed.
+#
+# This scenario cannot assert the crash directly (a crash takes the process with
+# it), which is the point: tests/devshell_scenarios.py treats a non-zero exit as
+# a failure, so a regression here shows up as a dead shell.
+#
+# Run: build/cw_devshell.exe run tests/scenarios/teardown.txt
+
+monitor 0,0,1920,1080
+set impactGate on
+set speed 2000
+set band 150
+set guard 50
+
+# Open both.
+set tuningOverlay on
+set dataWindow on
+wait 250
+
+# Close them through their settings (the same path the settings page uses).
+set tuningOverlay off
+set dataWindow off
+wait 150
+
+# Repeat: a second stop() of an already-stopped component must be a no-op, and
+# a second start() must not assign over a joinable thread.
+set tuningOverlay on
+set dataWindow on
+wait 150
+set tuningOverlay off
+set dataWindow off
+wait 150
+set tuningOverlay on
+set dataWindow on
+wait 150
+
+# The explicit show path too, which is what `cursorwrap data` and `tune` use.
+show none
+wait 100
+show both
+wait 150
+show none
+wait 100
+
+# Samples still work after all that churn.
+expect wrap
+stroke 1400 540 1919 540 10 8
+
+wait 200

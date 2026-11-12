@@ -71,14 +71,23 @@ void DataWindow::start(Provider provider)
 {
     if (m_running.exchange(true))
         return;
+    // The previous run may have ended by itself (the X button clears
+    // m_running), leaving a joinable thread behind. Assigning over it is
+    // std::terminate, so join first.
+    if (m_thread.joinable())
+        m_thread.join();
     m_provider = std::move(provider);
     m_thread = std::thread([this] { run(); });
 }
 
 void DataWindow::stop()
 {
-    if (!m_running.exchange(false))
-        return;
+    // Join whatever is joinable, never depend on m_running: the window's own
+    // WM_CLOSE handler and the CreateWindowEx failure path both clear it, and a
+    // joinable std::thread reaches std::terminate in its destructor. That is
+    // exactly what a real host logged: closing the window with its X, then
+    // "terminate called without an active exception".
+    m_running.store(false);
     if (m_threadId)
         PostThreadMessage(m_threadId, WM_QUIT, 0, 0);
     if (m_thread.joinable())

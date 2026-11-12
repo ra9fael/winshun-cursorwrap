@@ -38,7 +38,7 @@ bool MouseHook::activationKeyHeld(ActivationMode mode)
 
 bool MouseHook::start(WrapEngine* engine, WrapSink onWrap)
 {
-    if (!engine || m_running.load())
+    if (!engine || m_running.load() || m_thread.joinable())
         return false;
     m_engine = engine;
     m_onWrap = std::move(onWrap);
@@ -51,16 +51,28 @@ bool MouseHook::start(WrapEngine* engine, WrapSink onWrap)
             break;
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-    if (!m_installed.load())
+    if (!m_installed.load()) {
+        // The hook thread bailed out and cleared m_running itself. Join it here,
+        // because stop() sees m_running already false and returns early -- the
+        // thread would then still be joinable when this object is destroyed, and
+        // a joinable std::thread in its destructor calls std::terminate.
+        // Observed on a real host: "terminate called without an active exception"
+        // followed by exit code 1.
+        if (m_thread.joinable())
+            m_thread.join();
+        m_running.store(false);
         return false;
+    }
     m_watchdog = std::thread([this] { watch(); });
     return true;
 }
 
 void MouseHook::stop()
 {
-    if (!m_running.exchange(false))
-        return;
+    // Always join, whatever m_running says: start() can leave a joinable thread
+    // behind when the install failed, and a joinable std::thread reaches
+    // std::terminate in its destructor.
+    m_running.store(false);
     if (m_threadId)
         PostThreadMessage(m_threadId, WM_QUIT, 0, 0);
     if (m_watchdog.joinable())

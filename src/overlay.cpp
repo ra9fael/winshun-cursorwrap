@@ -93,6 +93,11 @@ void Overlay::start(const std::vector<MonitorBox>& monitors)
 {
     if (m_running.load())
         stop();
+    // stop() joins, but be defensive: assigning over a joinable std::thread is
+    // std::terminate, and this method is called again whenever the settings or
+    // the layout change.
+    if (m_thread.joinable())
+        m_thread.join();
     m_monitors = monitors;
     if (m_monitors.empty())
         return;
@@ -102,8 +107,10 @@ void Overlay::start(const std::vector<MonitorBox>& monitors)
 
 void Overlay::stop()
 {
-    if (!m_running.exchange(false))
-        return;
+    // Join whatever is joinable, never depend on m_running: run() can clear it
+    // on its own, and a joinable std::thread reaches std::terminate in its
+    // destructor.
+    m_running.store(false);
     if (m_threadId)
         PostThreadMessage(m_threadId, WM_QUIT, 0, 0);
     if (m_thread.joinable())
