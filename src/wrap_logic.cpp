@@ -14,6 +14,22 @@ bool horizontal(EdgeType t) { return t == EdgeType::Left || t == EdgeType::Right
 
 } // namespace
 
+const char* skipReasonName(SkipReason reason)
+{
+    switch (reason) {
+    case SkipReason::None: return "wrapped";
+    case SkipReason::NoMonitors: return "no-monitors";
+    case SkipReason::SingleMonitor: return "single-monitor";
+    case SkipReason::Dragging: return "dragging";
+    case SkipReason::NoModifier: return "no-modifier";
+    case SkipReason::Guard: return "guard";
+    case SkipReason::OffMonitor: return "off-monitor";
+    case SkipReason::NotOnEdge: return "not-on-edge";
+    case SkipReason::ImpactGate: return "impact-gate";
+    }
+    return "unknown";
+}
+
 WrapEngine::WrapEngine(Settings settings)
     : m_settings(settings)
 {
@@ -58,6 +74,64 @@ void WrapEngine::resetState()
     m_arrivalSeq = 0;
     m_hasArrivalEdge = false;
     m_arrivalMonitor = -1;
+    m_decisions.clear();
+    m_decisionSeq = 0;
+    m_hasLastSample = false;
+    m_lastSample = { kNever, kNever };
+    m_lastReason = SkipReason::None;
+}
+
+void WrapEngine::noteDecision(const Sample& sample, SkipReason reason, bool onEdge,
+                              const EdgeVerdict& verdict, int monitorIndex)
+{
+    Decision d;
+    d.seq = ++m_decisionSeq;
+    d.tUs = sample.tUs;
+    d.x = sample.x;
+    d.y = sample.y;
+    d.monitorIndex = monitorIndex;
+    d.edge = verdict.edge;
+    d.onEdge = onEdge;
+    d.measuredPps = verdict.measuredPps;
+    d.gatePps = verdict.thresholdPps;
+    d.reason = reason;
+    d.wrapped = reason == SkipReason::None;
+    m_decisions.push_back(d);
+    if (m_decisions.size() > kDecisionMax)
+        m_decisions.erase(m_decisions.begin(),
+                          m_decisions.begin() + (m_decisions.size() - kDecisionMax));
+}
+
+void WrapEngine::noteSkip(SkipReason reason, const Sample& sample, int monitorIndex,
+                          const EdgeVerdict* verdict)
+{
+    ++m_stats.suppressed;
+    const int index = static_cast<int>(reason);
+    if (index >= 0 && index < kSkipReasonCount)
+        ++m_stats.skipped[index];
+    // Log the first sample of a run, not every event of it: a slow drift
+    // along the bottom edge is one "not-on-edge", not four hundred.
+    if (reason != m_lastReason) {
+        const EdgeVerdict none {};
+        noteDecision(sample, reason, verdict != nullptr, verdict ? *verdict : none,
+                     monitorIndex);
+    }
+    m_lastReason = reason;
+}
+
+std::vector<Decision> WrapEngine::decisions() const
+{
+    std::lock_guard lock(m_mutex);
+    return m_decisions;
+}
+
+bool WrapEngine::lastSample(Sample& out) const
+{
+    std::lock_guard lock(m_mutex);
+    if (!m_hasLastSample)
+        return false;
+    out = m_lastSample;
+    return true;
 }
 
 CursorDirection WrapEngine::direction(const Sample& s) const
@@ -178,35 +252,38 @@ std::pair<int64_t, int64_t> WrapEngine::onMouseMove(const Sample& sample, bool m
     std::lock_guard lock(m_mutex);
     ++m_stats.moves;
     noteSample(sample);
+    m_lastSample = sample;
+    m_hasLastSample = true;
 
-    const auto skip = [&]() {
-        ++m_stats.suppressed;
+    // Every exit funnels through here so the per-reason counters see every
+    // move: "it does not wrap at all" is only answerable when the diagnostic
+    // says WHICH gate keeps saying no.
+    const auto skip = [&](SkipReason reason, int monitorIndex = -1,
+                          const EdgeVerdict* verdict = nullptr) {
+        noteSkip(reason, sample, monitorIndex, verdict);
         m_previous = sample;
         m_hasPrevious = true;
         return std::pair { sample.x, sample.y };
     };
 
     if (!m_topology.monitorCount())
-        return skip();
-    if (m_settings.disableOnSingleMonitor && m_topology.monitorCount() <= 1)
-        return skip();
+        return skip(SkipReason::NoMonitors);
+    const int monitorCount = static_cast<int>(m_topology.monitorCount());
+    if (m_settings.disableOnSingleMonitor && monitorCount <= 1)
+        return skip(SkipReason::SingleMonitor);
     if (m_settings.disableDuringDrag && leftButtonHeld)
-        return skip();
+        return skip(SkipReason::Dragging);
     if (m_settings.activation != ActivationMode::Always && !modifierHeld)
-        return skip();
+        return skip(SkipReason::NoModifier);
     if (withinGuard(sample.x, sample.y)) {
         m_verdict.guardBlocked = true;
-        return skip();
+        return skip(SkipReason::Guard);
     }
     if (m_hasLastWrap && !withinGuard(sample.x, sample.y))
         m_hasLastWrap = false;
-    const int index = m_topology.monitorAt(sample.x, sample.y);
-    if (index < 0) {
-        // Off every monitor (should not happen for real pointers).
-        m_previous = sample;
-        m_hasPrevious = true;
-        return { sample.x, sample.y };
-    }
+    const int index = m_topology.nearestMonitor(sample.x, sample.y);
+    if (index < 0)
+        return skip(SkipReason::OffMonitor); // no monitors at all
 
     const CursorDirection dir = direction(sample);
     EdgeType edge = EdgeType::Left;
@@ -214,7 +291,7 @@ std::pair<int64_t, int64_t> WrapEngine::onMouseMove(const Sample& sample, bool m
                                 m_settings.edgeThresholdPx)) {
         // Left the edge (or never reached one): the next arrival is a new one.
         m_hasArrivalEdge = false;
-        return skip();
+        return skip(SkipReason::NotOnEdge, index);
     }
 
     // Impact gate: reaching the edge must look like a hit, not a drift.
@@ -285,7 +362,7 @@ std::pair<int64_t, int64_t> WrapEngine::onMouseMove(const Sample& sample, bool m
         m_hasArrivalEdge = true;
     }
     if (gatedOut)
-        return skip();
+        return skip(SkipReason::ImpactGate, index, &m_verdict);
 
     const auto [nx, ny] = m_topology.wrapDestination(index, sample.x, sample.y, edge,
                                                      m_settings.wrapMode);
@@ -298,6 +375,8 @@ std::pair<int64_t, int64_t> WrapEngine::onMouseMove(const Sample& sample, bool m
         m_lastWrap = { nx, ny };
         m_hasLastWrap = true;
         ++m_stats.wraps;
+        noteDecision(sample, SkipReason::None, true, m_verdict, index);
+        m_lastReason = SkipReason::None;
         m_history.clear(); // the landing point starts a fresh movement
         return { nx, ny };
     }
@@ -443,6 +522,10 @@ void applySettings(const RawSettings& raw, Settings& out, bool merge)
         out.disableOnSingleMonitor = raw.disableOnSingleMonitor;
     if (raw.hasImpactGate)
         out.impactGate = raw.impactGate;
+    if (raw.hasTuningOverlay)
+        out.tuningOverlay = raw.tuningOverlay;
+    if (raw.hasDataWindow)
+        out.dataWindow = raw.dataWindow;
 
     auto applyNumber = [](double v, bool has, int lo, int hi, int def, int prev) {
         if (!has)

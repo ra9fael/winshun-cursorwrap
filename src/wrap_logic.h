@@ -40,6 +40,12 @@ struct Settings {
     bool impactGate = false;
     int impactSpeedPps = 2000;      // 500..20000 px/s
     int impactBandPx = 150;         // 50..500 px: the approach band speed is measured in
+    // The two runtime windows. They live in Settings (not only in the command
+    // layer) so the host card, the search bar and the persisted overrides all
+    // see the same switch: the plugin's settings page must be able to turn on
+    // what the search bar can turn on.
+    bool tuningOverlay = false;     // draw the edge bands and the readout
+    bool dataWindow = false;        // show the live data window
 };
 
 // Parsed-setting values straight from the host JSON, already type-checked.
@@ -56,6 +62,8 @@ struct RawSettings {
     bool impactGate = false;
     double impactSpeedPps = 2000;
     double impactBandPx = 150;
+    bool tuningOverlay = false;
+    bool dataWindow = false;
     bool hasWrapMode = false;
     bool hasActivation = false;
     bool hasDrag = false;
@@ -66,6 +74,8 @@ struct RawSettings {
     bool hasImpactGate = false;
     bool hasImpactSpeed = false;
     bool hasImpactBand = false;
+    bool hasTuningOverlay = false;
+    bool hasDataWindow = false;
 };
 
 // Apply RawSettings onto Settings. Every bad value falls back to the default
@@ -83,12 +93,48 @@ struct Sample {
     long long tUs = 0;
 };
 
+// Why a move did not wrap. A single "suppressed" total is useless when the
+// user reports "it does not wrap at all": nine different gates can each say
+// no, and only the split tells them apart.
+enum class SkipReason : int {
+    None = 0,       // the move wrapped
+    NoMonitors,
+    SingleMonitor,
+    Dragging,
+    NoModifier,
+    Guard,
+    OffMonitor,
+    NotOnEdge,
+    ImpactGate,
+};
+inline constexpr int kSkipReasonCount = static_cast<int>(SkipReason::ImpactGate) + 1;
+
+// The name used in diagnostics and the data window (English, stable).
+const char* skipReasonName(SkipReason reason);
+
 // Statistics for the status row and diagnostics copy.
 struct Stats {
     long long moves = 0;      // all WM_MOUSEMOVE events seen
     long long wraps = 0;      // wraps performed
-    long long suppressed = 0; // recognized-but-skipped (guard, drag, single, activation, impact)
+    long long suppressed = 0; // sum of `skipped` (kept for the existing rows)
     long long rebuilt = 0;    // topology rebuilds
+    long long skipped[kSkipReasonCount] = {}; // per-reason counts
+};
+
+// One recorded decision: an edge arrival, or a change of the reason a move
+// was skipped. Bounded so a long session cannot grow without limit.
+struct Decision {
+    long long seq = 0;
+    long long tUs = 0;
+    int64_t x = 0;
+    int64_t y = 0;
+    int monitorIndex = -1;
+    EdgeType edge = EdgeType::Left;
+    bool onEdge = false;
+    long long measuredPps = 0;
+    long long gatePps = 0;
+    SkipReason reason = SkipReason::None; // None + wrapped: an accepted arrival
+    bool wrapped = false;
 };
 
 // One edge-arrival verdict, for the tuning overlay and diagnostics: what the
@@ -139,6 +185,13 @@ struct Diagnostics {
     Settings settings;
     Stats stats;
     std::vector<std::string> gaps; // human-readable layout gap notes
+    // Hook health, filled in by the plugin (wrap_logic does not see the hook).
+    long long hookReinstalls = 0;   // times the watchdog reinstalled the hook
+    long long hookMissed = 0;       // watchdog cycles that saw a moved pointer
+                                    // with no event: the hook was being dropped
+    long long hookDropped = 0;      // hook callbacks Windows reported as timed out
+    long long setCursorFailures = 0; // SetCursorPos said no (no wrap happened)
+    bool hookResponsive = true;      // false after the last watchdog fired
 };
 
 class WrapEngine {
@@ -175,6 +228,17 @@ public:
     // Drop the recorded arrivals (the tuner's "clear" action).
     void clearArrivals();
     static constexpr size_t kTraceMax = 512;
+
+    // The most recent decisions (arrivals and first-of-a-run skip reasons),
+    // newest last. Answers "why did the last push not wrap?" in the data
+    // window; bounded by kDecisionMax.
+    std::vector<Decision> decisions() const;
+    static constexpr size_t kDecisionMax = 24;
+
+    // The last mouse position the engine saw, even when the move was
+    // skipped. The data window draws it so the user sees the pointer the
+    // engine sees.
+    bool lastSample(Sample& out) const;
 
     // A copy of the current monitor boxes (the overlay windows cover them).
     std::vector<MonitorBox> monitorsSnapshot() const;
@@ -224,6 +288,21 @@ private:
     EdgeType m_arrivalEdge = EdgeType::Left;
     int m_arrivalMonitor = -1;
     bool m_hasArrivalEdge = false;
+    // The decision log and the last position seen (for the data window).
+    std::vector<Decision> m_decisions;
+    long long m_decisionSeq = 0;
+    Sample m_lastSample { kNever, kNever };
+    bool m_hasLastSample = false;
+    // The skip reason of the previous sample: a decision is logged when it
+    // changes, not on every event (a 1000 Hz mouse would flood the log).
+    SkipReason m_lastReason = SkipReason::None;
+
+    // Record one decision (mutex held by the caller). Bounded by kDecisionMax.
+    void noteDecision(const Sample& sample, SkipReason reason, bool onEdge,
+                      const EdgeVerdict& verdict, int monitorIndex);
+    // Count a skip and log its reason when it is new (mutex held).
+    void noteSkip(SkipReason reason, const Sample& sample, int monitorIndex,
+                  const EdgeVerdict* verdict = nullptr);
 };
 
 } // namespace cw
