@@ -185,7 +185,11 @@ seq,t_us,monitor,edge,measured_pps,gate_pps,wrapped,gate_off
 - 若系统因 `LowLevelHooksTimeout` 把钩子摘掉，本版有**看门狗**：每秒比对真实光标
   位置与钩子最后报告的位置，连续两个周期「光标动了但没有事件」就判定掉线并重装，
   `cursorwrap diag` 里的 `hook reinstalls` / `hook responsive` 会记下来
-- 远程桌面会话只有一块虚拟屏，走单屏语义
+- **远程桌面（RDP）支持**：会话里只有一块虚拟屏，走单屏语义——左右边缘照样回绕，
+  落点为对侧内缩 1px（右边缘 → `x=1`，左边缘 → `x=1918`）。状态行会标出
+  `远程桌面`，并在「单屏时禁用」把它关掉时明确写出
+  `disabled on one monitor`。断开重连时的 `WM_DISPLAYCHANGE` 不会再清空显示器拓扑
+  （空枚举会被拒绝并计入 `rebuildRefused`）
 - 高对比度、放大镜等辅助功能未专门验证
 - 与 PowerToys 原版的差异：没有「快捷键触发回绕」模式，也没有按进程自动启停
 
@@ -231,11 +235,15 @@ C++ 运行时，目标机器不需要 MinGW。MSVC 构建用静态运行库（`/
 ## 测试
 
 ```powershell
-ctest --test-dir build --output-on-failure       # L1：86 用例 + 7 布局 fixture
-python tests/protocol_roundtrip.py               # L3：63 项协议往返检查
-python tests/live_wrap_probe.py                  # L4 单屏：真实 SetCursorPos 手势
+ctest --test-dir build --output-on-failure       # L1：121 用例 + 7 布局 fixture
+python tests/protocol_roundtrip.py               # L3：118 项协议往返检查
+python tests/repeat_push_probe.py                # L4 单屏 / 远程桌面：真实 SetCursorPos 多轮推送
+python tests/injected_wrap_probe.py              # L4：注入事件（LLMHF_INJECTED）仍能回绕
 python tests/validate.py                         # L0：清单/双语文档/打包静态校验
 ```
+
+> `tests/live_wrap_probe.py` 的判据（光标位置 ≠ 目标）不成立——被边缘夹住也算「变了」。
+> 它的结论已撤回，请用 `repeat_push_probe.py`（以插件计数器 `delta_wraps` 为判据）。
 
 设计说明见 [docs/spec.md](docs/spec.md)，测试规格见 [docs/tests.md](docs/tests.md)，
 本轮验证证据见 [docs/validation.md](docs/validation.md)。

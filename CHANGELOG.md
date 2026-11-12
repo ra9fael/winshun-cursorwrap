@@ -9,6 +9,44 @@ single source of truth; release tags are `v<version>`.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-13
+
+### Added
+
+- **远程桌面（RDP）兼容**：状态行与诊断信息标注 `远程桌面` / `remote session`，
+  说明「这台机器平时双屏、现在只有一块」是会话类型而非故障；诊断新增
+  `remote session` 与 `rebuilds refused (empty enumeration)` 两个字段。
+- 单屏且 `disableOnSingleMonitor` 开启时，状态行明确写出
+  `单屏禁用已生效：只有一块屏，回绕不会发生`——这是 RDP 下唯一会静默关掉回绕的
+  设置项，不写出来用户会以为插件坏了。
+- 新增 `tests/rdp_wrap_probe.py`、`tests/repeat_push_probe.py`、
+  `tests/injected_wrap_probe.py`：用插件自己的计数（`wraps` / `moves` /
+  分原因跳过）判断是否回绕，并校验落点是否为文档规定的内缩 1px。
+
+### Fixed
+
+- **RDP 重连/缩放会清空拓扑**：`EnumDisplayMonitors` 在会话重连或分辨率切换的瞬间
+  可能返回**空列表**，而 `WM_DISPLAYCHANGE` 正好在那个窗口触发；旧代码会把空列表
+  当成新布局，清掉可用拓扑并让插件在整段会话里失效。现在：
+  1. `WrapEngine::rebuild` 拒绝空枚举（保留上一份可用布局）并计入
+     `rebuildRefused`；
+  2. `enumerateMonitors` 在枚举为空时回退到虚拟屏矩形
+     （`SM_*VIRTUALSCREEN`），让通知永远不会把插件变成无布局状态。
+  真正的布局变化（拔掉外接屏、会话结束回到双屏）仍然立即生效。
+- **旧的单屏真机探针判定不成立**：`tests/live_wrap_probe.py` 用
+  `cursor_pos() != target` 判定"回绕了"，但没走到目标是同一结果。实测证据里
+  `after=[1888,540]`（目标 1919）被判成"回绕成功"，而单屏右边缘回绕的落点必须是
+  `x=1`。新探针改为核对插件自己的 `wraps` 增量 + 落点坐标，`live_wrap_probe.py`
+  的这份证据随之作废（见 `docs/validation.md`）。
+
+### Verified on a real Remote Desktop session
+
+`tests/repeat_push_probe.py` 在一台真实 RDP 会话（`remote=1`、1920×1080 单虚拟屏）
+上各跑 3 轮：**6/6 全部回绕**，右边缘落点 `x=1`、左边缘落点 `x=1918`，
+`y_stable=True`（证明没有外部力量干扰）。`tests/injected_wrap_probe.py` 另外证明
+注入输入（`SendInput`，`LLMHF_INJECTED`）同样能回绕：`injected_seen=16` 且
+`delta_wraps=1`——所以插件丢弃注入事件的过滤**不会**让 RDP 用户的真实输入失效。
+
 ## [0.2.0] - 2026-11-12
 
 ### Added

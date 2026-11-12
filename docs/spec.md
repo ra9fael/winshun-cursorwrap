@@ -324,6 +324,24 @@ gate_pps,wrapped,gate_off`），可以离线画图或验证建议值；`clear` /
 真机运行中记录到 1008 次。纯逻辑（`wrap_topology`、`wrap_logic`）不引任何 OS
 头文件，显示器以 `MonitorBox` 结构体注入，因此单测在任意平台可跑。
 
+### 远程桌面（RDP）
+
+RDP 会话对本插件的影响有三点，且都不是"不支持"：
+
+1. **只有一块虚拟屏**。这是正常配置：单屏时回绕到本屏对边（右边缘 → 左边缘
+   `x=1`，左边缘 → 右边缘 `x=1918`）。真机 RDP 会话实测 6/6 回绕成功。
+2. **`disableOnSingleMonitor` 会静默关掉回绕**。它是单屏下唯一会让用户以为
+   "插件坏了"的设置项，所以状态行在命中该条件时明确写出
+   `单屏禁用已生效：只有一块屏，回绕不会发生`，并标注 `远程桌面`。
+3. **重连/缩放会触发 `WM_DISPLAYCHANGE`，而此时枚举可能为空**。这是真 bug：
+   旧代码把空列表当成新布局，清掉拓扑后整段会话失效。现在 `rebuild` 拒绝空枚举
+   （保留上一份布局并计入 `rebuildRefused`），`enumerateMonitors` 在为空时回退到
+   `SM_*VIRTUALSCREEN` 矩形。真正的布局变化（拔屏、会话结束回到双屏）仍然立即生效。
+
+注入输入不影响 RDP：`SendInput` 产生的事件带 `LLMHF_INJECTED`，插件丢弃这些事件的
+过滤看似会挡住 RDP 的真实输入，实测证明不会——`injected_seen=16` 的同时
+`delta_wraps=1`，因为同一移动还会产生一条不带该标志的事件供引擎判定。
+
 ## 9 数据位置
 
 设置由宿主在 `WinShun.ini` 管理；搜索栏改动写进 `WS_DATA_DIR\settings.json`
@@ -340,6 +358,7 @@ gate_pps,wrapped,gate_off`），可以离线画图或验证建议值；`clear` /
 | `SetCursorPos` 失败 | 不吞事件，原样放行，计入 `setcursorpos failures` | 该次不移动，不产生「卡住」 |
 | 显示器枚举为空 | 引擎空转，不吞任何事件 | 状态行显示 0 块屏 |
 | 指针短暂落在所有屏幕矩形之外 | 归到最近的一块屏继续判定 | 不再当作 `off-monitor` 吞掉 |
+| 远程桌面（RDP）重连/缩放导致枚举为空 | `rebuild` 拒绝空枚举并计数，`enumerateMonitors` 回退到虚拟屏矩形 | 保留上一份可用布局，会话内不再失效 |
 | 布局有坐标缝隙（GPU 驱动怪癖） | 缝隙 ≤ 容差仍算相邻；更大的缝隙按外边处理 | 诊断里列出缝隙 |
 | 远程会话（RDP） | 只有一块虚拟屏 | 单屏语义（默认回绕到本屏对边） |
 | 屏被热拔/热插 | 500ms 防抖后重建，移动历史清零 | 无崩溃、无错位 |
@@ -362,6 +381,8 @@ gate_pps,wrapped,gate_off`），可以离线画图或验证建议值；`clear` /
   `hook reinstalls` 与 `hook responsive` 就是给这种情况用的。
 - 独占全屏（exclusive fullscreen）D3D 应用里外框可能不生效。
 - 高对比度/放大镜等辅助功能未专门验证。
+- 远程桌面（RDP）**是支持的**：会话里只有一块虚拟屏，走单屏语义（见 §10）。断开重连
+  不再清空拓扑，状态行会标出 `远程桌面`。
 - 与 PowerToys CursorWrap 的差异：不实现 `activation_shortcut` 热键触发模式，
   也不实现「自动激活」的进程白名单。
 
@@ -401,7 +422,9 @@ gate_pps,wrapped,gate_off`），可以离线画图或验证建议值；`clear` /
   注入的几何快照。
 - 真实鼠标移动下的 `SetCursorPos` 落点、拖拽抑制手感、按住 Ctrl 的互不干扰。
 - 热插拔/`WM_DISPLAYCHANGE` 的真实重建时序（代码路径只有合成测试）。
-- 远程会话、独占全屏、高对比度、放大镜。
+- 独占全屏、高对比度、放大镜。
+- 远程会话的断开重连时序（`rebuildRefused` 只有单测；**单屏 RDP 回绕本身已实测**
+  6/6，见 `docs/validation.md`）。
 - 在真实 Win顺 宿主里安装 `.wsplugin` 并启用（L3 目前是直接驱动 exe 的 stdio 往返，
   不是宿主集成）。
 

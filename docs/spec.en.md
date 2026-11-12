@@ -384,6 +384,32 @@ swallows the wrap — a real-machine run logged 1008 such samples. The pure core
 (`wrap_topology`, `wrap_logic`) includes no OS headers — monitors enter as
 `MonitorBox` values — so the engine unit-tests anywhere.
 
+### Remote Desktop (RDP)
+
+An RDP session affects this plugin in three ways, none of them "unsupported":
+
+1. **One virtual display.** That is a working configuration: on a single display
+   wrapping goes to that display's opposite edge (right edge → left edge `x=1`,
+   left edge → right edge `x=1918`). Measured on a real RDP session: 6/6 wraps.
+2. **`disableOnSingleMonitor` silently switches wrapping off.** It is the only
+   setting that makes a one-display user conclude the plugin is broken, so the
+   status row spells it out — `disabled on one monitor: only one display, so
+   nothing wraps` — and marks the session as `remote session`.
+3. **A reconnect or resize fires `WM_DISPLAYCHANGE` while the enumeration can be
+   empty.** That was a real bug: the old code applied the empty list as the new
+   layout, erased the topology and left the plugin inert for the rest of the
+   session. Now `rebuild` refuses an empty enumeration (keeping the last good
+   layout and counting it in `rebuildRefused`), and `enumerateMonitors` falls
+   back to the `SM_*VIRTUALSCREEN` rectangle when it comes back empty. Genuine
+   changes (unplugging a monitor, the session ending and the desk layout
+   returning) still apply immediately.
+
+Injected input does not break RDP: `SendInput` events carry `LLMHF_INJECTED`,
+and the filter that drops them looks like it would block a Remote Desktop user's
+real input. Measurement says it does not — `injected_seen=16` with
+`delta_wraps=1`, because the same movement also produces an untagged event for
+the engine to judge.
+
 ## 11 Data
 
 Settings are managed by the host in `WinShun.ini`; search-bar changes go to
@@ -400,7 +426,8 @@ names or user text).
 | The hook is silently unhooked | the watchdog reinstalls it after 2 cycles and counts it, `log(warn)` | recovers without a restart |
 | `SetCursorPos` fails | the move is passed through untouched and counted in `setcursorpos failures` | that wrap does not happen; no stuck cursor |
 | Display enumeration empty | engine idles, swallows nothing | status shows 0 displays |
-| The pointer is briefly outside every rect | attributed to the nearest display and judged normally | no longer swallowed as `off-monitor` |
+| 指针短暂落在所有屏幕矩形之外 | 归到最近的一块屏继续判定 | 不再当作 `off-monitor` 吞掉 |
+| An RDP reconnect or resize returns an empty enumeration | `rebuild` refuses it and counts it; `enumerateMonitors` falls back to the virtual-screen rect | the last good layout survives; the session is not left inert |
 | Layout has coordinate gaps (GPU driver) | gaps within the tolerance still count as adjacent; larger ones become outer edges | gaps are listed in diagnostics |
 | Remote session (RDP) | one virtual display | single-monitor semantics |
 | Display hot-plugged | rebuilt after the debounce, movement history cleared | no crash, no stale edges |
@@ -425,6 +452,9 @@ names or user text).
   for.
 - Exclusive-fullscreen D3D applications may not see the outer edges.
 - High contrast / Magnifier not specifically verified.
+- Remote Desktop works and is supported (one virtual display, single-display
+  semantics; see §10). A `WM_DISPLAYCHANGE` during reconnect can no longer erase
+  the topology, and the status row marks the session as `remote session`.
 - Differences from PowerToys CursorWrap: no `activation_shortcut` hotkey trigger
   and no auto-activate process whitelist.
 
@@ -471,7 +501,10 @@ names or user text).
 - Real pointer movement with `SetCursorPos`, drag suppression feel, and
   coexistence with a Ctrl-held gesture from another plugin.
 - Hot-plug / `WM_DISPLAYCHANGE` rebuild timing (only synthetic paths exercised).
-- Remote sessions, exclusive fullscreen, high contrast, Magnifier.
+- Exclusive fullscreen, high contrast, Magnifier.
+- The Remote Desktop disconnect/reconnect timing (`rebuildRefused` is unit-tested
+  only; **single-display RDP wrapping itself is measured** 6/6, see
+  `docs/validation.en.md`).
 - Installing the `.wsplugin` into a real WinShun host and enabling it: the round
   trip above drives the executable's stdio directly, it is not host integration.
 

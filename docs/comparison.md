@@ -130,13 +130,15 @@ PowerToys 没有任何等价物——它只有拖拽抑制和（可选）热键�
 - PowerToys `MouseHookProc` **不过滤** `LLMHF_INJECTED`。它 `SetCursorPos` 落点
   后 `return 1` 吞掉原始 move；落点产生的新 move（系统注入）再进钩子时，靠
   `IsWithinWrapThreshold` 的 50px 防震荡半径判定不回绕。
-- 本插件 `LLMHF_INJECTED` 一律只观察不回绕——包括**自己 `SetCursorPos` 产生的**
-  事件？实测否：真机探针证实自己的 `SetCursorPos` 事件**不带** injected 标志
-  （`live-wrap-evidence.json`，27 条事件 injected_seen=0），所以插件的回绕落点
-  不会被自己的钩子拒绝，行为与 PowerToys 等效，同时把「其他程序瞬移光标」挡在
+- 本插件 `LLMHF_INJECTED` 一律只观察不回绕——包括**自己 `SetCursorPos` 产生的**事件？
+  实测否：真机探针证实自己的 `SetCursorPos` 事件**不带** injected 标志
+  （`flags=0x0`、`extra=0x0`，`injected_wrap_probe.py` 逐字段复核），所以插件的回绕
+  落点不会被自己的钩子拒绝，行为与 PowerToys 等效，同时把「其他程序瞬移光标」挡在
   门外（PowerToys 会被这类程序触发回绕，本插件不会）。
-- 影响：如果远程桌面/无障碍工具以 injected 方式送 move，PowerToys 会绕、
-  本插件不会。这是有意取舍（`ignoreInjected` 在 findmouse 也是默认开）。
+- 影响：**远程桌面不受影响**。`SendInput` 确实产生带 `LLMHF_INJECTED` 的事件，但同一次
+  移动还会产生一个不带标记的事件供引擎判定，实测 `injected_seen=16` 时
+  `delta_wraps=1`——注入输入照常回绕。这一点原先写成「RDP 会失效」，是错的。
+  真正被挡在门外的是「只有注入、没有伴随真实事件」的光标瞬移。
 
 ### 5.3 增强：线程安全
 

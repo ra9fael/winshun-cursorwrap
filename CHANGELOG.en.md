@@ -9,6 +9,55 @@ single source of truth; release tags are `v<version>`.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-13
+
+### Added
+
+- **Remote Desktop (RDP) compatibility**: the status row and diagnostics mark
+  `remote session`, so "this machine usually has two displays but now reports
+  one" reads as the session type rather than a fault. Diagnostics gained
+  `remote session` and `rebuilds refused (empty enumeration)`.
+- With one display and `disableOnSingleMonitor` on, the status row now says
+  `disabled on one monitor: only one display, so nothing wraps` — that is the
+  one setting that can silently switch wrapping off over RDP, and leaving it
+  unsaid makes the plugin look broken.
+- New probes `tests/rdp_wrap_probe.py`, `tests/repeat_push_probe.py` and
+  `tests/injected_wrap_probe.py`. They judge a wrap by the plugin's own counters
+  (`wraps`, `moves`, the per-reason skips) and check the landing point against
+  the documented one-pixel inset.
+
+### Fixed
+
+- **An RDP reconnect or resize could wipe the topology**: `EnumDisplayMonitors`
+  can return an **empty list** at the instant a session reconnects or changes
+  resolution, and `WM_DISPLAYCHANGE` fires inside exactly that window. The old
+  code applied the empty list as the new layout, erasing a working topology and
+  leaving the plugin inert for the rest of the session. Now:
+  1. `WrapEngine::rebuild` refuses an empty enumeration (keeping the last good
+     layout) and counts it in `rebuildRefused`;
+  2. `enumerateMonitors` falls back to the virtual-screen rectangle
+     (`SM_*VIRTUALSCREEN`) when the enumeration comes back empty, so no
+     notification can leave the plugin without a layout.
+  Real changes (unplugging a monitor, the session ending and the desk layout
+  returning) still apply immediately.
+- **The old single-display probe's oracle did not hold**: `tests/live_wrap_probe.py`
+  decided "it wrapped" from `cursor_pos() != target`, which is equally true when
+  the push merely stops short. In the captured evidence `after=[1888,540]`
+  (commanded 1919) was recorded as a successful wrap, while a right-edge wrap on
+  one display must land at `x=1`. The new probes check the plugin's `wraps`
+  delta plus the landing coordinate; that earlier evidence is retracted in
+  `docs/validation.md`.
+
+### Verified on a real Remote Desktop session
+
+`tests/repeat_push_probe.py` ran 3 rounds per direction on a real RDP session
+(`remote=1`, one 1920×1080 virtual display): **6/6 wrapped**, landing at `x=1`
+from the right edge and `x=1918` from the left, with `y_stable=True` (which
+proves no outside force moved the pointer). `tests/injected_wrap_probe.py`
+additionally shows injected input (`SendInput`, `LLMHF_INJECTED`) wraps too:
+`injected_seen=16` with `delta_wraps=1` — so the filter that drops injected
+events does **not** disable a Remote Desktop user's real input.
+
 ## [0.2.0] - 2026-11-12
 
 ### Added

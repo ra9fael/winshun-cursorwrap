@@ -17,7 +17,7 @@
 | 打包物含 `plugin.json` / `cursorwrap.exe` / `README.md` / `LICENSE`，无 `build/`、`dist/`、`.git` | §8 | `tools/package.py` + `tools/ci_release.py` |
 | 双语文档锚点互链（`docs/spec*.md`、`docs/tests*.md`、README、CHANGELOG） | — | 通过 |
 
-## L1 — 纯逻辑单测（`cw_tests`，ctest 目标，116 用例 + 7 布局 fixture）
+## L1 — 纯逻辑单测（`cw_tests`，ctest 目标，121 用例 + 7 布局 fixture）
 
 不引 OS 头文件，任何平台可跑。运行：
 
@@ -62,6 +62,7 @@ ctest --test-dir build --output-on-failure
 | `lastSample` | 被抑制的移动也算「引擎最后看到的位置」 | §8 |
 | 最近屏归位 | `monitorAt` 保持精确（屏外 -1，布局测试依赖）；`nearestMonitor` 屏外归最近屏、空布局仍 -1；布局外 1px 的指针不得关闭回绕 | §5 |
 | 用户真机配置复现 | 双屏 `[-2560,0..0,1440] + [0,0..2560,1440]`、`wrapMode=horizontal`、`guard=100`、`tol=10`：关门槛双向回绕落点正确；内边永不回绕；开门槛时 5000 px/s 命中回绕；慢漂只被 `impact-gate` 拦下且其他原因计数为 0；拖拽计入 `dragging` | §5 §9 |
+| 远程桌面（RDP） | 单虚拟屏 1920×1080 双向回绕落点为 `x=1` / `x=1918`；`disableOnSingleMonitor` 计入 `single-monitor`；**空枚举不得清空拓扑**（保留上一份布局 + 计入 `rebuildRefused` + 之后仍能回绕）；真正的布局变化（拔屏、会话结束回双屏）仍然立即生效；单屏下撞击门槛仍可测速并正确拦截 | §5 §10 |
 | 两个窗口是真设置 | `tuningOverlay` / `dataWindow` 经 `RawSettings` 往返保持；部分更新不会清掉它们 | §7 |
 | 布局 fixture | `tests/layouts/*.json` 六个合成布局逐条断言 | §5 |
 
@@ -120,21 +121,28 @@ python tests/protocol_roundtrip.py
 
 ## L4 — 真机交互 E2E（Windows 11，Win顺 0.22.0+）
 
-需真实桌面与至少两块屏。**单屏部分已实测**（见下），多屏部分全部未执行。
+需真实桌面与至少两块屏。**单屏（含远程桌面单屏）部分已实测**（见下），多屏部分全部未执行。
 
-### 已实测（单屏，2026-11-10）
+### 已实测（远程桌面单屏，2026-11-13）
 
-`tests/live_wrap_probe.py` 用真实 `SetCursorPos` + 真实钩子驱动真实插件进程：
+`tests/repeat_push_probe.py` 用真实 `SetCursorPos` + 真实钩子驱动真实插件进程，
+**以插件自己的计数器为判据**（`delta_wraps`），不猜光标位置：
 
-- [x] 推到右边缘 → 光标落在左边缘 (0, 536)
-- [x] 推到左边缘 → 光标落在右边缘 (1919, 540)
-- [x] 屏幕中间 → 不回绕
+- [x] 单虚拟屏 1920×1080，向右推到边缘 → `delta_wraps=1`，落点 `x=1`
+- [x] 向左推到边缘 → `delta_wraps=1`，落点 `x=1918`
+- [x] 6 轮连续推送全部回绕，`y_stable=True`（未被外力打断）
+- [x] 注入事件不破坏远程输入：`injected_seen=16` 时 `delta_wraps=1`
+- [x] 观察钩子确认插件自己的 `SetCursorPos` 不带 `LLMHF_INJECTED`（`flags=0x0`），不会被自己的钩子拒绝
 - [x] 进程干净退出 0
-- [x] 观察钩子确认插件自己的 `SetCursorPos` 不带 `LLMHF_INJECTED`，不会被自己的钩子拒绝
-- [x] 撞击模式（门槛 3000px/s）：快推 ≈5300px/s → 回绕；慢漂 ≈800px/s → 不回绕；
-      单次瞬移 → 不回绕（fail closed）；门槛关闭后行为与 0.1 一致
 
-证据：`tests/layouts/live-wrap-evidence.json`、`tests/layouts/live-single.json`。
+证据：`tests/layouts/rdp-wrap-evidence.json`。
+
+### ⚠ 已撤回的结论（`live_wrap_probe.py`）
+
+早期声称"5/6 通过"的判据说 `cursor_pos() != target` 即视为回绕成功。这个判据是错的：
+推送被 Windows 在边界上夹住（`after=[1888,540]`，而命令值 1919）也会满足它。
+`tests/layouts/live-wrap-evidence.json` 因此**不能作为回绕证据**，该文件的结论全部作废，
+仅保留 `live-single.json` 作为布局 fixture。判据必须是插件计数器 + 落点坐标。
 
 ### 未执行（多屏）
 
@@ -152,7 +160,7 @@ python tests/protocol_roundtrip.py
 - [ ] `disableOnSingleMonitor=true`：拔掉一块屏后不回绕
 - [ ] 拔出/插回显示器 → 拓扑在约 0.5s 后重建，回绕方向随之正确
 - [ ] 布局有缝隙（显示设置里两块屏未贴齐）→ 诊断里列出缝隙，行为可解释
-- [ ] 远程桌面会话 → 单屏语义，不误报
+- [ ] 远程桌面会话 → 单屏语义（已实测，见上）；断开重连期间的 `WM_DISPLAYCHANGE` 不得清空拓扑
 - [ ] 连续 30 分钟把光标推过边缘 → 无内存/句柄增长，无卡顿
 - [ ] 中英文 locale 下状态行与通知文案正确
 - [ ] `copyDiagnostics` 粘贴内容不含窗口标题、文件名、用户名
@@ -178,22 +186,25 @@ python tests/protocol_roundtrip.py
 | §7 设置 | L1 设置解析/类型混淆/两个窗口设置往返、L3 settingsChanged、L4 第 6–11 项 |
 | §8 架构与协议 | L3 全部、L4 第 1 项、数据窗口子菜单（L3） |
 | §9 数据 | L0 清单、L1 按原因计数 / 决策日志 / `lastSample`、L3 诊断与 `data` 子菜单 |
-| §10 失败处理 | L1 空/退化/极端坐标、L2 故障注入（未自动化）、L4 第 12–15 项 |
+| §10 失败处理 | L1 空/退化/极端坐标、L1 `rdp_*` 空枚举与单屏用例、L2 故障注入（未自动化）、L4 第 12–15 项 |
 | §11 权限 | L0 清单检查、L4 第 1 项 |
 
 ## 验收标准
 
-- L1 全绿（当前 116 用例 + 7 fixture，含真机采集的 `live-single.json`）
+- L1 全绿（当前 121 用例 + 7 fixture，含真机采集的 `live-single.json`）
 - L3 全通过（当前 118/118）
 - L0 静态校验通过
-- L4 单屏部分已实测通过；**多屏部分全部勾选后**才可宣布多屏可发布，
+- L4 单屏与远程桌面单屏部分已实测通过；**多屏部分全部勾选后**才可宣布多屏可发布，
   当前属发布阻塞项
 
 ## 没测的
 
 - L2 的注入事件与 `SetCursorPos` 失败路径没有自动化用例（需要真实钩子或故障注入）
-- L4 多屏部分未执行：多屏手感、热插拔、拖拽抑制、远程会话、独占全屏、高对比度、
+- L4 多屏部分未执行：多屏手感、热插拔、拖拽抑制、独占全屏、高对比度、
   放大镜都没有在真机上按验收清单逐项验证
+- 远程桌面的断开重连（`WM_DISPLAYCHANGE` + 空枚举路径）只有单测覆盖，没有在真实
+  会话切换中观察过 `rebuildRefused`
 - 看门狗的重装路径从未在真机上触发过（只有代码审查与数据窗口里的间接观察）
 - 数据窗口只在一次真机渲染中检查过内容，混合 DPI 布局未验证
 - `edgeThresholdPx` 设置项已接入判定（默认 1px），但只有合成几何验证，没有真机手感验证
+- 自动化推鼠标会被用户自己的鼠标打断：若 `y_stable=False` 该轮结果作废，需重跑

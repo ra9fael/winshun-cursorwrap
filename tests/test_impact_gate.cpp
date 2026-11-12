@@ -766,3 +766,106 @@ CW_TEST(pointer_one_pixel_below_the_layout_does_not_disable_wrapping)
     CW_CHECK(x != 2559 && x != 1440); // it wrapped, it did not fall through
     CW_CHECK_EQ(e.stats().skipped[static_cast<int>(SkipReason::OffMonitor)], 0);
 }
+
+//
+// Remote Desktop compatibility. An RDP session reports ONE virtual display and
+// fires WM_DISPLAYCHANGE while it reconnects or resizes — and during that
+// window EnumDisplayMonitors can legitimately return nothing. Applying an
+// empty enumeration would wipe a working topology and leave the plugin inert
+// for the rest of the session.
+//
+
+CW_TEST(rdp_single_display_wraps_to_its_own_opposite_edge)
+{
+    // What an RDP session actually reports: 1920x1080, nothing else.
+    Settings s;
+    s.wrapMode = WrapMode::Both;
+    WrapEngine e(s);
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    // Right edge wraps to the same display's left edge, one pixel inside.
+    CW_CHECK_EQ(e.onMouseMove({ 1919, 540, 1'000'000 }, false, false).first, 1);
+    CW_CHECK_EQ(e.stats().wraps, 1);
+    // Leave the anti-oscillation radius before the next attempt, or the guard
+    // (correctly) eats it: the landing point was x=1.
+    e.onMouseMove({ 960, 540, 1'500'000 }, false, false);
+    CW_CHECK_EQ(e.onMouseMove({ 0, 540, 2'000'000 }, false, false).first, 1918);
+    CW_CHECK_EQ(e.stats().wraps, 2);
+}
+
+CW_TEST(rdp_single_display_needs_the_switch_that_does_not_disable_it)
+{
+    // `disableOnSingleMonitor` is the one setting that silently turns wrapping
+    // off on a one-display machine — which is every RDP session. The engine
+    // must attribute it to that reason so the status row can say so.
+    Settings s;
+    s.disableOnSingleMonitor = true;
+    WrapEngine e(s);
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    CW_CHECK_EQ(e.onMouseMove({ 1919, 540, 1'000'000 }, false, false).first, 1919);
+    CW_CHECK_EQ(e.stats().wraps, 0);
+    CW_CHECK_EQ(e.stats().skipped[static_cast<int>(SkipReason::SingleMonitor)], 1);
+}
+
+CW_TEST(rdp_empty_enumeration_keeps_the_last_good_layout)
+{
+    // The reconnect window: EnumDisplayMonitors returns nothing.
+    WrapEngine e(userConfig(false));
+    e.rebuild(dualScreens());
+    const Stats before = e.stats();
+    e.rebuild({}); // what a WM_DISPLAYCHANGE during a reconnect delivers
+    CW_CHECK_EQ(e.monitorCount(), 2u); // the layout survived
+    CW_CHECK_EQ(e.stats().rebuilt, before.rebuilt); // and was not restarted
+    CW_CHECK_EQ(e.stats().rebuildRefused, before.rebuildRefused + 1);
+    // Wrapping still works on the retained layout.
+    CW_CHECK_EQ(e.onMouseMove({ 2559, 720, 1'000'000 }, false, false).first, -2559);
+    CW_CHECK_EQ(e.stats().wraps, 1);
+}
+
+CW_TEST(rdp_original_layout_returns_after_the_session_ends)
+{
+    // Disconnect the RDP session and the physical dual-display layout comes
+    // back. A genuine change must still be applied — only an EMPTY list is
+    // refused.
+    WrapEngine e(userConfig(false));
+    e.rebuild(dualScreens());
+    e.rebuild({});
+    CW_CHECK_EQ(e.monitorCount(), 2u);
+    e.rebuild({ box(0, 0, 1920, 1080, true) }); // RDP's single display
+    CW_CHECK_EQ(e.monitorCount(), 1u);
+    CW_CHECK_EQ(e.onMouseMove({ 1919, 540, 1'000'000 }, false, false).first, 1);
+    e.rebuild(dualScreens()); // back on the desk
+    CW_CHECK_EQ(e.monitorCount(), 2u);
+    CW_CHECK_EQ(e.onMouseMove({ 2559, 720, 2'000'000 }, false, false).first, -2559);
+}
+
+CW_TEST(rdp_impact_gate_measures_on_a_single_display)
+{
+    // The gate must be usable over RDP too: a fast hit on a single display
+    // wraps, a drift does not, and the speed is measured from real timestamps.
+    Settings s = userConfig(true);
+    s.wrapMode = WrapMode::Both;
+    WrapEngine fast(s);
+    fast.rebuild({ box(0, 0, 1920, 1080, true) });
+    long long t = 1'000'000;
+    int64_t x = 1750;
+    int wraps = 0;
+    for (int i = 0; i < 40 && !wraps; ++i) {
+        const auto [nx, ny] = fast.onMouseMove({ x, 540, t }, false, false);
+        if (nx != x)
+            ++wraps;
+        t += 4000;
+        x = x + 20 > 1919 ? 1919 : x + 20;
+    }
+    CW_CHECK_EQ(wraps, 1);
+    CW_CHECK(fast.lastVerdict().measuredPps >= 2000);
+
+    WrapEngine slow(s);
+    slow.rebuild({ box(0, 0, 1920, 1080, true) });
+    t = 1'000'000;
+    for (int64_t cx = 1819; cx <= 1919; ++cx) {
+        slow.onMouseMove({ cx, 540, t }, false, false);
+        t += 4000; // 250 px/s
+    }
+    CW_CHECK_EQ(slow.stats().wraps, 0);
+    CW_CHECK(slow.stats().skipped[static_cast<int>(SkipReason::ImpactGate)] >= 1);
+}

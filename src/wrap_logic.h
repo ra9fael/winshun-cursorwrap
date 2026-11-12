@@ -118,6 +118,10 @@ struct Stats {
     long long wraps = 0;      // wraps performed
     long long suppressed = 0; // sum of `skipped` (kept for the existing rows)
     long long rebuilt = 0;    // topology rebuilds
+    // Rebuilds refused because the enumeration came back empty while a
+    // topology was already known (an RDP reconnect or a resize race). A
+    // non-zero value here means "the desktop blinked", not "it broke".
+    long long rebuildRefused = 0;
     long long skipped[kSkipReasonCount] = {}; // per-reason counts
 };
 

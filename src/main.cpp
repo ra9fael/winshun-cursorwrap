@@ -118,6 +118,15 @@ cw::RawSettings rawFromJson(const Json& s)
     return raw;
 }
 
+// True when this process runs inside a Remote Desktop session. The session
+// type is worth reporting: it explains a one-display layout on a machine that
+// normally has two, and it is where a display change can arrive while the
+// enumeration is briefly empty.
+bool inRemoteSession()
+{
+    return GetSystemMetrics(SM_REMOTESESSION) != 0;
+}
+
 std::vector<cw::MonitorBox> enumerateMonitors()
 {
     std::vector<cw::MonitorBox> monitors;
@@ -137,6 +146,22 @@ std::vector<cw::MonitorBox> enumerateMonitors()
         }
         return TRUE;
     }, reinterpret_cast<LPARAM>(&monitors));
+    // EnumDisplayMonitors returns nothing while an RDP session reconnects or
+    // resizes. Fall back to the virtual-screen rectangle, which the display
+    // driver keeps correct in those windows, so a notification never leaves
+    // the plugin without a layout at all. (WrapEngine::rebuild also refuses an
+    // empty list, but that is the last line of defence, not the first.)
+    if (monitors.empty()) {
+        cw::MonitorBox box;
+        box.left = GetSystemMetrics(SM_XVIRTUALSCREEN);
+        box.top = GetSystemMetrics(SM_YVIRTUALSCREEN);
+        box.right = box.left + GetSystemMetrics(SM_CXVIRTUALSCREEN);
+        box.bottom = box.top + GetSystemMetrics(SM_CYVIRTUALSCREEN);
+        box.primary = true;
+        box.dpi = 96;
+        if (box.width() > 0 && box.height() > 0)
+            monitors.push_back(box);
+    }
     return monitors;
 }
 
@@ -858,9 +883,18 @@ private:
                    : std::string(chinese ? "关" : " off"))
             + std::string(chinese ? " · " : " · ") + intText(d.monitors)
             + std::string(chinese ? " 块屏" : " display(s)")
+            + (inRemoteSession() ? (chinese ? " · 远程桌面" : " · remote desktop")
+                                 : std::string())
             + sourceNote(chinese);
         if (!d.hookOk)
             subtitle += chinese ? " · 钩子未安装，仅显示状态" : " · hook failed, status only";
+        // One display is a working configuration (that is what an RDP session
+        // reports), but "disable on a single monitor" is the one switch that
+        // silently turns wrapping off there, so say it instead of letting the
+        // user conclude the plugin is broken.
+        if (d.monitors <= 1 && m_settings.disableOnSingleMonitor)
+            subtitle += chinese ? " · 单屏禁用已生效：只有一块屏，回绕不会发生"
+                                : " · disabled on one monitor: only one display, so nothing wraps";
         Item row("cursorwrap.status", chinese ? "光标回绕：已开启" : "Cursor wrap: on",
                  subtitle);
         row.withActions({ {"toggleEnabled", chinese ? "关闭" : "Disable", "Enter"} });
@@ -1385,6 +1419,7 @@ private:
         text += "wrap mode: " + modeLabel(m_settings.wrapMode, false) + "\n";
         text += "activation: " + activationLabel(m_settings.activation, false) + "\n";
         text += "monitors: " + intText(d.monitors) + "\n";
+        text += std::string("remote session: ") + (inRemoteSession() ? "true" : "false") + "\n";
         if (m_engine) {
             const auto monitors = m_engine->monitorsSnapshot();
             for (size_t i = 0; i < monitors.size(); ++i) {
@@ -1405,6 +1440,9 @@ private:
                 + ": " + intText(d.stats.skipped[i]) + "\n";
         }
         text += "rebuilds: " + intText(d.stats.rebuilt) + "\n";
+        if (d.stats.rebuildRefused > 0)
+            text += "rebuilds refused (empty enumeration): "
+                + intText(d.stats.rebuildRefused) + "\n";
         if (m_hook) {
             const cw::MouseHook::Health health = m_hook->health();
             text += "hook events: " + intText(health.events) + "\n";

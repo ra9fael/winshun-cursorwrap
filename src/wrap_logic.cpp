@@ -50,6 +50,17 @@ Settings WrapEngine::settings() const
 void WrapEngine::rebuild(const std::vector<MonitorBox>& monitors)
 {
     std::lock_guard lock(m_mutex);
+    // A rebuild is also driven by WM_DISPLAYCHANGE, which an RDP session
+    // fires while it is reconnecting or resizing: EnumDisplayMonitors can
+    // legitimately return NOTHING for a moment there. Applying that would
+    // wipe a working topology and leave the plugin inert until the next
+    // rebuild — and if the session settles without another notification, for
+    // the rest of the session. Keeping the last good layout is the safe
+    // reading: a desktop with no displays is not a state the user can be in.
+    if (monitors.empty() && m_topology.monitorCount() > 0) {
+        ++m_stats.rebuildRefused;
+        return;
+    }
     Topology fresh;
     fresh.initialize(monitors, m_settings.adjacencyTolerancePx);
     m_topology = std::move(fresh);

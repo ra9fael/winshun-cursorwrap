@@ -143,7 +143,14 @@ the host restarted:
 - The test install was removed and `WinShun.ini` restored afterwards; the host is
   running normally again
 
-### Real gestures on hardware (single display, part of L4)
+### Real gestures on hardware (single display, part of L4) — ⚠ unsound oracle, conclusion withdrawn
+
+> **This section's conclusion is withdrawn.** The probe judged a wrap by
+> "cursor position ≠ target", but a push Windows clamps at the edge (commanded 1919,
+> observed 1888) satisfies that with no wrap at all. `live-wrap-evidence.json` is not
+> evidence of wrapping. Use the
+> [v0.2.1 Remote Desktop single-display section](#v021-remote-desktop-single-display-verification-2026-11-13),
+> which judges by the plugin's counters. The original text is kept for the record.
 
 `tests/live_wrap_probe.py` drives the real hook with real `SetCursorPos` moves: the
 probe installs its own `WH_MOUSE_LL` observer hook to record events, pushes the
@@ -159,15 +166,19 @@ layout 1920×1080 (`tests/layouts/live-single.json`):
 
 The observer hook received 27 real move events, all with `LLMHF_INJECTED=0` — the
 probe's `SetCursorPos` does not look injected to a hook, which is exactly the
-environment the plugin's own `SetCursorPos` runs in, so the plugin's wrap landing is
-not rejected by its own hook as injected input. Evidence file:
+environment the plugin's own `SetCursorPos` runs in. Evidence file:
 `tests/layouts/live-wrap-evidence.json`.
 
-**This proves single-display wrapping works on real hardware**: the plugin process,
-the real hook, real `SetCursorPos` and the guard radius all ran on the real path.
-What remains unverified is multi-display geometry and feel (see "Not tested").
+**The one observation that still stands** is `LLMHF_INJECTED=0` (later re-checked
+field by field with `flags`/`extra` by `injected_wrap_probe.py`). Whether a wrap
+happened cannot be decided by this section's old oracle.
 
 ### Impact mode on real hardware (L4 single display, second round 2026-11-10; band version, third round 2026-11-11)
+
+> This section uses the same probe but its conclusions are of a different kind: it
+> compares the same landing with the gate off vs on, fast push vs slow drift. The
+> landing coordinate alone cannot prove a wrap; the *difference* (on vs off, fast vs
+> slow) remains valid.
 
 `tests/live_wrap_probe.py` extended to compare gate off/on, fast push / slow drift /
 braking push / teleport (gate at 3000 px/s; the probe's step timing: 24 steps × 5 ms
@@ -266,11 +277,55 @@ consecutive mismatches. After a successful `SetCursorPos` the landing point is
 recorded as "the last position" immediately, so the watchdog cannot mistake the
 plugin's own wrap for a dead hook.
 
+### v0.2.1 Remote Desktop single-display verification (2026-11-13)
+
+The user switched to Remote Desktop, so there is one virtual display (1920×1080,
+`SM_REMOTESESSION=1`, `SM_CMONITORS=1`). That path has to work, and it is also **the
+only environment in which wrapping could actually be verified**.
+
+**First, correcting a bad oracle**: the early `live_wrap_probe.py` took
+"cursor position ≠ target" as proof of a wrap. That is wrong — a push Windows clamps
+at the edge (commanded 1919, observed 1888) satisfies it with no wrap at all. The
+earlier "5/6 passed" claim is therefore **withdrawn**, and
+`tests/layouts/live-wrap-evidence.json` is no longer evidence of wrapping. The sound
+oracle is **the plugin's own counters** (`delta_wraps`) plus the landing coordinate.
+
+The new probe `tests/repeat_push_probe.py`, several rounds per direction:
+
+| Round | Direction | `delta_wraps` | Landing | `y_stable` |
+|---|---|---|---|---|
+| 1–3 | right | 1 / 1 / 1 | `x=1` | true |
+| 4–6 | left | 1 / 1 / 1 | `x=1918` | true |
+
+`y_stable` is essential: if the user moves their own mouse, the constant `y` drifts
+and that round must be discarded.
+
+**Measured injected-input facts** (`tests/injected_wrap_probe.py`):
+
+| Item | Result | Meaning |
+|---|---|---|
+| The plugin's own `SetCursorPos` | `flags=0x0`, `extra=0x0` | not an injected event, so its own `LLMHF_INJECTED` filter can never reject it |
+| The probe's `SendInput` | `flags=0x1` (`LLMHF_INJECTED`) | `dwExtraInfo` really does reach the low-level hook |
+| Wrapping under `SendInput` | `injected_seen=16`, `delta_wraps=1` | injected input **still wraps** — the same movement also produces an untagged event for the engine, so the filter does not lock out a Remote Desktop user |
+
+**Fix (a genuine bug)**: during reconnect or a resolution change `WM_DISPLAYCHANGE`
+fires, and at that moment `EnumDisplayMonitors` may legitimately return nothing. The
+old code applied the empty list as the new layout, which **erased the topology
+permanently** and left the plugin inert for the whole session. Two-layer fix:
+`rebuild` refuses an empty enumeration (keeping the last good layout and counting it
+in `rebuildRefused`), and `enumerateMonitors` falls back to `SM_*VIRTUALSCREEN` when
+it comes back empty. Genuine changes (unplugging a display, the session ending and the
+two-display desk returning) still apply immediately.
+
+**Still unverified**: the actual `rebuildRefused` count during a real
+disconnect/reconnect (unit tests only); the v0.2.0 dual-display root-cause fixes still
+have no real-machine wrap confirmation.
+
 ### v0.2.0 automated evidence
 
 | Item | Result |
 |---|---|
-| `cw_tests` | **116 cases + 7 fixtures green** (14 new: per-reason counters, decision log, `lastSample`, `nearestMonitor`, six real-configuration reproductions, the window settings round trip, the data-window grammar) |
+| `cw_tests` | **121 cases + 7 fixtures green** (14 new in v0.2.0; 5 further `rdp_*` cases in v0.2.1) |
 | `protocol_roundtrip.py` | **118/118 checks passed**, exit code 0 (15 new: the twelve manifest settings key by key, the `data` submenu, the settings list agreeing with the submenu, the `window` alias, diagnostics carrying the skip split and hook health) |
 | `tests/validate.py` | static validation passed (including the new `[0.2.0]` CHANGELOG heading matching `plugin.json`) |
 | The user's real configuration | dual displays `[-2560,0..0,1440] + [0,0..2560,1440]`, `wrapMode=horizontal`, `guard=100`, `tol=10`: with the gate off both directions land correctly (`x=-2559` / `x=2558`); inner edges never wrap; a 5000 px/s hit wraps with the gate on; a slow drift is refused by **only** `impact-gate` (every other reason counts 0) |
@@ -285,8 +340,9 @@ reinstall path has never fired on hardware; the data window on a mixed-DPI layou
 - **Every real multi-display behaviour is unverified**: this machine has one display.
   Two side by side, stacked, L-shape, inner edges left alone, hot-plug rebuild, gap
   layouts and the feel of `disableOnSingleMonitor` are only covered by unit tests over
-  synthetic geometry. **Single-display wrapping does have real-hardware evidence**
-  (see `live_wrap_probe.py` above) and is not on the unverified list.
+  synthetic geometry. **Single-display wrapping, including Remote Desktop on a single
+  display, does have real-hardware evidence** (see `repeat_push_probe.py` above) and
+  is not on the unverified list.
 - **Real pointer gestures**: the `SetCursorPos` landing point, whether swallowing a
   move causes a visible skip, drag suppression feel, and interaction with the
   Ctrl+wheel taskbar volume plugin while Ctrl is held have not been tried on hardware.
@@ -297,8 +353,11 @@ reinstall path has never fired on hardware; the data window on a mixed-DPI layou
   the `hook live` reading in the data window only).
 - **The data window's mixed-DPI behaviour** is unverified (it has only rendered at
   100%).
-- **Remote sessions, exclusive fullscreen, high contrast and Magnifier** are
-  unverified.
+- **Remote sessions, exclusive fullscreen, high contrast and Magnifier**: the RDP
+  disconnect/reconnect path is unit-tested only (`rebuildRefused` has not been observed
+  during a real session switch); the others are unverified.
+- **Automated cursor pushes are invalidated by the user's own mouse**: any round with
+  `y_stable=False` must be discarded and rerun.
 - **The host UI path**: installing the `.wsplugin` through "Add plugin → Archive" and
   toggling the enable switch was not exercised; the config file was edited directly.
 - Whether `wrapMode` / `activationMode` / enable changes take effect immediately under

@@ -215,7 +215,13 @@ judgement.
   position the hook last reported, and two consecutive cycles of "the pointer moved
   but no event arrived" mean the hook was dropped — it is reinstalled, and
   `cursorwrap diag` records it in `hook reinstalls` / `hook responsive`
-- A remote desktop session has one virtual display, so single-display semantics apply
+- **Remote Desktop (RDP) is supported**: the session has one virtual display, so
+  single-display semantics apply — left and right edges still wrap, landing one pixel
+  inside the opposite edge (right edge → `x=1`, left edge → `x=1918`). The status row
+  marks the session as `remote session` and says
+  `disabled on one monitor` outright when that switch is what turns wrapping off. A
+  `WM_DISPLAYCHANGE` during reconnect can no longer wipe the display topology (an
+  empty enumeration is refused and counted in `rebuildRefused`)
 - High contrast and Magnifier have not been specifically verified
 - Differences from PowerToys CursorWrap: no hotkey-triggered wrap mode and no
   per-process auto-enable
@@ -266,11 +272,16 @@ MinGW. MSVC builds use the static runtime (`/MT`) and likewise ship no external 
 ## Tests
 
 ```powershell
-ctest --test-dir build --output-on-failure       # L1: 102 cases + 7 layout fixtures
-python tests/protocol_roundtrip.py               # L3: 103 protocol round-trip checks
-python tests/live_wrap_probe.py                  # L4 single display: real SetCursorPos gestures
+ctest --test-dir build --output-on-failure       # L1: 121 cases + 7 layout fixtures
+python tests/protocol_roundtrip.py               # L3: 118 protocol round-trip checks
+python tests/repeat_push_probe.py                # L4 single display / RDP: multi-round real SetCursorPos pushes
+python tests/injected_wrap_probe.py              # L4: injected input (LLMHF_INJECTED) still wraps
 python tests/validate.py                         # L0: manifest / bilingual docs / packaging checks
 ```
+
+> `tests/live_wrap_probe.py` uses an unsound oracle ("cursor position ≠ target" — a push
+> clamped at the edge also satisfies it); its conclusions are withdrawn. Use
+> `repeat_push_probe.py`, which judges by the plugin's `delta_wraps` counter.
 
 Design notes: [docs/spec.en.md](docs/spec.en.md). Test plan: [docs/tests.en.md](docs/tests.en.md).
 This round's validation evidence: [docs/validation.en.md](docs/validation.en.md).
