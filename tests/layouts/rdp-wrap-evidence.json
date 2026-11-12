@@ -21,10 +21,10 @@
         1,
         540
       ],
-      "moves_seen": 13,
+      "moves_seen": 11,
       "skip_delta": {
-        "not-on-edge": 11,
-        "guard": 1
+        "guard": 1,
+        "not-on-edge": 9
       },
       "expected_landing_x": 1,
       "ok": true
@@ -39,10 +39,10 @@
         1918,
         540
       ],
-      "moves_seen": 13,
+      "moves_seen": 12,
       "skip_delta": {
-        "not-on-edge": 11,
-        "guard": 1
+        "guard": 1,
+        "not-on-edge": 10
       },
       "expected_landing_x": 1918,
       "ok": true
@@ -57,10 +57,10 @@
         1,
         540
       ],
-      "moves_seen": 9,
+      "moves_seen": 10,
       "skip_delta": {
-        "not-on-edge": 7,
-        "guard": 1
+        "guard": 1,
+        "not-on-edge": 8
       },
       "expected_landing_x": 1,
       "ok": true
@@ -77,9 +77,9 @@
       ],
       "moves_seen": 12,
       "skip_delta": {
-        "not-on-edge": 11,
+        "guard": 0,
         "impact-gate": 1,
-        "guard": 0
+        "not-on-edge": 11
       },
       "ok": true
     },
@@ -90,7 +90,7 @@
       "note": "moves > 0 with every reason 0 would mean events are dropped before the engine (the RDP injected-input path)",
       "skip_totals": {
         "guard": 4,
-        "not-on-edge": 45,
+        "not-on-edge": 43,
         "impact-gate": 1
       }
     },
