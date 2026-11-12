@@ -30,6 +30,8 @@
 //   trace | 轨迹                -> Copy the arrival trace as CSV (CopyTrace)
 //   clear | 清除轨迹            -> Drop the recorded arrivals (ClearTrace)
 //   best | 最优                 -> MenuBest (the suggested gate, and apply it)
+//   data | window | 数据 | 窗口 -> MenuData (the live data window's submenu)
+//   data on|off | 数据 开|关    -> SetDataWindow (open or close the window)
 //   diag | 诊断                 -> Copy diagnostics (CopyDiagnostics)
 //   reset | 恢复默认            -> ResetToDefaults
 //   anything else               -> Unknown (an error row suggests the words)
@@ -56,6 +58,7 @@ enum class CommandKind {
     MenuSingle,     // "disable on a single monitor" submenu
     MenuTuner,      // tuning-overlay submenu
     MenuBest,       // the suggested gate: show it, apply it, explain it
+    MenuData,       // the live data window's submenu
     ToggleImpact,
     SetImpact,      // value: 0 = off, 1 = on
     SetImpactSpeed, // value: px/s
@@ -69,6 +72,7 @@ enum class CommandKind {
     SetDrag,        // value: 0 = wrap while dragging, 1 = do not
     SetSingle,      // value: 0 = wrap on one monitor, 1 = do not
     SetOverlay,     // value: 0 = overlay off, 1 = overlay on
+    SetData,        // value: 0 = data window closed, 1 = open
     CopyDiagnostics,
     CopyTrace,   // copy the recorded arrivals as CSV
     ClearTrace,  // drop the recorded arrivals

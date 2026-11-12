@@ -82,6 +82,14 @@ const Token kTokens[] = {
     { "清除", CommandKind::ClearTrace, 0 },
     { "best", CommandKind::MenuBest, 0 },
     { "最优", CommandKind::MenuBest, 0 },
+    { "data on", CommandKind::SetData, 1 },
+    { "data off", CommandKind::SetData, 0 },
+    { "数据 开", CommandKind::SetData, 1 },
+    { "数据 关", CommandKind::SetData, 0 },
+    { "data", CommandKind::MenuData, 0 },
+    { "window", CommandKind::MenuData, 0 },
+    { "数据", CommandKind::MenuData, 0 },
+    { "窗口", CommandKind::MenuData, 0 },
     { "reset", CommandKind::ResetToDefaults, 0 },
     { "恢复默认", CommandKind::ResetToDefaults, 0 },
     { "恢复", CommandKind::ResetToDefaults, 0 },
@@ -213,6 +221,10 @@ ParsedCommand parseCommand(const std::string& rawText)
             break;
         case CommandKind::MenuBest:
             // "best" alone opens the suggestion submenu.
+            break;
+        case CommandKind::MenuData:
+            // "data" alone opens the data-window submenu; "data on/off"
+            // matched the longer tokens above.
             break;
         case CommandKind::MenuMode:
             // "mode" alone opens the submenu; "mode both" etc. already

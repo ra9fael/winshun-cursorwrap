@@ -123,6 +123,18 @@ Settings loadOverrides(const std::string& jsonText, bool& valid, std::string& pr
             raw.hasAdjacency = true;
         }
     });
+    applyKey(s, "tuningOverlay", out, [](RawSettings& raw, const winshun::Json& v) {
+        if (v.isBool()) {
+            raw.tuningOverlay = v.toBool();
+            raw.hasTuningOverlay = true;
+        }
+    });
+    applyKey(s, "dataWindow", out, [](RawSettings& raw, const winshun::Json& v) {
+        if (v.isBool()) {
+            raw.dataWindow = v.toBool();
+            raw.hasDataWindow = true;
+        }
+    });
     return out;
 }
 
@@ -146,6 +158,10 @@ std::string dumpOverrides(const Settings& settings)
         inner["edgeThresholdPx"] = static_cast<long long>(settings.edgeThresholdPx);
     if (settings.adjacencyTolerancePx != defaults.adjacencyTolerancePx)
         inner["adjacencyTolerancePx"] = static_cast<long long>(settings.adjacencyTolerancePx);
+    if (settings.tuningOverlay != defaults.tuningOverlay)
+        inner["tuningOverlay"] = settings.tuningOverlay;
+    if (settings.dataWindow != defaults.dataWindow)
+        inner["dataWindow"] = settings.dataWindow;
 
     winshun::Json::Object root;
     root["version"] = static_cast<long long>(kVersion);

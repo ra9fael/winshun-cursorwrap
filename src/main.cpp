@@ -15,6 +15,7 @@
 // authoritative for keys the search bar has not overridden.
 #include "winshun.h"
 
+#include "data_window.h"
 #include "monitor_watcher.h"
 #include "mouse_hook.h"
 #include "overlay.h"
@@ -22,10 +23,14 @@
 #include "settings_store.h"
 #include "wrap_logic.h"
 
+#include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 #include <windows.h>
 
@@ -108,6 +113,8 @@ cw::RawSettings rawFromJson(const Json& s)
     boolField("impactGate", raw.impactGate, raw.hasImpactGate);
     numberField("impactSpeedPps", raw.impactSpeedPps, raw.hasImpactSpeed);
     numberField("impactBandPx", raw.impactBandPx, raw.hasImpactBand);
+    boolField("tuningOverlay", raw.tuningOverlay, raw.hasTuningOverlay);
+    boolField("dataWindow", raw.dataWindow, raw.hasDataWindow);
     return raw;
 }
 
@@ -192,11 +199,15 @@ protected:
         m_engine->rebuild(enumerateMonitors());
 
         m_hook = std::make_unique<cw::MouseHook>();
-        const bool hookOk = m_hook->start(m_engine.get(), [this](int64_t, int64_t) {
-            // A wrap happened; a status row left open should update.
-            refresh();
+        m_hook->start(m_engine.get(), [this](int64_t, int64_t) {
+            // Runs INSIDE the low-level hook callback: touch nothing but a
+            // flag. Writing to the host's stdout here (refresh()) risks
+            // missing Windows' LowLevelHooksTimeout, after which the hook is
+            // silently removed and nothing wraps. The protocol thread's
+            // coalescing timer turns this flag into one refresh().
+            m_refreshPending.store(true);
         });
-        m_hookOk = hookOk;
+        m_hookOk = m_hook->installed();
 
         m_watcher = std::make_unique<cw::MonitorWatcher>();
         m_watcherOk = m_watcher->start([this] {
@@ -205,14 +216,18 @@ protected:
                 if (m_hook)
                     m_hook->updateSettings(m_engine->settings());
                 // The overlay windows must follow the new layout.
-                if (m_tunerOn)
+                if (m_overlay.active() && m_engine)
                     m_overlay.start(m_engine->monitorsSnapshot());
             }
         });
         m_overlay.setEngine(m_engine.get());
+        // The windows follow the settings, so the settings page is enough to
+        // turn them on (the search bar is not the only way in).
+        applyWindowSettings();
+        startCoalescer();
 
-        log(hookOk && m_watcherOk ? "info" : "warn",
-            std::string("cursorwrap: hook ") + (hookOk ? "installed" : "FAILED")
+        log(hookOk() && m_watcherOk ? "info" : "warn",
+            std::string("cursorwrap: hook ") + (hookOk() ? "installed" : "FAILED")
                 + ", watcher " + (m_watcherOk ? "started" : "FAILED")
                 + ", " + intText(static_cast<long long>(m_engine->monitorCount()))
                 + " monitor(s)"
@@ -246,11 +261,7 @@ protected:
             return { diagnosticsRow() };
         case cw::CommandKind::ToggleTuner: {
             // Toggle the overlay and refresh the list (the row shows on/off).
-            m_tunerOn = !m_tunerOn;
-            if (m_tunerOn && m_engine)
-                m_overlay.start(m_engine->monitorsSnapshot());
-            else
-                m_overlay.stop();
+            setWindowFlag(&cw::Settings::tuningOverlay, !m_settings.tuningOverlay);
             return settingsList();
         }
         case cw::CommandKind::MenuImpact:
@@ -284,6 +295,8 @@ protected:
             return tunerMenu();
         case cw::CommandKind::MenuBest:
             return bestMenu();
+        case cw::CommandKind::MenuData:
+            return dataMenu();
         case cw::CommandKind::CopyTrace:
             // Like the diagnostics row: the text rides in the copy field, and
             // Enter runs the plugin action that flashes "copied".
@@ -349,6 +362,8 @@ protected:
             m_settings.wrapGuardPx = defaults.wrapGuardPx;
             m_settings.edgeThresholdPx = defaults.edgeThresholdPx;
             m_settings.adjacencyTolerancePx = defaults.adjacencyTolerancePx;
+            m_settings.tuningOverlay = defaults.tuningOverlay;
+            m_settings.dataWindow = defaults.dataWindow;
             persistOverrides();
             pushSettings();
             return listEffects(effect::notify(chinese ? "已恢复宿主设置卡" : "Host settings restored"));
@@ -402,15 +417,22 @@ protected:
             }
         }
         if (a.action == "toggleTuner") {
-            m_tunerOn = !m_tunerOn;
-            if (m_tunerOn && m_engine)
-                m_overlay.start(m_engine->monitorsSnapshot());
-            else
-                m_overlay.stop();
+            setWindowFlag(&cw::Settings::tuningOverlay, !m_settings.tuningOverlay);
             const bool chinese = winshun::Plugin::chinese();
             return listEffects(effect::notify(
-                m_tunerOn ? (chinese ? "调参可视化已开启：甩到边缘看速度读数" : "Tuning overlay on: push to an edge and watch the readout")
-                          : (chinese ? "调参可视化已关闭" : "Tuning overlay off")));
+                m_settings.tuningOverlay
+                    ? (chinese ? "调参可视化已开启：甩到边缘看速度读数"
+                               : "Tuning overlay on: push to an edge and watch the readout")
+                    : (chinese ? "调参可视化已关闭" : "Tuning overlay off")));
+        }
+        if (a.action == "toggleDataWindow") {
+            setWindowFlag(&cw::Settings::dataWindow, !m_settings.dataWindow);
+            const bool chinese = winshun::Plugin::chinese();
+            return listEffects(effect::notify(
+                m_settings.dataWindow
+                    ? (chinese ? "数据窗口已打开：实时显示速度分布与决策原因"
+                               : "Data window open: live speeds, histogram and skip reasons")
+                    : (chinese ? "数据窗口已关闭" : "Data window closed")));
         }
         if (a.action == "copyDiagnostics") {
             return { effect::copy(diagnosticsText()), effect::keep(),
@@ -442,10 +464,14 @@ protected:
         }
         if (m_hook)
             m_hook->updateSettings(m_settings);
+        // The two windows are settings now, so the settings page drives them.
+        applyWindowSettings();
     }
 
     void shuttingDown() override
     {
+        stopCoalescer();
+        m_dataWindow.stop();
         m_overlay.stop();
         if (m_hook) {
             m_hook->stop();
@@ -487,9 +513,117 @@ protected:
         colors.background = parseARGB("background", colors.background);
         colors.dark = theme() == "dark";
         m_overlay.setColors(colors);
+        cw::DataWindow::Colors dataColors;
+        dataColors.accent = colors.accent;
+        dataColors.text = colors.text;
+        dataColors.background = colors.background;
+        dataColors.dark = colors.dark;
+        m_dataWindow.setColors(dataColors);
     }
 
 private:
+    // --- the two runtime windows ---------------------------------------------
+    //
+    // Both are Settings fields, not command-only state: the settings page and
+    // the search bar write the same switch, and the durable overrides file
+    // remembers it, so the windows survive a plugin restart.
+
+    bool hookOk() const { return m_hook && m_hook->installed(); }
+
+    // The hook only sets m_refreshPending (it must not touch the host's
+    // stdout: a slow write there is what makes Windows drop a low-level hook).
+    // This thread coalesces those flags into one refresh per 100 ms, which is
+    // all a status row left open needs.
+    void startCoalescer()
+    {
+        m_coalescerRunning.store(true);
+        m_coalescer = std::thread([this] {
+            while (m_coalescerRunning.load()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                if (m_refreshPending.exchange(false))
+                    refresh();
+                // The data window's X must turn the setting off, so the two
+                // surfaces cannot disagree about whether it is open. The write
+                // is serialised against the protocol thread's own writes.
+                if (m_dataWindow.takeCloseRequest()) {
+                    std::lock_guard lock(m_persistMutex);
+                    if (m_settings.dataWindow) {
+                        m_settings.dataWindow = false;
+                        persistOverrides();
+                        pushSettings();
+                    }
+                }
+            }
+        });
+    }
+
+    void stopCoalescer()
+    {
+        m_coalescerRunning.store(false);
+        if (m_coalescer.joinable())
+            m_coalescer.join();
+    }
+
+    // Start or stop the windows so they match the settings. Called from
+    // initialized(), settingsChanged() and after every window command.
+    void applyWindowSettings()
+    {
+        const bool overlayOn = m_settings.tuningOverlay && m_hookEnabled && m_engine;
+        if (overlayOn && !m_overlay.active())
+            m_overlay.start(m_engine->monitorsSnapshot());
+        else if (!overlayOn && m_overlay.active())
+            m_overlay.stop();
+
+        if (m_settings.dataWindow && !m_dataWindow.active())
+            m_dataWindow.start([this] { return dataSnapshot(); });
+        else if (!m_settings.dataWindow && m_dataWindow.active())
+            m_dataWindow.stop();
+    }
+
+    void setWindowFlag(bool cw::Settings::*field, bool on)
+    {
+        m_settings.*field = on;
+        persistOverrides();
+        pushSettings();
+        applyWindowSettings();
+    }
+
+    cw::DataSnapshot dataSnapshot()
+    {
+        cw::DataSnapshot snap;
+        snap.enabled = m_hookEnabled;
+        snap.hookOk = hookOk();
+        if (m_hook) {
+            const cw::MouseHook::Health health = m_hook->health();
+            snap.hookResponsive = health.responsive;
+            snap.hookReinstalls = health.reinstalls;
+            snap.setCursorFailures = m_hook->setCursorFailures();
+            // Before the first mouse move the engine has no sample, but the
+            // hook knows where the pointer was when it installed: show that
+            // rather than an empty line.
+            if (!snap.hasPointer) {
+                snap.pointer.x = health.seenX;
+                snap.pointer.y = health.seenY;
+                snap.hasPointer = health.events > 0 || health.seenX != 0 || health.seenY != 0;
+            }
+        }
+        if (!m_engine)
+            return snap;
+        const cw::Diagnostics d = m_engine->diagnostics(snap.hookOk);
+        snap.monitors = d.monitors;
+        snap.outerEdges = d.outerEdges;
+        snap.settings = d.settings;
+        snap.stats = d.stats;
+        snap.verdict = m_engine->lastVerdict();
+        // The engine's own last sample wins once it has one.
+        if (m_engine->lastSample(snap.pointer))
+            snap.hasPointer = true;
+        snap.arrivals = m_engine->arrivals();
+        snap.decisions = m_engine->decisions();
+        snap.boxes = m_engine->monitorsSnapshot();
+        return snap;
+    }
+
     // --- persistence ---------------------------------------------------------
 
     void loadOverridesFromDisk()
@@ -524,10 +658,14 @@ private:
         raw.hasEdgeThreshold = overrides.edgeThresholdPx != cw::Settings{}.edgeThresholdPx;
         raw.adjacencyTolerancePx = overrides.adjacencyTolerancePx;
         raw.hasAdjacency = overrides.adjacencyTolerancePx != cw::Settings{}.adjacencyTolerancePx;
+        raw.tuningOverlay = overrides.tuningOverlay;
+        raw.hasTuningOverlay = overrides.tuningOverlay != cw::Settings{}.tuningOverlay;
+        raw.dataWindow = overrides.dataWindow;
+        raw.hasDataWindow = overrides.dataWindow != cw::Settings{}.dataWindow;
         applySettings(raw, m_settings, true);
         m_overrides = raw.hasWrapMode || raw.hasActivation || raw.hasImpactGate
             || raw.hasImpactSpeed || raw.hasWrapGuard || raw.hasEdgeThreshold
-            || raw.hasAdjacency;
+            || raw.hasAdjacency || raw.hasTuningOverlay || raw.hasDataWindow;
     }
 
     void persistOverrides()
@@ -581,11 +719,10 @@ private:
             m_settings.disableOnSingleMonitor = cmd.value != 0;
             break;
         case cw::CommandKind::SetOverlay:
-            m_tunerOn = cmd.value != 0;
-            if (m_tunerOn && m_engine)
-                m_overlay.start(m_engine->monitorsSnapshot());
-            else
-                m_overlay.stop();
+            m_settings.tuningOverlay = cmd.value != 0;
+            break;
+        case cw::CommandKind::SetData:
+            m_settings.dataWindow = cmd.value != 0;
             break;
         case cw::CommandKind::ClearTrace:
             if (m_engine)
@@ -606,6 +743,8 @@ private:
             m_settings.wrapGuardPx = defaults.wrapGuardPx;
             m_settings.edgeThresholdPx = defaults.edgeThresholdPx;
             m_settings.adjacencyTolerancePx = defaults.adjacencyTolerancePx;
+            m_settings.tuningOverlay = defaults.tuningOverlay;
+            m_settings.dataWindow = defaults.dataWindow;
             break;
         }
         default:
@@ -613,6 +752,7 @@ private:
         }
         persistOverrides();
         pushSettings();
+        applyWindowSettings();
     }
 
     void cycleMode()
@@ -644,10 +784,10 @@ private:
         const bool chinese = winshun::Plugin::chinese();
         Item row("cursorwrap.unknown",
                  chinese ? "不认识的词：" + text : "Unknown words: " + text,
-                 chinese ? "试试：best 最优 · trace 轨迹 · tuner 调参 · impact 撞击 · "
+                 chinese ? "试试：best 最优 · trace 轨迹 · tuner 调参 · data 数据 · impact 撞击 · "
                          "speed 速度 · band 区间 · mode 模式 · drag 拖拽 · single 单屏 · "
                          "activation 激活 · guard 防震 · edge 边缘 · tol 容差 · diag 诊断"
-                         : "try: best · trace · tuner · impact · speed · band · mode · "
+                         : "try: best · trace · tuner · data · impact · speed · band · mode · "
                            "drag · single · activation · guard · edge · tol · diag");
         row.invalid();
         return row;
@@ -676,6 +816,8 @@ private:
             m_hook->setEnabled(on);
             m_engine->resetState();
         }
+        // A disabled plugin must not keep drawing about itself.
+        applyWindowSettings();
     }
 
     void pushSettings()
@@ -842,10 +984,19 @@ private:
 
         rows.push_back(drillRow("cursorwrap.row.tuner",
                                 std::string(chinese ? "调参可视化：" : "Tuning overlay: ")
-                                    + (m_tunerOn ? (chinese ? "开" : "on") : (chinese ? "关" : "off")),
+                                    + (m_settings.tuningOverlay ? (chinese ? "开" : "on")
+                                                                : (chinese ? "关" : "off")),
                                 chinese ? "Enter 打开子菜单（开关 / 区间 / 门槛 / 防震 / 阈值）"
                                         : "Enter for the submenu (switch, band, gate, guard, threshold)",
                                 "cursorwrap tune "));
+
+        rows.push_back(drillRow("cursorwrap.row.data",
+                                std::string(chinese ? "数据窗口：" : "Data window: ")
+                                    + (m_settings.dataWindow ? (chinese ? "开" : "on")
+                                                             : (chinese ? "关" : "off")),
+                                chinese ? "Enter 打开子菜单（开关 / 决策日志 / 原因计数）"
+                                        : "Enter for the submenu (switch, decision log, skip reasons)",
+                                "cursorwrap data "));
 
         rows.push_back(drillRow("cursorwrap.row.best",
                                 std::string(chinese ? "建议门槛：" : "Suggested gate: ")
@@ -1032,7 +1183,8 @@ private:
 
         Item state("cursorwrap.tuner.state",
                    std::string(chinese ? "调参可视化：" : "Tuning overlay: ")
-                       + (m_tunerOn ? (chinese ? "开" : "on") : (chinese ? "关" : "off")),
+                       + (m_settings.tuningOverlay ? (chinese ? "开" : "on")
+                                                   : (chinese ? "关" : "off")),
                    chinese ? "Enter 开关 · 只在能回绕的外边缘画线和测速区间"
                            : "Enter to toggle · draws the line and measuring band on outer edges only");
         state.withActions({ {"toggleTuner", chinese ? "切换" : "Toggle", "Enter"} });
@@ -1063,6 +1215,81 @@ private:
                                         : "Enter to pick how close counts as on the edge",
                                 "cursorwrap edge "));
         return rows;
+    }
+
+    // The data window's submenu: its switch plus the read-only facts that
+    // explain "why did it not wrap" without opening the window.
+    Items dataMenu()
+    {
+        const bool chinese = winshun::Plugin::chinese();
+        Items rows;
+        rows.push_back(backRow());
+
+        Item state("cursorwrap.data.state",
+                   std::string(chinese ? "数据窗口：" : "Data window: ")
+                       + (m_settings.dataWindow ? (chinese ? "开" : "on")
+                                                : (chinese ? "关" : "off")),
+                   chinese ? "Enter 开关 · 实时显示速度分布、决策日志与各类跳过计数"
+                           : "Enter to toggle · live histogram, decision log and per-reason skip counts");
+        state.withActions({ {"toggleDataWindow", chinese ? "切换" : "Toggle", "Enter"} });
+        rows.push_back(std::move(state));
+
+        // The skip split is the single most useful read-out when wrapping
+        // "does nothing": it names the gate that keeps refusing.
+        const cw::Stats stats = m_engine ? m_engine->stats() : cw::Stats {};
+        std::string skipped;
+        for (int i = 1; i < cw::kSkipReasonCount; ++i) {
+            const long long n = stats.skipped[i];
+            if (n <= 0)
+                continue;
+            if (!skipped.empty())
+                skipped += " · ";
+            skipped += cw::skipReasonName(static_cast<cw::SkipReason>(i));
+            skipped += " " + intText(n);
+        }
+        Item reasons("cursorwrap.data.reasons",
+                     chinese ? "各类跳过计数" : "Skipped by reason",
+                     skipped.empty() ? std::string(chinese ? "还没有记录" : "nothing yet")
+                                     : skipped);
+        reasons.invalid(); // informational only: Enter does nothing
+        rows.push_back(std::move(reasons));
+
+        Item health("cursorwrap.data.health",
+                    chinese ? "钩子健康" : "Hook health",
+                    hookHealthText(chinese));
+        health.invalid();
+        rows.push_back(std::move(health));
+
+        rows.push_back(drillRow("cursorwrap.data.trace",
+                                chinese ? "复制到达轨迹" : "Copy the arrival trace",
+                                chinese ? "Enter 复制 CSV 离线分析" : "Enter to copy the CSV",
+                                "cursorwrap trace "));
+        rows.push_back(drillRow("cursorwrap.data.best",
+                                chinese ? "查看建议门槛" : "See the suggested gate",
+                                bestSummary(chinese),
+                                "cursorwrap best "));
+        return rows;
+    }
+
+    // One line for the hook's health, honest about what it does not know.
+    std::string hookHealthText(bool chinese) const
+    {
+        if (!m_hook)
+            return chinese ? "钩子未启动" : "the hook is not running";
+        const cw::MouseHook::Health health = m_hook->health();
+        if (!m_hookOk)
+            return chinese ? "钩子安装失败：回绕不会发生" : "the hook failed to install: nothing will wrap";
+        std::string text = (chinese ? "事件 " : "events ") + intText(health.events)
+            + (chinese ? " · 注入 " : " · injected ") + intText(health.injected);
+        if (health.reinstalls > 0)
+            text += (chinese ? " · 已重装 " : " · reinstalled ") + intText(health.reinstalls);
+        const long long failures = m_hook->setCursorFailures();
+        if (failures > 0)
+            text += (chinese ? " · SetCursorPos 失败 " : " · SetCursorPos failed ")
+                + intText(failures);
+        if (!health.responsive)
+            text += chinese ? " · 上次看门狗判定掉线" : " · the watchdog last saw a dropped hook";
+        return text;
     }
 
     // The `cursorwrap trace` row: the arrival trace as CSV rides in the copy
@@ -1171,10 +1398,26 @@ private:
         text += "moves: " + intText(d.stats.moves) + "\n";
         text += "wraps: " + intText(d.stats.wraps) + "\n";
         text += "suppressed: " + intText(d.stats.suppressed) + "\n";
+        for (int i = 1; i < cw::kSkipReasonCount; ++i) {
+            if (d.stats.skipped[i] <= 0)
+                continue;
+            text += std::string("skipped ") + cw::skipReasonName(static_cast<cw::SkipReason>(i))
+                + ": " + intText(d.stats.skipped[i]) + "\n";
+        }
         text += "rebuilds: " + intText(d.stats.rebuilt) + "\n";
+        if (m_hook) {
+            const cw::MouseHook::Health health = m_hook->health();
+            text += "hook events: " + intText(health.events) + "\n";
+            text += "hook injected: " + intText(health.injected) + "\n";
+            text += "hook reinstalls: " + intText(health.reinstalls) + "\n";
+            text += "hook responsive: " + std::string(health.responsive ? "true" : "false") + "\n";
+            text += "setcursorpos failures: " + intText(m_hook->setCursorFailures()) + "\n";
+        }
         text += "edge threshold: " + intText(d.settings.edgeThresholdPx) + " px\n";
         text += "wrap guard: " + intText(d.settings.wrapGuardPx) + " px\n";
         text += "adjacency tolerance: " + intText(d.settings.adjacencyTolerancePx) + " px\n";
+        text += "tuning overlay: " + std::string(m_settings.tuningOverlay ? "on" : "off") + "\n";
+        text += "data window: " + std::string(m_settings.dataWindow ? "on" : "off") + "\n";
         text += std::string("impact gate: ") + (d.settings.impactGate ? "on" : "off") + "\n";
         if (d.settings.impactGate) {
             text += "impact speed: " + intText(d.settings.impactSpeedPps) + " px/s\n";
@@ -1189,8 +1432,16 @@ private:
     std::unique_ptr<cw::WrapEngine> m_engine;
     std::unique_ptr<cw::MouseHook> m_hook;
     std::unique_ptr<cw::MonitorWatcher> m_watcher;
-    cw::Overlay m_overlay; // the tuning overlay (off until the user turns it on)
-    bool m_tunerOn = false;
+    cw::Overlay m_overlay;       // edge bands + readout (settings.tuningOverlay)
+    cw::DataWindow m_dataWindow; // the live data window (settings.dataWindow)
+    // Set from inside the hook callback; drained by the coalescing timer so
+    // the hook path never does I/O.
+    std::atomic<bool> m_refreshPending { false };
+    std::thread m_coalescer;
+    std::atomic<bool> m_coalescerRunning { false };
+    // Guards the settings state against the two writers: the protocol thread
+    // (a command) and the coalescer (the data window's close button).
+    std::mutex m_persistMutex;
     bool m_hookOk = false;
     bool m_watcherOk = false;
     bool m_hookEnabled = true;

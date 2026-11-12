@@ -3,7 +3,7 @@
   "manifest": 1,
   "id": "ra9fael.cursorwrap",
   "name": {"zh": "光标回绕", "en": "Cursor wrap"},
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": {
     "zh": "光标到达屏幕外边时从对边进入（多显示器边缘拓扑，支持仅纵向/仅横向与按住 Ctrl/Shift 激活）；cursorwrap 关键字查看状态与开关",
     "en": "The cursor re-enters from the opposite edge when it reaches an outer edge (multi-monitor edge topology; vertical/horizontal-only modes and Ctrl/Shift activation); the cursorwrap keyword shows status and toggles it"
@@ -119,6 +119,20 @@
       "title": {"zh": "撞击测速区间（像素）", "en": "Impact measuring band (px)"},
       "hint": {"zh": "50–500，默认 150；只在距边缘该范围内测速——远处冲刺不算，贴边抖动因位移过小也不算", "en": "50–500, default 150; speed is measured only within this distance of the edge — distant sprints and edge jitter (too little travel) both fail"},
       "default": 150
+    },
+    {
+      "key": "tuningOverlay",
+      "type": "bool",
+      "title": {"zh": "调参可视化", "en": "Tuning overlay"},
+      "hint": {"zh": "在能回绕的外边缘画出测速区间与门槛线，并在撞到边缘时显示实测速度；内边不画。与搜索栏的 tune 是同一个开关", "en": "draws the measuring band and the wrap line on outer edges only, plus the measured speed when you hit one; same switch as tune in the search bar"},
+      "default": false
+    },
+    {
+      "key": "dataWindow",
+      "type": "bool",
+      "title": {"zh": "数据窗口", "en": "Data window"},
+      "hint": {"zh": "打开一个实时数据窗口：到达速度直方图、建议门槛、最近决策日志、按原因分类的跳过计数、钩子健康。不抢焦点，关掉窗口即停", "en": "opens a live data window: arrival-speed histogram, suggested gate, recent decisions, per-reason skip counts and hook health. Never takes focus; closing the window turns it off"},
+      "default": false
     }
   ]
 }

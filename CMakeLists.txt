@@ -30,6 +30,7 @@ add_executable(WinShunCursorWrap WIN32
     src/mouse_hook.cpp
     src/monitor_watcher.cpp
     src/overlay.cpp
+    src/data_window.cpp
     cursorwrap.rc
 )
 if(MSVC)
