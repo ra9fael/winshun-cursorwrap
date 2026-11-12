@@ -12,10 +12,12 @@
 | `runtime`：resident / eager / `idleExitSec 0` / `normal` / `timeoutMs 1500` / `memoryMB 64` | §8 | 通过 |
 | 一个命令、三个动作、顺序 `toggleEnabled, cycleMode, copyDiagnostics` | §3 | 通过（L3 也有断言） |
 | 七个设置项类型在白名单内、默认值在文档区间内 | §7 | 通过 |
+| 十二个设置项（含 `tuningOverlay` / `dataWindow`）类型在白名单内、默认值在文档区间内 | §7 | 通过 |
+| 搜索栏覆盖清单每一项（协议测试从 `plugin.json` 逐键核对） | §3 | 通过（L3） |
 | 打包物含 `plugin.json` / `cursorwrap.exe` / `README.md` / `LICENSE`，无 `build/`、`dist/`、`.git` | §8 | `tools/package.py` + `tools/ci_release.py` |
 | 双语文档锚点互链（`docs/spec*.md`、`docs/tests*.md`、README、CHANGELOG） | — | 通过 |
 
-## L1 — 纯逻辑单测（`cw_tests`，ctest 目标，102 用例 + 7 布局 fixture）
+## L1 — 纯逻辑单测（`cw_tests`，ctest 目标，116 用例 + 7 布局 fixture）
 
 不引 OS 头文件，任何平台可跑。运行：
 
@@ -55,6 +57,12 @@ ctest --test-dir build --output-on-failure
 | 到达轨迹 | 每次到达外边记一行；被门槛拦下的也记；同一次到达（手停在边缘被钳位）只记一行；上限 `kTraceMax`；`clearArrivals` 清空；`resetState` 清空 | §7 记录曲线 |
 | 建议门槛 `suggestGate` | 样本不足 6 条返回 0；两簇之间取最宽相对空档的中点；单一簇返回 0（不编造）；忽略不可测样本；结果钳在 500–20000 | §7 记录曲线 |
 | 诊断结构 | 屏数/外边数/钩子标志/缝隙文本 | §3 |
+| 按原因分类的跳过计数 | 每道门槛（拖拽 / 不在边上 / 撞击门槛）各自计数，且各原因之和等于 `suppressed` 总数 | §9 |
+| 决策日志 | 一次连续滑行只记一条（不刷屏）；回绕记为 `wrapped`+`onEdge`；上限 `kDecisionMax` | §9 |
+| `lastSample` | 被抑制的移动也算「引擎最后看到的位置」 | §8 |
+| 最近屏归位 | `monitorAt` 保持精确（屏外 -1，布局测试依赖）；`nearestMonitor` 屏外归最近屏、空布局仍 -1；布局外 1px 的指针不得关闭回绕 | §5 |
+| 用户真机配置复现 | 双屏 `[-2560,0..0,1440] + [0,0..2560,1440]`、`wrapMode=horizontal`、`guard=100`、`tol=10`：关门槛双向回绕落点正确；内边永不回绕；开门槛时 5000 px/s 命中回绕；慢漂只被 `impact-gate` 拦下且其他原因计数为 0；拖拽计入 `dragging` | §5 §9 |
+| 两个窗口是真设置 | `tuningOverlay` / `dataWindow` 经 `RawSettings` 往返保持；部分更新不会清掉它们 | §7 |
 | 布局 fixture | `tests/layouts/*.json` 六个合成布局逐条断言 | §5 |
 
 fixture 是**合成几何**，不是真机采集，因此可安全提交（不含设备名、用户名、机器名）。
@@ -79,20 +87,22 @@ fixture 是**合成几何**，不是真机采集，因此可安全提交（不�
 python tests/protocol_roundtrip.py
 ```
 
-2026-11-10 实跑：**103 项检查全部通过**，进程退出码 0。
+2026-11-12 实跑：**118 项检查全部通过**，进程退出码 0。
 
 | 检查 | 对应 |
 |---|---|
 | `initialize` 无 error、`protocolVersion == "1"` | §8 |
 | 空查询返回**多行设置列表**（≥5 行），首行 `id == cursorwrap.status` | §3 |
 | 状态行只有 `toggleEnabled` 一个动作（其他设置各占一行） | §3 |
-| **清单 10 个设置逐项都有对应行**（读 `plugin.json` 的 `settings`，逐键核对列表里的行 id） | §3 §7 |
-| 下钻行（speed/band/activation/guard/edge/tol/drag/single/tuner）带 `setQuery` | §3 |
+| **清单 12 个设置逐项都有对应行**（读 `plugin.json` 的 `settings`，逐键核对列表里的行 id） | §3 §7 |
+| 下钻行（speed/band/activation/guard/edge/tol/drag/single/tuner/data）带 `setQuery` | §3 |
 | 带文字查询仍只返回一行（查询无副作用） | §3 |
 | `impact` 打开子菜单（首行 `← 返回`），`impact on/off` 直接设值 | §3 |
 | `speed 3500` 打开速度子菜单，状态行副标题含 `3500` | §3 |
 | `drag` / `single` 子菜单可开可关，列表行跟着变 | §3 |
 | `tune` 打开调参子菜单（开关 + 区间 / 门槛 / 防震 / 阈值四个下钻），`tune on/off` 直接开关 | §7 |
+| `data` 打开数据窗口子菜单（开关 / 跳过计数 / 钩子健康），`data on/off` 直接开关，列表行与子菜单同步；`window` 是别名 | §8 §9 |
+| 诊断含按原因跳过计数与钩子健康（`skipped …` / `hook responsive`） | §9 |
 | `trace` 返回轨迹行，`copy` 字段带 CSV 表头 | §7 |
 | `best` 打开建议子菜单；没有轨迹时返回「数据不足」行而不是编造数字 | §7 |
 | `clear` 被接受且后续查询正常 | §7 |
@@ -154,7 +164,7 @@ python tests/protocol_roundtrip.py
 | 阈值标定 | 用 `tools/capture_layout.ps1` 采集真机布局 → 加进 `tests/layouts/` 回归；据此确认 50px 邻接容差与 50px 防震ign半径在目标布局上合适 |
 | 打包 | `python tools/package.py` 产出 `.wsplugin` + `.sha256` + `release-notes.md`；`--tag` 校验版本 |
 | 发布校验 | `python tools/ci_release.py dist`（本地）与 CI 的 verify → build → publish |
-| 文档 | README 双语、CHANGELOG `[0.1.0]`、`docs/spec*`、`docs/tests*` 互链校验 |
+| 文档 | README 双语、CHANGELOG `[0.2.0]`、`docs/spec*`、`docs/tests*` 互链校验 |
 | 图标 | `winshun-plugin-icons` 生成 `app.ico` 与 `.rc`，登记 `plugins.json` |
 
 ## 追溯矩阵
@@ -163,25 +173,27 @@ python tests/protocol_roundtrip.py
 |---|---|
 | §3 命令与动作 | L1 诊断结构、L3 全部动作检查、L4 第 2 项 |
 | §4 手势与吞事件 | L1 模式/激活用例、L2 注入事件（未自动化）、L4 第 3–8 项 |
-| §5 拓扑算法 | L1 拓扑组 + fixture、L5 阈值标定 |
+| §5 拓扑算法 | L1 拓扑组 + fixture + `nearestMonitor`、L5 阈值标定 |
 | §6 防震荡与方向 | L1 状态机与角点用例、L4 第 3–4 项 |
-| §7 设置 | L1 设置解析/类型混淆、L3 settingsChanged、L4 第 6–11 项 |
-| §8 架构与协议 | L3 全部、L4 第 1 项 |
-| §9 数据 | L0 清单、L4 第 17 项 |
+| §7 设置 | L1 设置解析/类型混淆/两个窗口设置往返、L3 settingsChanged、L4 第 6–11 项 |
+| §8 架构与协议 | L3 全部、L4 第 1 项、数据窗口子菜单（L3） |
+| §9 数据 | L0 清单、L1 按原因计数 / 决策日志 / `lastSample`、L3 诊断与 `data` 子菜单 |
 | §10 失败处理 | L1 空/退化/极端坐标、L2 故障注入（未自动化）、L4 第 12–15 项 |
 | §11 权限 | L0 清单检查、L4 第 1 项 |
 
 ## 验收标准
 
-- L1 全绿（当前 86 用例 + 7 fixture，含真机采集的 `live-single.json`）
-- L3 全通过（当前 103/103）
+- L1 全绿（当前 116 用例 + 7 fixture，含真机采集的 `live-single.json`）
+- L3 全通过（当前 118/118）
 - L0 静态校验通过
-- L4 单屏部分已实测通过；**多屏部分全部勾选后**才可宣布 v0.1.0 多屏可发布，
+- L4 单屏部分已实测通过；**多屏部分全部勾选后**才可宣布多屏可发布，
   当前属发布阻塞项
 
 ## 没测的
 
 - L2 的注入事件与 `SetCursorPos` 失败路径没有自动化用例（需要真实钩子或故障注入）
-- L4 全部未执行：本机只有一块显示器，多屏手感、热插拔、拖拽抑制、远程会话、
-  独占全屏、高对比度、放大镜都没有在真机上验证
+- L4 多屏部分未执行：多屏手感、热插拔、拖拽抑制、远程会话、独占全屏、高对比度、
+  放大镜都没有在真机上按验收清单逐项验证
+- 看门狗的重装路径从未在真机上触发过（只有代码审查与数据窗口里的间接观察）
+- 数据窗口只在一次真机渲染中检查过内容，混合 DPI 布局未验证
 - `edgeThresholdPx` 设置项已接入判定（默认 1px），但只有合成几何验证，没有真机手感验证

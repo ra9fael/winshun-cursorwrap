@@ -59,6 +59,7 @@ row is one choice, and Enter applies it):
 | `cursorwrap drag` | back · on · off |
 | `cursorwrap single` | back · on · off |
 | `cursorwrap tune` | back · switch · band · gate · guard · threshold |
+| `cursorwrap data` / `window` | back · switch · skip reasons · hook health · copy the trace · suggested gate |
 | `cursorwrap best` | back · suggested gate · apply · see the data |
 
 **With a number, set directly** (skips the submenu):
@@ -76,6 +77,7 @@ row is one choice, and Enter applies it):
 | `cursorwrap drag on` / `off` | whether dragging wraps |
 | `cursorwrap single on` / `off` | whether one display disables wrapping |
 | `cursorwrap tune on` / `off` | the tuning overlay |
+| `cursorwrap data on` / `off` | the data window |
 | `cursorwrap trace` | a trace row; Enter copies the CSV |
 | `cursorwrap best` | the suggestion: see / apply / inspect |
 | `cursorwrap clear` | drop the recorded arrivals |
@@ -106,7 +108,29 @@ is untouched**:
 
 The overlay is click-through, never takes focus and has no Alt+Tab entry; colours
 follow the host theme, and panels sit inside `rcWork` so the taskbar cannot cut
-them. The toggle does not persist across restarts.
+them. The switch is the `tuningOverlay` setting: the settings page and the search
+bar write the same field, and it survives a restart.
+
+## Data window
+
+The tuning overlay draws on the edges and only has content at the instant of a
+hit. The **data window** is the one you can leave open beside the app:
+`cursorwrap data` (or the settings page's "Data window" toggle) opens a topmost,
+**never-focus-taking** window that is absent from the taskbar and repaints itself
+every 150 ms, showing
+
+- a state header: enabled / hook / display count / outer-edge count;
+- the pointer position and the **most recent decision** (verdict + edge + measured
+  speed + the gate in force);
+- the arrival-speed histogram (log axis 500–20000; amber line for the current gate,
+  green for the suggested one);
+- the **per-reason skip counters** — `dragging` / `guard` / `not-on-edge` /
+  `impact-gate` … so "which gate keeps refusing" is one line away;
+- the last 20 decisions (edge · measured speed · verdict · display).
+
+Closing it with the X clears the setting too, so the two surfaces cannot disagree.
+Like the overlay it is the `dataWindow` setting, so the settings page can turn it
+on as well.
 
 ## Arrival trace: finding the optimal gate
 
@@ -159,8 +183,14 @@ the clamped samples at the edge — pushing against the edge used to dilute a re
 | `impactGate` | false | impact mode: the cursor must hit the edge fast enough to wrap; drifting there does not trigger |
 | `impactSpeedPps` | 2000 | 500–20000, the impact speed gate (px/s, over the last in-band approach stroke) |
 | `impactBandPx` | 150 | 50–500, the impact measuring band: speed is measured only this close to the edge; distant sprints and edge jitter both fail |
+| `tuningOverlay` | false | tuning overlay: draw the measuring band and the wrap line on outer edges, plus the measured speed |
+| `dataWindow` | false | data window: live histogram, decision log, per-reason skip counts, hook health |
 
-Invalid values fall back to the defaults; nothing errors out.
+The last two are **real settings**, not command-layer switches: the settings page,
+the search bar (`tune` / `data`) and the `settings.json` overrides file write the
+same field, and both survive a restart.
+
+An invalid value always falls back to the default; nothing throws.
 
 ## Permissions
 
@@ -180,9 +210,11 @@ judgement.
 ## Known limitations
 
 - Exclusive-fullscreen DirectX applications may not see the outer edges
-- If Windows removes the hook after a `LowLevelHooksTimeout` stall this version does
-  not re-install it (the status row says "hook failed, status only"); re-enabling the
-  plugin fixes it
+- If Windows removes the hook after a `LowLevelHooksTimeout` stall, this version has
+  a **watchdog**: once a second it compares the real pointer position with the
+  position the hook last reported, and two consecutive cycles of "the pointer moved
+  but no event arrived" mean the hook was dropped — it is reinstalled, and
+  `cursorwrap diag` records it in `hook reinstalls` / `hook responsive`
 - A remote desktop session has one virtual display, so single-display semantics apply
 - High contrast and Magnifier have not been specifically verified
 - Differences from PowerToys CursorWrap: no hotkey-triggered wrap mode and no

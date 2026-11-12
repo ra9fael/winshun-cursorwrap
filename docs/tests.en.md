@@ -16,7 +16,7 @@ original: [tests.md](tests.md).
 | Package contains `plugin.json` / `cursorwrap.exe` / `README.md` / `LICENSE`, no `build/`, `dist/`, `.git` | §8 | `tools/package.py` + `tools/ci_release.py` |
 | Bilingual anchors cross-link (`docs/spec*.md`, `docs/tests*.md`, README, CHANGELOG) | — | pass |
 
-## L1 — Pure logic unit tests (`cw_tests`, ctest target, 102 cases + 7 layout fixtures)
+## L1 — Pure logic unit tests (`cw_tests`, ctest target, 116 cases + 7 layout fixtures)
 
 No OS headers: runs anywhere. Commands:
 
@@ -56,6 +56,12 @@ ctest --test-dir build --output-on-failure
 | Arrival trace | one row per edge arrival; blocked arrivals are recorded too; one row per arrival run (a hand resting at the edge records once); capped at `kTraceMax`; `clearArrivals` and `resetState` empty it | §7 arrival trace |
 | `suggestGate` | returns 0 under six samples; puts the gate mid-way in the widest relative gap between two clusters; returns 0 for a single cluster (never invents a number); ignores unmeasurable arrivals; clamps to 500–20000 | §7 arrival trace |
 | Diagnostics shape | display count, outer-edge count, hook flag, gap text | §3 |
+| Per-reason skip counters | each gate (dragging / not-on-edge / impact gate) counts separately, and the reasons sum to `suppressed` | §9 |
+| Decision log | one entry per continuous glide (no flooding); a wrap is recorded as `wrapped` + `onEdge`; capped at `kDecisionMax` | §9 |
+| `lastSample` | a suppressed move still updates "the position the engine last saw" | §8 |
+| Nearest-display attribution | `monitorAt` stays exact (-1 outside, which the layout tests rely on); `nearestMonitor` falls back to the closest and stays -1 with no displays; a pointer 1 px outside the layout must not disable wrapping | §5 |
+| The user's real configuration | dual displays `[-2560,0..0,1440] + [0,0..2560,1440]`, `wrapMode=horizontal`, `guard=100`, `tol=10`: both directions wrap to the right landing; inner edges never wrap; 5000 px/s hits wrap with the gate on; a slow drift is refused ONLY by `impact-gate` (every other reason counts 0); dragging counts as `dragging` | §5 §9 |
+| Both windows are real settings | `tuningOverlay` / `dataWindow` survive a `RawSettings` round trip; a partial update does not clear them | §7 |
 | Layout fixtures | `tests/layouts/*.json` — six synthetic layouts asserted case by case | §5 |
 
 Fixtures are **synthetic geometry**, not captured hardware, so they are safe to
@@ -81,7 +87,7 @@ The hook callback and settings delivery can be tested without a real hook:
 python tests/protocol_roundtrip.py
 ```
 
-Run on 2026-11-10: **103 checks passed**, process exit code 0.
+Run on 2026-11-12: **118 checks passed**, process exit code 0.
 
 | Check | Spec |
 |---|---|
@@ -89,12 +95,14 @@ Run on 2026-11-10: **103 checks passed**, process exit code 0.
 | An empty query returns the **multi-row settings list** (≥5 rows), first row `id == cursorwrap.status` | §3 |
 | The status row has only `toggleEnabled` (every other setting has its own row) | §3 |
 | **Every manifest setting has a row**: the test reads `plugin.json`'s `settings` and checks each key's row id is in the list | §3 §7 |
-| Drill-down rows (speed/band/activation/guard/edge/tol/drag/single/tuner) carry `setQuery` | §3 |
+| Drill-down rows (speed/band/activation/guard/edge/tol/drag/single/tuner/data) carry `setQuery` | §3 |
 | A query with text still returns one row (queries have no side effects) | §3 |
 | `impact` opens the submenu (first row `← Back`); `impact on/off` set the value directly | §3 |
 | `speed 3500` opens the speed submenu and the status row subtitle shows `3500` | §3 |
 | `drag` / `single` submenus toggle and the list row follows | §3 |
 | `tune` opens the tuning submenu (switch plus band / gate / guard / threshold drill-downs); `tune on/off` flips it directly | §7 |
+| `data` opens the data-window submenu (switch / skip reasons / hook health); `data on/off` flips it directly, the list row follows without another command, and `window` is an alias | §8 §9 |
+| The diagnostics carry the per-reason skip counters and the hook health (`skipped …` / `hook responsive`) | §9 |
 | `trace` returns the trace row whose `copy` field carries a CSV header | §7 |
 | `best` opens the suggestion submenu; with no trace it returns "not enough data" rather than inventing a gate | §7 |
 | `clear` is accepted and the next query still answers | §7 |
@@ -160,7 +168,7 @@ Evidence: `tests/layouts/live-wrap-evidence.json`, `tests/layouts/live-single.js
 | Threshold calibration | Capture a real layout with `tools/capture_layout.ps1`, add it under `tests/layouts/` as a regression, and confirm the 50 px adjacency tolerance and 50 px guard radius suit that layout |
 | Packaging | `python tools/package.py` produces `.wsplugin` + `.sha256` + `release-notes.md`; `--tag` validates the version |
 | Release validation | `python tools/ci_release.py dist` locally, and CI's verify → build → publish |
-| Documentation | Bilingual README, CHANGELOG `[0.1.0]`, `docs/spec*`, `docs/tests*` cross-links |
+| Documentation | Bilingual README, CHANGELOG `[0.2.0]`, `docs/spec*`, `docs/tests*` cross-links |
 | Icon | `winshun-plugin-icons` generates `app.ico` and the `.rc`; registered in `plugins.json` |
 
 ## Traceability matrix
@@ -169,20 +177,34 @@ Evidence: `tests/layouts/live-wrap-evidence.json`, `tests/layouts/live-single.js
 |---|---|
 | §3 command and actions | L1 diagnostics shape, every L3 action check, L4 item 2 |
 | §4 gesture and event swallowing | L1 mode/activation cases, L2 injected events (not automated), L4 items 3–8 |
-| §5 topology algorithm | L1 topology group + fixtures, L5 threshold calibration |
+| §5 topology algorithm | L1 topology group + fixtures + `nearestMonitor`, L5 threshold calibration |
 | §6 anti-oscillation and direction | L1 engine and corner cases, L4 items 3–4 |
-| §7 settings | L1 settings parsing/type confusion, L3 settingsChanged, L4 items 6–11 |
-| §8 architecture and protocol | all of L3, L4 item 1 |
-| §9 data | L0 manifest checks, L4 item 17 |
+| §7 settings | L1 settings parsing / type confusion / both window settings round-tripping, L3 settingsChanged, L4 items 6–11 |
+| §8 architecture and protocol | all of L3, L4 item 1, the data-window submenu (L3) |
+| §9 data | L0 manifest checks, L1 per-reason counters / decision log / `lastSample`, L3 diagnostics and `data` submenu |
 | §10 failure handling | L1 empty/degenerate/extreme coordinates, L2 fault injection (not automated), L4 items 12–15 |
 | §11 permissions | L0 manifest checks, L4 item 1 |
 
 ## Acceptance criteria
 
-- L1 green (currently 102 cases + 7 fixtures, including the captured
+- L1 green (currently 116 cases + 7 fixtures, including the captured
   `live-single.json`)
-- L3 fully passing (currently 103/103)
+- L3 fully passing (currently 118/118)
 - L0 static validation passing
 - The single-display part of L4 has been measured and passed; **all multi-display
-  boxes must be checked** before v0.1.0 can be called releasable for multi-display,
-  which remains a release blocker
+  boxes must be checked** before multi-display can be called releasable, which
+  remains a release blocker
+
+## Not tested (§未验证)
+
+- L2 injected events and the `SetCursorPos` failure path have no automated case
+  (they need a real hook or fault injection).
+- L4's multi-display part is not executed item by item: multi-display feel,
+  hot-plug, drag suppression, remote sessions, exclusive fullscreen, high
+  contrast and Magnifier are unverified on real hardware.
+- The watchdog's reinstall path has never fired on a real machine — only code
+  review and the indirect observation in the data window (`hook live`).
+- The data window was inspected once on real hardware; mixed-DPI layouts are
+  unverified.
+- `edgeThresholdPx` is wired into the decision (1 px default) but only verified
+  against synthetic geometry.

@@ -53,6 +53,7 @@ Enter 就是该行的主操作，不用记组合键：
 | `cursorwrap drag` / `拖拽` | 返回 · 开 · 关 |
 | `cursorwrap single` / `单屏` | 返回 · 开 · 关 |
 | `cursorwrap tune` / `调参` | 返回 · 开关 · 测速区间 · 门槛 · 防震 · 阈值 |
+| `cursorwrap data` / `数据` / `window` / `窗口` | 返回 · 开关 · 各类跳过计数 · 钩子健康 · 复制轨迹 · 建议门槛 |
 | `cursorwrap best` / `最优` | 返回 · 建议门槛 · 采用 · 查看数据 |
 
 **带数字直接设值**（跳过子菜单）：
@@ -70,6 +71,7 @@ Enter 就是该行的主操作，不用记组合键：
 | `cursorwrap drag on` / `off` | 拖拽时是否回绕 |
 | `cursorwrap single on` / `off` | 单屏时是否禁用 |
 | `cursorwrap tune on` / `off` / `调参 开` | 调参可视化开关 |
+| `cursorwrap data on` / `off` / `数据 开` | 数据窗口开关 |
 | `cursorwrap trace` / `轨迹` | 返回轨迹行，Enter 复制 CSV |
 | `cursorwrap best` / `最优` | 建议门槛：查看 / 采用 / 看数据 |
 | `cursorwrap clear` / `清除轨迹` | 清空已记录的到达轨迹 |
@@ -93,7 +95,23 @@ Enter 就是该行的主操作，不用记组合键：
 - **记录曲线**：主屏右下角的直方图面板，见下。
 
 覆盖层不抢焦点、不进 Alt+Tab、点击穿透，颜色跟随宿主主题；面板按工作区定位，
-不会被任务栏切掉。开关不持久化，宿主重启后默认关闭。
+不会被任务栏切掉。开关就是设置项 `tuningOverlay`，设置页与搜索栏同源，重启后仍然记住。
+
+## 数据窗口
+
+调参可视化画在边缘上，只在撞边那一刻有内容。**数据窗口**是可以一直摆在旁边的
+那块：`cursorwrap data` / `数据`（或设置页的「数据窗口」开关）打开后，一个置顶、
+**不抢焦点**、不进任务栏的小窗口每 150ms 刷新，显示
+
+- 状态头：开关 / 钩子 / 屏数 / 外边缘数；
+- 光标位置与**最近一次决策**（裁决 + 边 + 实测速度 + 当时门槛）；
+- 到达速度直方图（对数横轴 500–20000，橙线当前门槛、绿线建议门槛）；
+- **按原因分类的跳过计数**——`dragging` / `guard` / `not-on-edge` / `impact-gate` …
+  「到底哪道门槛在拒」一行就能看出来；
+- 最近 20 条决策日志（边 · 实测速度 · 裁决 · 屏号）。
+
+点 X 关掉时设置项同步关掉，两个界面不会各说各话。它和调参可视化一样是设置项
+`dataWindow`，设置页也能开。
 
 ## 记录曲线：怎么找到最优门槛
 
@@ -141,6 +159,11 @@ seq,t_us,monitor,edge,measured_pps,gate_pps,wrapped,gate_off
 | `impactGate` | false | 撞击模式：光标必须以足够速度撞到边缘才回绕；慢慢挪到边缘不触发 |
 | `impactSpeedPps` | 2000 | 500–20000，撞击速度门槛（px/s，取测速区间内最后一段逼近） |
 | `impactBandPx` | 150 | 50–500，撞击测速区间：只在距边缘该范围内测速，远处冲刺与贴边抖动都不算 |
+| `tuningOverlay` | false | 调参可视化：在能回绕的外边缘画测速区间与门槛线，并显示实测速度 |
+| `dataWindow` | false | 数据窗口：实时直方图、决策日志、按原因跳过计数、钩子健康 |
+
+后两项**是真正的设置项**，不是命令层的临时开关：设置页、搜索栏（`tune` / `data`）、
+`settings.json` 覆盖文件写的是同一个字段，重启后仍然记住。
 
 非法值一律回落到默认，不会报错。
 
@@ -159,8 +182,9 @@ seq,t_us,monitor,edge,measured_pps,gate_pps,wrapped,gate_off
 ## 已知限制
 
 - 独占全屏（exclusive fullscreen）的 DirectX 程序里外框可能不生效
-- 若系统因 `LowLevelHooksTimeout` 把钩子摘掉，本版不会自动重装（状态行会显示
-  「钩子未安装，仅显示状态」）；重新启用插件即可
+- 若系统因 `LowLevelHooksTimeout` 把钩子摘掉，本版有**看门狗**：每秒比对真实光标
+  位置与钩子最后报告的位置，连续两个周期「光标动了但没有事件」就判定掉线并重装，
+  `cursorwrap diag` 里的 `hook reinstalls` / `hook responsive` 会记下来
 - 远程桌面会话只有一块虚拟屏，走单屏语义
 - 高对比度、放大镜等辅助功能未专门验证
 - 与 PowerToys 原版的差异：没有「快捷键触发回绕」模式，也没有按进程自动启停

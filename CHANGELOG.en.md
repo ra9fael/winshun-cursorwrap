@@ -9,6 +9,78 @@ single source of truth; release tags are `v<version>`.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-12
+
+### Added
+
+- **Data window** (`cursorwrap data` / `window`, or the settings page's "Data
+  window"): a real topmost GDI window that never takes focus
+  (`WS_EX_NOACTIVATE`), repainting itself every 150 ms and stopping when closed.
+  It shows the state header (enabled / hook / displays / outer edges), the
+  pointer the engine last saw and its most recent decision, the arrival-speed
+  histogram (log axis 500–20000 with both the current and the suggested gate
+  drawn in), the per-reason skip counters, and the last 20 decisions (edge,
+  measured speed, verdict). **This is the "not only offline analysis"** half:
+  the histogram and the log update while you tune.
+- **Per-reason skip counters** (`SkipReason`): `no-monitors`,
+  `single-monitor`, `dragging`, `no-modifier`, `guard`, `off-monitor`,
+  `not-on-edge`, `impact-gate`. A single `suppressed` total could never answer
+  "which gate keeps refusing"; the diagnostics, the `data` submenu and the data
+  window now all list the split.
+- **Decision log** (capped at 24): one entry per arrival and one per CHANGE of
+  skip reason (a continuous glide logs once, so a 1000 Hz mouse cannot flood
+  it), carrying the position, display, edge, measured speed, the gate in force
+  and the verdict.
+- **Hook health watchdog**: an independent thread compares `GetCursorPos()`
+  against the position the hook last reported once a second. Two consecutive
+  cycles of "the pointer moved but no event arrived" mean Windows silently
+  dropped the hook: it is reinstalled, counted and logged as a warning. The
+  crucial trap: after our own `SetCursorPos` the landing point must be recorded
+  as the last known position immediately, or our own wrap looks like a dead
+  hook.
+- Two new settings, `tuningOverlay` and `dataWindow`, so the plugin's settings
+  page can turn on what the search bar can turn on — the tuning switch used to
+  exist only in the search bar.
+- Diagnostics gained: the per-reason skip split, hook events / injected events /
+  reinstall count / responsiveness, `SetCursorPos` failures, and both window
+  switches.
+
+### Fixed
+
+- **Wrapping did nothing at all on the real dual-monitor machine (cause 1)**:
+  the hook's wrap callback called `refresh()` directly, i.e. it wrote JSON to
+  the host's stdout and took the send lock. A low-level mouse hook is timed by
+  a Windows watchdog: a callback past `LowLevelHooksTimeout` (300 ms by default)
+  is **silently unhooked**, while the plugin still believes it is installed and
+  healthy. The wrap callback now only sets an atomic flag; the protocol thread's
+  100 ms coalescing timer turns it into one `refresh()`. Zero I/O on the hook
+  path.
+- **Wrapping did nothing at all on the real dual-monitor machine (cause 2)**:
+  the wrap path located the display with an exact containment test
+  (`Topology::monitorAt`). A pointer outside every monitor rect returned -1 and
+  the whole move was swallowed as `off-monitor`; a real-machine run logged
+  **1008** such samples. Added `Topology::nearestMonitor` (the container, else
+  the nearest) and the wrap path uses it; `monitorAt` keeps its exact semantics,
+  which the layout tests and gap detection rely on. New regressions: "a pointer
+  one pixel outside the layout must not disable wrapping" and "an outside sample
+  is attributed to the nearest display".
+- The wrap callback now tests `HC_ACTION` explicitly instead of relying on the
+  implicit `code >= 0` convention.
+- The hook handle is held in a `std::atomic<long long>` and all reinstall and
+  shutdown paths go through one place, so a repair cannot leak a handle or
+  unhook the wrong one.
+
+### Changed
+
+- The tuning overlay and the data window moved from command-layer private state
+  into `cw::Settings` (`tuningOverlay` / `dataWindow`) and run through the same
+  clamping and persistence path as everything else: the settings page, the
+  search bar and the `settings.json` overrides file agree, and both survive a
+  restart.
+- Closing the data window with its X clears its setting, so the two surfaces
+  cannot disagree about whether it is open.
+- Version bumped to `0.2.0` (new feature surface: minor).
+
 ### Added
 
 - **Arrival trace and the optimal-gate suggestion** (`cursorwrap best`,

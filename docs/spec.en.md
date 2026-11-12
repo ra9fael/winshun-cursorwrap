@@ -27,7 +27,7 @@ Line-by-line comparison against the PowerToys original: [comparison.md](comparis
 
 Empty text returns a **multi-row settings list**, one row per setting, where Enter
 is that row's main action — so every setting has its own key, free of the host's
-three-keys-per-row limit. **All ten manifest settings are reachable here**; the
+three-keys-per-row limit. **All twelve manifest settings are reachable here**; the
 protocol test checks each one, so the two surfaces cannot drift apart silently:
 
 | Row | Title | Enter | Manifest setting |
@@ -43,11 +43,18 @@ protocol test checks each one, so the two surfaces cannot drift apart silently:
 | 9 | `Adjacency tolerance: <n> px` | drill down to the tolerance submenu | `adjacencyTolerancePx` |
 | 10 | `No wrap while dragging: on/off` | drill down to the on/off submenu | `disableDuringDrag` |
 | 11 | `Disable on one monitor: on/off` | drill down to the on/off submenu | `disableOnSingleMonitor` |
-| 12 | `Tuning overlay: on/off` | drill down to the tuning submenu | — (runtime switch + parameter entry) |
-| 13 | `Suggested gate: <n>/not enough data` | drill down to the suggestion submenu | a `impactSpeedPps` suggestion from the trace |
-| 14 | `Cursor wrap: arrival trace` | copy the trace CSV | — |
-| 15 | `Cursor wrap: diagnostics` | copy the full diagnostics | — |
-| 16 | `Restore host settings` | clear the search-bar overrides | — |
+| 12 | `Tuning overlay: on/off` | drill down to the tuning submenu | `tuningOverlay` |
+| 13 | `Data window: on/off` | drill down to the data-window submenu | `dataWindow` |
+| 14 | `Suggested gate: <n>/not enough data` | drill down to the suggestion submenu | a `impactSpeedPps` suggestion from the trace |
+| 15 | `Cursor wrap: arrival trace` | copy the trace CSV | — |
+| 16 | `Cursor wrap: diagnostics` | copy the full diagnostics | — |
+| 17 | `Restore host settings` | clear the search-bar overrides | — |
+
+**The settings page and the search bar share one switch.** `tuningOverlay` and
+`dataWindow` are real manifest settings: the settings page's toggle, the search
+bar's `tune` / `data` submenus and the `settings.json` overrides file all write
+the same field, and both survive a restart. The tuning switch used to exist only
+in the search bar.
 
 Status-row subtitle: `mode <mode> · activation <mode> · impact on/off [gate] ·
 N display(s)`; when the search bar has overridden settings, ` · search-bar
@@ -74,6 +81,7 @@ choice, and Enter applies it:
 | `drag` | back · on · off (no wrap while dragging) |
 | `single` | back · on · off (disable on one monitor) |
 | `tune` | back · switch · band · gate · guard · edge threshold (see "Tuning overlay") |
+| `data` / `window` | back · switch · skip reasons · hook health · copy the trace · suggested gate (see "Data window") |
 | `best` | back · suggested gate · apply · see the data (see "Arrival trace") |
 
 ### With a number: set directly (skip the submenu)
@@ -94,6 +102,7 @@ the new value marked "current":
 | `drag on` / `drag off` | whether dragging wraps |
 | `single on` / `single off` | whether one display disables wrapping |
 | `tune on` / `tune off` | the tuning overlay (with no value it opens the submenu) |
+| `data on` / `data off` | the data window (with no value it opens the submenu) |
 | `trace` | a trace row; Enter copies the CSV |
 | `best` | the suggestion submenu: see / apply / inspect |
 | `clear` | drop the recorded arrivals |
@@ -165,6 +174,14 @@ and tests are reproducible.
 | `impactGate` | bool | false | impact mode: the cursor must hit the edge fast enough to wrap |
 | `impactSpeedPps` | number | 2000 | 500–20000, the impact speed gate (px/s) |
 | `impactBandPx` | number | 150 | 50–500, the impact measuring band (how close to the edge counts as approach) |
+| `tuningOverlay` | bool | false | tuning overlay: draw the measuring band and the wrap line on outer edges, plus the measured speed |
+| `dataWindow` | bool | false | data window: live histogram, decision log, per-reason skip counts, hook health |
+
+`tuningOverlay` and `dataWindow` are **real settings**, not command-layer state:
+the settings page, the search bar (`tune` / `data`) and the `settings.json`
+overrides file write the same field, and both survive a restart. Opening and
+closing both windows goes through one place (`applyWindowSettings()`), called
+after every path that can change them.
 
 The wrap **landing is one pixel inside** the destination edge (`left+1` /
 `right-2` / `top+1` / `bottom-2`), not on its line — a landing inside the
@@ -277,34 +294,113 @@ Design choices:
 - The movement history clears after every wrap: the speed of the hit cannot
   leak into the next decision.
 
-## 8 Architecture
+## 8 Data window
 
-One process, one executable (`cursorwrap.exe`), no DLL, no Qt, no windows, no tray.
-Three threads:
+The tuning overlay draws on the edges themselves and only has content at the
+moment of a hit. The **data window** is what can sit beside the app while you
+tune:
+
+- A real top-level GDI window (`WS_POPUP | WS_CAPTION | WS_SYSMENU`) with
+  `WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE`: always on top, absent
+  from the taskbar and Alt+Tab, and it **never takes focus** (taking it would
+  interrupt whatever you are tuning against).
+- Refreshes itself every 150 ms (`SetTimer` + `InvalidateRect`); `WM_ERASEBKGND`
+  returns 1 and the window paints every pixel, so it does not flicker.
+- Top to bottom:
+  1. state header: enabled / hook state / display count / outer-edge count;
+  2. the pointer position and the **most recent decision** (verdict + edge +
+     measured speed + the gate in force) plus the `moves / wraps / skipped`
+     totals;
+  3. the arrival-speed histogram: log axis 500–20000 in 22 buckets, an amber
+     line for the current gate and a green one for the suggested gate, with
+     `N hits` and the suggestion in the title;
+  4. the per-reason skip counters;
+  5. the last 20 decisions (edge · measured speed · verdict · display), wraps in
+     green and skips in grey.
+- Closing it with the X clears the `dataWindow` setting too (the plugin thread
+  polls `takeCloseRequest()` every 100 ms), so the two surfaces cannot disagree.
+
+## 9 Per-reason skip counters and the decision log
+
+A single `suppressed` total cannot locate "it never wraps": any of nine gates may
+be saying no. `SkipReason` splits it:
+
+| Reason | Meaning |
+|---|---|
+| `no-monitors` | no display was enumerated |
+| `single-monitor` | one display, and "disable on one monitor" is on |
+| `dragging` | the left button is held and "no wrap while dragging" is on |
+| `no-modifier` | activation requires Ctrl/Shift and it is not held |
+| `guard` | inside the anti-oscillation radius |
+| `off-monitor` | the pointer is on no display (should not happen) |
+| `not-on-edge` | not within the outer-edge detection band |
+| `impact-gate` | reached the edge, but the measured speed failed the gate |
+| `wrapped` (`None`) | it wrapped |
+
+`Stats::skipped[]` counts **every sample**. The `Decision` log records only an
+arrival or a CHANGE of skip reason — one continuous glide is one entry, so a
+1000 Hz mouse cannot flood it — capped at 24 (`kDecisionMax`). Diagnostics, the
+`data` submenu and the data window all read the same data.
+
+## 10 Architecture
+
+One process, one executable (`cursorwrap.exe`), no DLL, no Qt, no tray. Threads:
 
 | Thread | Responsibility |
 |---|---|
 | Protocol (`serve()`) | `query` / `action` / `settingsChanged` / `shutdown`; owns a `WrapEngine` |
 | Hook | `WH_MOUSE_LL` with its own message pump; settings arrive via `WM_APP_SETTINGS`, so the hot path is lock-free |
 | Watcher | message-only window receiving `WM_DISPLAYCHANGE` / `WM_SETTINGCHANGE` / `WM_DEVICECHANGE`; rebuilds the topology after a 500 ms debounce |
+| Coalescer | 100 ms poll: folds the hook's `refreshPending` into one `refresh()`, and turns the data window's close request into a setting change |
+| Watchdog | 1 s comparison of `GetCursorPos()` against the position the hook last reported, to detect a silently dropped hook |
+| Window threads | one `GetMessage` loop each for the tuning overlay and the data window |
 
-The pure core (`wrap_topology`, `wrap_logic`) includes no OS headers — monitors
-enter as `MonitorBox` values — so the engine unit-tests anywhere.
+### Zero I/O on the hook thread (a hard constraint)
 
-## 9 Data
+A low-level mouse hook is timed by a watchdog inside Windows: a callback past
+`LowLevelHooksTimeout` (300 ms by default) is **silently unhooked**, while the
+plugin still believes `installed == true`. So the hook callback does **no I/O at
+all**, not even a log line:
 
-`WS_DATA_DIR` is unused: no state file, no log file, no cache. Settings are managed
-by the host in `WinShun.ini`. Diagnostics reach the clipboard only on
+- a wrap only sets the atomic `m_refreshPending`; the coalescer turns it into one
+  `refresh()`;
+- the watchdog only compares atomics, and requests a repair with
+  `PostThreadMessage(WM_APP_REINSTALL)`.
+
+**The trap that matters**: after a successful `SetCursorPos` the landing point
+must immediately be recorded as "the position the hook last saw", or the next
+watchdog cycle sees "the pointer moved but no event arrived" and mistakes the
+plugin's own wrap for a dead hook.
+
+### Pointer location uses the nearest display, not exact containment
+
+`Topology::monitorAt` is an exact containment test (the layout tests and gap
+detection rely on it; it returns -1 outside). The wrap path uses
+`Topology::nearestMonitor`: the container if there is one, else the closest
+display. On a real machine the pointer can briefly sit outside every monitor
+rect (topology not rebuilt yet, a hot-plug seam, gaps between the displays
+Windows reports); exact containment then marks the whole path `off-monitor` and
+swallows the wrap — a real-machine run logged 1008 such samples. The pure core
+(`wrap_topology`, `wrap_logic`) includes no OS headers — monitors enter as
+`MonitorBox` values — so the engine unit-tests anywhere.
+
+## 11 Data
+
+Settings are managed by the host in `WinShun.ini`; search-bar changes go to
+`WS_DATA_DIR/settings.json` (only keys that differ from the defaults). Otherwise
+there is no log file and no cache. Diagnostics reach the clipboard only on
 `copyDiagnostics` and contain counters and geometry only (no window titles, file
 names or user text).
 
-## 10 Failure matrix
+## 12 Failure matrix
 
 | Failure | Symptom | Degradation |
 |---|---|---|
 | `SetWindowsHookEx` fails | status row says the hook is not installed; `winshun/log` warn | keyword query and toggle still work |
-| `SetCursorPos` fails | the move is passed through untouched | that wrap does not happen; no stuck cursor |
+| The hook is silently unhooked | the watchdog reinstalls it after 2 cycles and counts it, `log(warn)` | recovers without a restart |
+| `SetCursorPos` fails | the move is passed through untouched and counted in `setcursorpos failures` | that wrap does not happen; no stuck cursor |
 | Display enumeration empty | engine idles, swallows nothing | status shows 0 displays |
+| The pointer is briefly outside every rect | attributed to the nearest display and judged normally | no longer swallowed as `off-monitor` |
 | Layout has coordinate gaps (GPU driver) | gaps within the tolerance still count as adjacent; larger ones become outer edges | gaps are listed in diagnostics |
 | Remote session (RDP) | one virtual display | single-monitor semantics |
 | Display hot-plugged | rebuilt after the debounce, movement history cleared | no crash, no stale edges |
@@ -313,24 +409,26 @@ names or user text).
 | Host too old | ignored | keyword path works |
 | 3 consecutive query timeouts | host restarts the plugin | `initialized()` rebuilds hook and topology |
 
-## 11 Permissions, privacy
+## 13 Permissions, privacy
 
 - `permissions: ["ui"]` — the low-level mouse hook and a message-only window. `ui`
   is only partially enforced by the host; the README says so.
 - No `elevated`, `processes`, `network`, `files:write` or clipboard permission.
 - Coordinates and display geometry stay in the process: no network, no disk.
 
-## 12 Known limitations
+## 14 Known limitations
 
-- Needs a low-level mouse hook. If Windows removes it after a
-  `LowLevelHooksTimeout` stall the plugin does not re-install it (same as
-  findmouse); see the unverified list in tests.md.
+- Needs a low-level mouse hook. The watchdog (a 1 s position comparison) finds
+  and reinstalls one Windows removed, but in the extreme case (removed again
+  immediately after every reinstall) it shows as "the event count stops growing"
+  — that is what `hook reinstalls` and `hook responsive` in the diagnostics are
+  for.
 - Exclusive-fullscreen D3D applications may not see the outer edges.
 - High contrast / Magnifier not specifically verified.
 - Differences from PowerToys CursorWrap: no `activation_shortcut` hotkey trigger
   and no auto-activate process whitelist.
 
-## 13 Roadmap
+## 15 Roadmap
 
 - v0.1 (this release): everything above
 - v0.2 candidates: per-display enable, gap-snapping suggestions, hook re-install
@@ -376,3 +474,33 @@ names or user text).
 - Remote sessions, exclusive fullscreen, high contrast, Magnifier.
 - Installing the `.wsplugin` into a real WinShun host and enabling it: the round
   trip above drives the executable's stdio directly, it is not host integration.
+
+### v0.2.0: what changed and what is still open
+
+The user reported, after enabling the plugin on a real dual-monitor machine, that
+wrapping did not happen at all, with or without impact mode, and that neither the
+tuning switch nor the data read-out was reachable from the settings page. Two
+root causes were found by audit, both now fixed with regressions:
+
+1. The hook's wrap callback called `refresh()`, writing to the host's stdout
+   inside a `WH_MOUSE_LL` callback. Windows unhooks a low-level hook whose
+   callback stalls past `LowLevelHooksTimeout`, silently. The callback now only
+   sets an atomic flag (coalesced into one `refresh()` every 100 ms).
+2. The wrap path located the display with exact containment, so any sample
+   outside every monitor rect became `off-monitor` and was swallowed. A
+   real-machine capture logged 1008 such samples. `Topology::nearestMonitor` now
+   attributes such a pointer to the closest display.
+
+Still open, and honestly not measurable from here:
+
+- **The two root causes were found by reading code and by one real-machine
+  capture, not by a passing real-machine wrap.** The regression tests reproduce
+  the user's exact geometry and settings (`user_config_*` in
+  `tests/test_impact_gate.cpp`), and they pass, but they drive the engine
+  directly. Only the user can confirm the real gesture now wraps.
+- The watchdog's reinstall path has never fired on a real machine: the unit
+  tests cover `nearestMonitor` and the decision accounting, and the watchdog was
+  exercised only by reading its atomics in the data window (`hook live`).
+- The data window was rendered and inspected once (screenshot: header, pointer,
+  histogram, skip counters, decision log all populated from a live hook). Its
+  behaviour on a mixed-DPI layout has not been checked.
