@@ -262,6 +262,17 @@ sha256 `f4468611…7202722`，`--tag v0.1.0` 校验通过）后，把**包内容
 
 `y_stable` 是必需的：用户自己的鼠标一动，命令行里恒定的 `y` 就会漂移，该轮作废。
 
+修复计时器溢出后，`tests/rdp_wrap_probe.py` 的 7 项**全部通过**（含开门槛的两项）：
+
+```
+  single-right-edge-wraps          ok=True delta_wraps=1 landed=[1, 540]
+  single-left-edge-wraps           ok=True delta_wraps=1 landed=[1918, 540]
+  gate-fast-hit-wraps              ok=True delta_wraps=1 landed=[1, 540]
+  gate-slow-drift-refused          ok=True delta_wraps=0 landed=[1919, 540]
+  no-silent-suppression            ok=True
+  clean-exit                       ok=True
+```
+
 **测到的注入事件事实**（`tests/injected_wrap_probe.py`）：
 
 | 项 | 结果 | 含义 |
@@ -276,6 +287,17 @@ sha256 `f4468611…7202722`，`--tag v0.1.0` 校验通过）后，把**包内容
 `rebuildRefused`），`enumerateMonitors` 为空时回退到 `SM_*VIRTUALSCREEN`。
 真正的变化（拔屏、会话结束回到双屏）仍然立即生效。
 
+**修复（真实 bug，第三层）**：回绕的**测速**用了不安全的微秒换算。
+`QueryPerformanceCounter * 1'000'000 / freq` 在 `freq = 10MHz` 下，开机约 10.7 天后
+溢出 int64，之后每个时间戳变成负数。`approachSpeedPps` 用负窗口算出
+`measured_pps = 0`，门槛永远判负——这就是「开了撞击模式怎么推都不回绕」。
+本机（开机 11.2 天）实测：`t_us = -875612248758`、`measured_pps = 0`。新增
+`src/qpc_time.h` 的 `counterToUs()`（拆成 `whole + rem` 两段，两个乘积都不溢出），
+钩子与覆盖层统一走它。修复后同一台机器：快推 4231–8002 px/s → 回绕，慢漂 800 px/s
+→ 被 `impact-gate` 拒绝，**7/7 RDP 检查通过**（含 `gate-fast-hit-wraps`）。
+回归用例 4 个。这个缺陷只有"长期开机 + 开门槛"的组合才会暴露，单测过去用
+`t = 1'000'000` 起算，永远不会踩到。
+
 **仍未验证**：真实断开重连过程中 `rebuildRefused` 的实际计数（只有单测覆盖）；
 v0.2.0 双屏根因修复仍无真机回绕确认。
 
@@ -283,7 +305,7 @@ v0.2.0 双屏根因修复仍无真机回绕确认。
 
 | 项 | 结果 |
 |---|---|
-| `cw_tests` | **121 用例 + 7 fixture 全绿**（v0.2.0 新增 14 个；v0.2.1 再新增 5 个 `rdp_*`） |
+| `cw_tests` | **125 用例 + 7 fixture 全绿**（v0.2.0 新增 14 个；v0.2.1 再新增 5 个 `rdp_*` + 4 个时钟溢出用例） |
 | `protocol_roundtrip.py` | **118/118 检查通过**，退出码 0（新增 15 项：清单 12 个设置逐键核对、`data` 子菜单、设置页与列表同步、`window` 别名、诊断含跳过计数与钩子健康） |
 | `tests/validate.py` | 静态校验通过（含 CHANGELOG 新增 `[0.2.0]` 章节与 `plugin.json` 版本一致） |
 | 用户真机配置复现 | 双屏 `[-2560,0..0,1440] + [0,0..2560,1440]`、`wrapMode=horizontal`、`guard=100`、`tol=10`：关门槛双向回绕落点 `x=-2559` / `x=2558` 正确；内边永不回绕；开门槛时 5000 px/s 命中回绕；慢漂**只**被 `impact-gate` 拦下（其余原因计数为 0） |

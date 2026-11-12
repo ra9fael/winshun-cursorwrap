@@ -22,6 +22,8 @@
 // readout panel is 208x74 and only repaints when its numbers change.
 #include "overlay.h"
 
+#include "qpc_time.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -74,7 +76,9 @@ long long nowUs()
         return 0;
     LARGE_INTEGER c {};
     QueryPerformanceCounter(&c);
-    return c.QuadPart * 1'000'000LL / freq;
+    // Splitting the division avoids the int64 overflow the naive
+    // `c * 1'000'000 / freq` hits after ~10.7 days of uptime.
+    return counterToUs(c.QuadPart, freq);
 }
 
 } // namespace

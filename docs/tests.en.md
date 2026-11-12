@@ -16,7 +16,7 @@ original: [tests.md](tests.md).
 | Package contains `plugin.json` / `cursorwrap.exe` / `README.md` / `LICENSE`, no `build/`, `dist/`, `.git` | §8 | `tools/package.py` + `tools/ci_release.py` |
 | Bilingual anchors cross-link (`docs/spec*.md`, `docs/tests*.md`, README, CHANGELOG) | — | pass |
 
-## L1 — Pure logic unit tests (`cw_tests`, ctest target, 121 cases + 7 layout fixtures)
+## L1 — Pure logic unit tests (`cw_tests`, ctest target, 125 cases + 7 layout fixtures)
 
 No OS headers: runs anywhere. Commands:
 
@@ -63,6 +63,7 @@ ctest --test-dir build --output-on-failure
 | The user's real configuration | dual displays `[-2560,0..0,1440] + [0,0..2560,1440]`, `wrapMode=horizontal`, `guard=100`, `tol=10`: both directions wrap to the right landing; inner edges never wrap; 5000 px/s hits wrap with the gate on; a slow drift is refused ONLY by `impact-gate` (every other reason counts 0); dragging counts as `dragging` | §5 §9 |
 | Both windows are real settings | `tuningOverlay` / `dataWindow` survive a `RawSettings` round trip; a partial update does not clear them | §7 |
 | Remote Desktop (RDP) | one virtual display 1920×1080 wraps both directions to `x=1` / `x=1918`; `disableOnSingleMonitor` counts as `single-monitor`; **an empty enumeration must not wipe the topology** (keep the last good layout + count `rebuildRefused` + still wrap afterwards); a genuine layout change (unplug, session ends back to two displays) still applies immediately; the impact gate still measures and refuses correctly on one display | §5 §10 |
+| The microsecond clock does not overflow | `counterToUs` returns a positive, correct value after 30 days of uptime and for the real 11.2-day counter value; a 1 ms step is still exactly 1000 µs; `freq<=0` and a negative counter fail closed with 0; **end to end**: an engine fed the "11 days up" clock still wraps a 6000 px/s hit with `measuredPps>=2000` (the old code yielded `measured_pps=0` and the gate refused everything) | §5 §9 |
 | Layout fixtures | `tests/layouts/*.json` — six synthetic layouts asserted case by case | §5 |
 
 Fixtures are **synthetic geometry**, not captured hardware, so they are safe to
@@ -200,7 +201,7 @@ coordinates.
 
 ## Acceptance criteria
 
-- L1 green (currently 121 cases + 7 fixtures, including the captured
+- L1 green (currently 125 cases + 7 fixtures, including the captured
   `live-single.json`)
 - L3 fully passing (currently 118/118)
 - L0 static validation passing

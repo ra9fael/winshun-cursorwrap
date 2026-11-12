@@ -2,6 +2,7 @@
 // must look like a hit (enough perpendicular speed over the recent window),
 // not a drift. Timestamps are microseconds, exactly what the hook passes.
 #include "test_harness.h"
+#include "qpc_time.h"
 #include "wrap_logic.h"
 
 using namespace cw;
@@ -868,4 +869,66 @@ CW_TEST(rdp_impact_gate_measures_on_a_single_display)
     }
     CW_CHECK_EQ(slow.stats().wraps, 0);
     CW_CHECK(slow.stats().skipped[static_cast<int>(SkipReason::ImpactGate)] >= 1);
+}
+
+// The timestamp source must survive a machine up for weeks. The naive
+// `counter * 1'000'000 / freq` overflows int64 after ~10.7 days (2^63 / 1e6 /
+// 1e7 s), turning every timestamp negative. Measured on a machine up 11.2
+// days: t_us = -875612248758 and measured_pps = 0, so the impact gate refused
+// every wrap -- "the plugin does nothing" with the gate on.
+CW_TEST(qpc_counter_to_us_does_not_overflow_after_weeks_of_uptime)
+{
+    constexpr long long kFreq = 10'000'000; // 10 MHz, what Windows reports
+    // 30 days of uptime: the naive expression would overflow int64 by then.
+    const long long now = kFreq * 60LL * 60 * 24 * 30;
+    const long long us = counterToUs(now, kFreq);
+    CW_CHECK(us > 0);
+    CW_CHECK_EQ(us, 60LL * 60 * 24 * 30 * 1'000'000);
+
+    // And a 1 ms step still measures as 1000 us, i.e. 1000 px/s per px.
+    const long long a = counterToUs(now, kFreq);
+    const long long b = counterToUs(now + kFreq / 1000, kFreq);
+    CW_CHECK_EQ(b - a, 1000);
+}
+
+CW_TEST(qpc_counter_to_us_at_eleven_days_matches_the_real_value)
+{
+    // The exact counter value read on the machine that exposed the bug,
+    // 11.2 days of uptime at 10 MHz.
+    constexpr long long kFreq = 10'000'000;
+    const long long now = 9690621586130LL;
+    const long long us = counterToUs(now, kFreq);
+    CW_CHECK(us > 0);
+    // 9690621586130 / 1e7 s = 969062.158613 s = 969062158613 us.
+    CW_CHECK_EQ(us, 969062158613LL);
+    // The naive expression wrapped to this; assert we do not reproduce it.
+    CW_CHECK(us != -875612248758LL);
+}
+
+CW_TEST(qpc_counter_to_us_fails_closed_on_a_bad_frequency)
+{
+    CW_CHECK_EQ(counterToUs(12345678, 0), 0);
+    CW_CHECK_EQ(counterToUs(12345678, -1), 0);
+    CW_CHECK_EQ(counterToUs(-5, 10'000'000), 0);
+}
+
+// End to end: a gate-on engine fed timestamps from a long-running counter
+// still measures speed and still wraps a real hit.
+CW_TEST(impact_gate_still_wraps_with_a_long_running_clock)
+{
+    constexpr long long kFreq = 10'000'000;
+    WrapEngine e(gateOn());
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    // 11 days in: the bug turned these negative.
+    long long counter = kFreq * 60LL * 60 * 24 * 11;
+    const long long stepUs = 2000; // 2 ms per 12 px = 6000 px/s
+    for (int64_t x = 1811; x < 1919; x += 12) {
+        e.onMouseMove({ x, 540, counterToUs(counter, kFreq) }, false, false);
+        counter += stepUs * kFreq / 1'000'000;
+    }
+    const auto [nx, ny] = e.onMouseMove({ 1919, 540, counterToUs(counter, kFreq) },
+                                        false, false);
+    CW_CHECK_EQ(nx, 1); // wrapped
+    CW_CHECK_EQ(e.stats().wraps, 1);
+    CW_CHECK(e.lastVerdict().measuredPps >= 2000);
 }

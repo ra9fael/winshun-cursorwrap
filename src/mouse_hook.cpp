@@ -1,6 +1,8 @@
 // mouse_hook.cpp — see mouse_hook.h.
 #include "mouse_hook.h"
 
+#include "qpc_time.h"
+
 #include <chrono>
 #include <thread>
 
@@ -248,9 +250,10 @@ LRESULT MouseHook::hookProc(int code, WPARAM wp, LPARAM lp)
         QueryPerformanceFrequency(&f);
         return f;
     }();
-    const long long tUs = freq.QuadPart > 0
-        ? now.QuadPart * 1'000'000LL / freq.QuadPart
-        : 0;
+    // counterToUs splits the division: the naive `now * 1'000'000 / freq`
+    // overflows int64 after ~10.7 days of uptime and turns every timestamp
+    // negative, which made the impact gate refuse every wrap.
+    const long long tUs = counterToUs(now.QuadPart, freq.QuadPart);
     const auto [nx, ny] = m_engine->onMouseMove({ info->pt.x, info->pt.y, tUs },
                                                modifier, leftDown);
     if (nx == info->pt.x && ny == info->pt.y)

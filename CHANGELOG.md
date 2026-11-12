@@ -25,6 +25,18 @@ single source of truth; release tags are `v<version>`.
 
 ### Fixed
 
+- **撞击模式的计时器在开机 10.7 天后溢出，导致「开着门槛就完全不能回绕」**：
+  钩子里用 `QueryPerformanceCounter * 1'000'000 / freq` 换算微秒。Windows 的
+  `freq` 是 10MHz，所以 `counter * 1e6` 在开机约 10.7 天
+  （2^63 / 1e6 / 1e7 秒）后**溢出 int64**，之后每个时间戳都是负数。后果是
+  `approachSpeedPps` 用负的时间窗口算出 `measured_pps = 0`，门槛永远判负——
+  表现就是「开了撞击模式，怎么推都不回绕」。本机实测（开机 11.2 天）：
+  `t_us = -875612248758`、`measured_pps = 0`，每一次到达都被 `impact-gate` 拒。
+  修复：新增 `src/qpc_time.h` 的 `counterToUs()`，把除法拆成
+  `whole = now / freq` + `rem = now % freq`，两个乘积都不会溢出；钩子与覆盖层
+  统一走它。修复后同一台机器实测：快推 4231–8002 px/s → 回绕，慢漂 800 px/s →
+  被 `impact-gate` 拒绝，7/7 RDP 检查通过。
+  回归用例 4 个（含 11.2 天真实计数值与端到端「长开机时间下仍然回绕」）。
 - **RDP 重连/缩放会清空拓扑**：`EnumDisplayMonitors` 在会话重连或分辨率切换的瞬间
   可能返回**空列表**，而 `WM_DISPLAYCHANGE` 正好在那个窗口触发；旧代码会把空列表
   当成新布局，清掉可用拓扑并让插件在整段会话里失效。现在：

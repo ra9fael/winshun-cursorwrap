@@ -235,7 +235,7 @@ C++ 运行时，目标机器不需要 MinGW。MSVC 构建用静态运行库（`/
 ## 测试
 
 ```powershell
-ctest --test-dir build --output-on-failure       # L1：121 用例 + 7 布局 fixture
+ctest --test-dir build --output-on-failure       # L1：125 用例 + 7 布局 fixture
 python tests/protocol_roundtrip.py               # L3：118 项协议往返检查
 python tests/repeat_push_probe.py                # L4 单屏 / 远程桌面：真实 SetCursorPos 多轮推送
 python tests/injected_wrap_probe.py              # L4：注入事件（LLMHF_INJECTED）仍能回绕

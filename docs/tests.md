@@ -17,7 +17,7 @@
 | 打包物含 `plugin.json` / `cursorwrap.exe` / `README.md` / `LICENSE`，无 `build/`、`dist/`、`.git` | §8 | `tools/package.py` + `tools/ci_release.py` |
 | 双语文档锚点互链（`docs/spec*.md`、`docs/tests*.md`、README、CHANGELOG） | — | 通过 |
 
-## L1 — 纯逻辑单测（`cw_tests`，ctest 目标，121 用例 + 7 布局 fixture）
+## L1 — 纯逻辑单测（`cw_tests`，ctest 目标，125 用例 + 7 布局 fixture）
 
 不引 OS 头文件，任何平台可跑。运行：
 
@@ -63,6 +63,7 @@ ctest --test-dir build --output-on-failure
 | 最近屏归位 | `monitorAt` 保持精确（屏外 -1，布局测试依赖）；`nearestMonitor` 屏外归最近屏、空布局仍 -1；布局外 1px 的指针不得关闭回绕 | §5 |
 | 用户真机配置复现 | 双屏 `[-2560,0..0,1440] + [0,0..2560,1440]`、`wrapMode=horizontal`、`guard=100`、`tol=10`：关门槛双向回绕落点正确；内边永不回绕；开门槛时 5000 px/s 命中回绕；慢漂只被 `impact-gate` 拦下且其他原因计数为 0；拖拽计入 `dragging` | §5 §9 |
 | 远程桌面（RDP） | 单虚拟屏 1920×1080 双向回绕落点为 `x=1` / `x=1918`；`disableOnSingleMonitor` 计入 `single-monitor`；**空枚举不得清空拓扑**（保留上一份布局 + 计入 `rebuildRefused` + 之后仍能回绕）；真正的布局变化（拔屏、会话结束回双屏）仍然立即生效；单屏下撞击门槛仍可测速并正确拦截 | §5 §10 |
+| 微秒时钟不溢出 | `counterToUs` 在开机 30 天、11.2 天真实计数值下都返回正数且数值正确；1ms 步长仍精确为 1000µs；`freq<=0` / 负计数 fail closed 返回 0；**端到端**：用「开机 11 天」的计数器喂引擎，6000 px/s 的撞击仍然回绕且 `measuredPps>=2000`（旧实现在这里 `measured_pps=0`，门槛拒绝一切） | §5 §9 |
 | 两个窗口是真设置 | `tuningOverlay` / `dataWindow` 经 `RawSettings` 往返保持；部分更新不会清掉它们 | §7 |
 | 布局 fixture | `tests/layouts/*.json` 六个合成布局逐条断言 | §5 |
 
@@ -191,7 +192,7 @@ python tests/protocol_roundtrip.py
 
 ## 验收标准
 
-- L1 全绿（当前 121 用例 + 7 fixture，含真机采集的 `live-single.json`）
+- L1 全绿（当前 125 用例 + 7 fixture，含真机采集的 `live-single.json`）
 - L3 全通过（当前 118/118）
 - L0 静态校验通过
 - L4 单屏与远程桌面单屏部分已实测通过；**多屏部分全部勾选后**才可宣布多屏可发布，

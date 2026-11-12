@@ -272,7 +272,7 @@ MinGW. MSVC builds use the static runtime (`/MT`) and likewise ship no external 
 ## Tests
 
 ```powershell
-ctest --test-dir build --output-on-failure       # L1: 121 cases + 7 layout fixtures
+ctest --test-dir build --output-on-failure       # L1: 125 cases + 7 layout fixtures
 python tests/protocol_roundtrip.py               # L3: 118 protocol round-trip checks
 python tests/repeat_push_probe.py                # L4 single display / RDP: multi-round real SetCursorPos pushes
 python tests/injected_wrap_probe.py              # L4: injected input (LLMHF_INJECTED) still wraps

@@ -342,6 +342,19 @@ RDP 会话对本插件的影响有三点，且都不是"不支持"：
 过滤看似会挡住 RDP 的真实输入，实测证明不会——`injected_seen=16` 的同时
 `delta_wraps=1`，因为同一移动还会产生一条不带该标志的事件供引擎判定。
 
+### 微秒时钟必须防溢出（`qpc_time.h`）
+
+钩子把 `QueryPerformanceCounter` 换算成微秒喂给引擎。写成
+`counter * 1'000'000 / freq` 是错的：Windows 的 `freq` 是 10MHz，`counter * 1e6` 在
+开机约 **10.7 天**（`2^63 / 1e6 / 1e7` 秒）后溢出 `int64`，之后每个时间戳都是负数。
+后果不是"速度不准"，而是**门槛永远判负**：`approachSpeedPps` 用负窗口算出
+`measured_pps = 0`，每一次到达都被 `impact-gate` 拒绝——表现就是「开了撞击模式，
+怎么推都不回绕」。实测（开机 11.2 天）：`t_us = -875612248758`、`measured_pps = 0`。
+
+`counterToUs(now, freq)` 把除法拆开：`whole = now / freq`、`rem = now % freq`，
+`whole * 1e6 + rem * 1e6 / freq`，两个乘积都远小于 int64 上限。`freq <= 0` 或负计数
+返回 0（fail closed）。**所有**取微秒的地方都必须用它，不允许再出现裸表达式。
+
 ## 9 数据位置
 
 设置由宿主在 `WinShun.ini` 管理；搜索栏改动写进 `WS_DATA_DIR\settings.json`

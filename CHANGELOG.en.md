@@ -28,6 +28,22 @@ single source of truth; release tags are `v<version>`.
 
 ### Fixed
 
+- **The impact-mode clock overflows after 10.7 days of uptime, which made "gate
+  on" block every wrap**: the hook converted `QueryPerformanceCounter` to
+  microseconds as `counter * 1'000'000 / freq`. Windows reports `freq` = 10 MHz,
+  so `counter * 1e6` **overflows int64** once the machine has been up for about
+  10.7 days (2^63 / 1e6 / 1e7 s), and every timestamp after that is negative.
+  `approachSpeedPps` then divides by a negative window, yields
+  `measured_pps = 0`, and the gate refuses every arrival — the symptom is
+  "impact mode is on, so nothing ever wraps". Measured on the machine that
+  exposed it (11.2 days up): `t_us = -875612248758`, `measured_pps = 0`, and
+  every arrival refused with `impact-gate`. Fix: `counterToUs()` in the new
+  `src/qpc_time.h` splits the division into `whole = now / freq` plus
+  `rem = now % freq`, so neither product can overflow; the hook and the overlay
+  both use it. After the fix, on the same machine: fast pushes at 4231–8002 px/s
+  wrap, a slow 800 px/s drift is refused by `impact-gate`, and all 7 RDP checks
+  pass. Four regression cases, including the real 11.2-day counter value and an
+  end-to-end "still wraps with a long-running clock".
 - **An RDP reconnect or resize could wipe the topology**: `EnumDisplayMonitors`
   can return an **empty list** at the instant a session reconnects or changes
   resolution, and `WM_DISPLAYCHANGE` fires inside exactly that window. The old

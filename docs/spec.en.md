@@ -404,11 +404,26 @@ An RDP session affects this plugin in three ways, none of them "unsupported":
    changes (unplugging a monitor, the session ending and the desk layout
    returning) still apply immediately.
 
-Injected input does not break RDP: `SendInput` events carry `LLMHF_INJECTED`,
-and the filter that drops them looks like it would block a Remote Desktop user's
-real input. Measurement says it does not — `injected_seen=16` with
-`delta_wraps=1`, because the same movement also produces an untagged event for
-the engine to judge.
+Injected input does not break RDP: `SendInput` events carry `LLMHF_INJECTED`, and the
+filter that drops them looks like it would block a Remote Desktop user's real input.
+Measurement says it does not — `injected_seen=16` with `delta_wraps=1`, because the
+same movement also produces an untagged event for the engine to judge.
+
+### The microsecond clock must not overflow (`qpc_time.h`)
+
+The hook converts `QueryPerformanceCounter` to microseconds for the engine. Spelling
+that `counter * 1'000'000 / freq` is wrong: Windows reports `freq` = 10 MHz, so
+`counter * 1e6` **overflows int64** after about **10.7 days** of uptime
+(`2^63 / 1e6 / 1e7` s), and every timestamp after that is negative. The consequence is
+not "a slightly wrong speed" but **the gate refusing everything**: `approachSpeedPps`
+divides by a negative window, yields `measured_pps = 0`, and every arrival is rejected
+by `impact-gate` — the symptom is "impact mode is on, so nothing ever wraps".
+Measured at 11.2 days up: `t_us = -875612248758`, `measured_pps = 0`.
+
+`counterToUs(now, freq)` splits the division: `whole = now / freq`,
+`rem = now % freq`, result `whole * 1e6 + rem * 1e6 / freq`, so neither product comes
+close to the int64 ceiling. `freq <= 0` or a negative counter returns 0 (fail closed).
+**Every** microsecond reading must go through it; no bare expression is allowed.
 
 ## 11 Data
 

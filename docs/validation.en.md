@@ -292,13 +292,25 @@ oracle is **the plugin's own counters** (`delta_wraps`) plus the landing coordin
 
 The new probe `tests/repeat_push_probe.py`, several rounds per direction:
 
-| Round | Direction | `delta_wraps` | Landing | `y_stable` |
+| 轮次 | 方向 | `delta_wraps` | 落点 | `y_stable` |
 |---|---|---|---|---|
 | 1–3 | right | 1 / 1 / 1 | `x=1` | true |
 | 4–6 | left | 1 / 1 / 1 | `x=1918` | true |
 
 `y_stable` is essential: if the user moves their own mouse, the constant `y` drifts
 and that round must be discarded.
+
+After the clock-overflow fix, all 7 checks in `tests/rdp_wrap_probe.py` pass
+(including the two with the gate on):
+
+```
+  single-right-edge-wraps          ok=True delta_wraps=1 landed=[1, 540]
+  single-left-edge-wraps           ok=True delta_wraps=1 landed=[1918, 540]
+  gate-fast-hit-wraps              ok=True delta_wraps=1 landed=[1, 540]
+  gate-slow-drift-refused          ok=True delta_wraps=0 landed=[1919, 540]
+  no-silent-suppression            ok=True
+  clean-exit                       ok=True
+```
 
 **Measured injected-input facts** (`tests/injected_wrap_probe.py`):
 
@@ -317,6 +329,20 @@ in `rebuildRefused`), and `enumerateMonitors` falls back to `SM_*VIRTUALSCREEN` 
 it comes back empty. Genuine changes (unplugging a display, the session ending and the
 two-display desk returning) still apply immediately.
 
+**Fix (a real bug, and a third layer)**: the wrap *speed measurement* used an
+unsafe microsecond conversion. `QueryPerformanceCounter * 1'000'000 / freq`
+overflows int64 after about 10.7 days of uptime at `freq = 10 MHz`, and every
+timestamp after that is negative. `approachSpeedPps` then divides by a negative
+window, yields `measured_pps = 0`, and the gate refuses every arrival — the symptom
+is "impact mode is on, so nothing ever wraps". Measured on this machine (11.2 days
+up): `t_us = -875612248758`, `measured_pps = 0`. New `counterToUs()` in
+`src/qpc_time.h` splits the division into `whole + rem` so neither product can
+overflow; the hook and the overlay both use it. After the fix, on the same machine:
+fast pushes at 4231–8002 px/s wrap, a slow 800 px/s drift is refused by
+`impact-gate`, and **all 7 RDP checks pass** (including `gate-fast-hit-wraps`).
+Four regression cases. This defect only shows up with "long uptime + gate on" —
+the unit tests started their clocks at `t = 1'000'000`, so they could never hit it.
+
 **Still unverified**: the actual `rebuildRefused` count during a real
 disconnect/reconnect (unit tests only); the v0.2.0 dual-display root-cause fixes still
 have no real-machine wrap confirmation.
@@ -325,7 +351,7 @@ have no real-machine wrap confirmation.
 
 | Item | Result |
 |---|---|
-| `cw_tests` | **121 cases + 7 fixtures green** (14 new in v0.2.0; 5 further `rdp_*` cases in v0.2.1) |
+| `cw_tests` | **125 cases + 7 fixtures green** (14 new in v0.2.0; 5 further `rdp_*` cases plus 4 clock-overflow cases in v0.2.1) |
 | `protocol_roundtrip.py` | **118/118 checks passed**, exit code 0 (15 new: the twelve manifest settings key by key, the `data` submenu, the settings list agreeing with the submenu, the `window` alias, diagnostics carrying the skip split and hook health) |
 | `tests/validate.py` | static validation passed (including the new `[0.2.0]` CHANGELOG heading matching `plugin.json`) |
 | The user's real configuration | dual displays `[-2560,0..0,1440] + [0,0..2560,1440]`, `wrapMode=horizontal`, `guard=100`, `tol=10`: with the gate off both directions land correctly (`x=-2559` / `x=2558`); inner edges never wrap; a 5000 px/s hit wraps with the gate on; a slow drift is refused by **only** `impact-gate` (every other reason counts 0) |

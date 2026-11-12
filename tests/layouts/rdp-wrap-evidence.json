@@ -15,22 +15,25 @@
       "check": "single-right-edge-wraps",
       "expected_wrap": true,
       "wraps_before": 0,
-      "wraps_after": 0,
-      "delta_wraps": 0,
+      "wraps_after": 1,
+      "delta_wraps": 1,
       "landed": [
-        1055,
-        1062
+        1,
+        540
       ],
-      "moves_seen": 0,
-      "skip_delta": {},
+      "moves_seen": 13,
+      "skip_delta": {
+        "not-on-edge": 11,
+        "guard": 1
+      },
       "expected_landing_x": 1,
-      "ok": false
+      "ok": true
     },
     {
       "check": "single-left-edge-wraps",
       "expected_wrap": true,
-      "wraps_before": 0,
-      "wraps_after": 1,
+      "wraps_before": 1,
+      "wraps_after": 2,
       "delta_wraps": 1,
       "landed": [
         1918,
@@ -47,27 +50,26 @@
     {
       "check": "gate-fast-hit-wraps",
       "expected_wrap": true,
-      "wraps_before": 1,
-      "wraps_after": 1,
-      "delta_wraps": 0,
+      "wraps_before": 2,
+      "wraps_after": 3,
+      "delta_wraps": 1,
       "landed": [
-        1919,
-        541
+        1,
+        540
       ],
       "moves_seen": 9,
       "skip_delta": {
         "not-on-edge": 7,
-        "guard": 0,
-        "impact-gate": 2
+        "guard": 1
       },
       "expected_landing_x": 1,
-      "ok": false
+      "ok": true
     },
     {
       "check": "gate-slow-drift-refused",
       "expected_wrap": false,
-      "wraps_before": 1,
-      "wraps_after": 1,
+      "wraps_before": 3,
+      "wraps_after": 3,
       "delta_wraps": 0,
       "landed": [
         1919,
@@ -76,8 +78,8 @@
       "moves_seen": 12,
       "skip_delta": {
         "not-on-edge": 11,
-        "guard": 0,
-        "impact-gate": 1
+        "impact-gate": 1,
+        "guard": 0
       },
       "ok": true
     },
@@ -87,9 +89,9 @@
       "moves_delta": 3,
       "note": "moves > 0 with every reason 0 would mean events are dropped before the engine (the RDP injected-input path)",
       "skip_totals": {
-        "guard": 2,
-        "not-on-edge": 46,
-        "impact-gate": 3
+        "guard": 4,
+        "not-on-edge": 45,
+        "impact-gate": 1
       }
     },
     {

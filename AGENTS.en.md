@@ -50,6 +50,16 @@ After a successful `SetCursorPos` the landing point must immediately be recorded
 as "the position the hook last saw", or the watchdog mistakes the plugin's own
 wrap for a dead hook.
 
+## The timestamp red line
+
+Read microseconds **only** through `counterToUs()` in `src/qpc_time.h`. Writing
+`QueryPerformanceCounter * 1'000'000 / freq` bare overflows `int64` after about
+10.7 days of uptime (`freq` is 10 MHz); every timestamp then turns negative, the
+impact gate computes `measured_pps = 0`, and every wrap is refused. The defect
+only appears with "long uptime + gate on", and the unit tests all start their
+clocks near zero so they can never hit it — **new clock-related cases must use
+counter values from weeks of uptime**.
+
 ## Debugging boundary
 
 Any investigation that moves the real cursor or installs a real global hook —
