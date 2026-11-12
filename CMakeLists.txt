@@ -53,6 +53,30 @@ endforeach()
 
 enable_testing()
 
+# cw_devshell — the plugin's own engine, overlay and data window, driven
+# without Win顺 and without touching the real pointer. Same translation units
+# as cursorwrap.exe, so a wrong pixel here is a wrong pixel in the shipped
+# plugin. See tools/devshell/devshell.cpp for why it exists.
+if(WIN32)
+    add_executable(cw_devshell
+        tools/devshell/devshell.cpp
+        src/wrap_topology.cpp
+        src/wrap_logic.cpp
+        src/settings_store.cpp
+        src/overlay.cpp
+        src/data_window.cpp
+    )
+    target_include_directories(cw_devshell PRIVATE src)
+    target_link_libraries(cw_devshell PRIVATE user32 gdi32)
+    set_target_properties(cw_devshell PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build")
+    foreach(cfg ${CMAKE_CONFIGURATION_TYPES})
+        string(TOUPPER "${cfg}" cfg_upper)
+        set_target_properties(cw_devshell PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY_${cfg_upper} "${CMAKE_SOURCE_DIR}/build")
+    endforeach()
+endif()
+
 add_executable(cw_tests
     tests/test_main.cpp
     tests/test_wrap_topology.cpp

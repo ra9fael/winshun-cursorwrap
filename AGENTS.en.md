@@ -96,8 +96,28 @@ a uniform fast push MUST wrap, and both must hold from 1000 Hz to 125 Hz.
 
 Any investigation that moves the real cursor or installs a real global hook —
 including starting `cursorwrap.exe` directly as a probe — **requires the user's
-consent first**. Building, unit tests, the protocol round trip and static
-validation do not.
+consent first**. Building, unit tests, the protocol round trip, static validation
+and the dev shell below do not.
+
+### Reach for `cw_devshell` before real hardware
+
+Prefer it for GUI and decision-logic checks: it never moves the real pointer.
+
+```powershell
+cmake --build build --target cw_devshell
+python tests/devshell_scenarios.py                 # every scenario
+build\cw_devshell.exe gui                          # real windows, keys 1/2/3
+build\cw_devshell.exe run tests\scenarios\<x>.txt   # one scenario
+```
+
+It links the same source files the plugin ships, so **a bug in the shell is a bug
+in the shipped plugin**. When you find a new defect, capture the reproduction as a
+`tests/scenarios/*.txt` scenario (it must declare a `monitor` layout and carry at
+least one `expect`) instead of leaving throwaway debug code behind.
+
+Only three things are out of its reach, and those need real hardware plus the
+user's consent: the real hook's install/reinstall path, the `SetCursorPos`
+failure path, and **feel**.
 
 Validation evidence follows the workspace convention
 (`winshun-dev/DEVELOPMENT.md`): curated evidence and machine-readable results

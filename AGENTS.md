@@ -82,7 +82,25 @@ fail closed，是安全方向。
 
 任何会移动真实光标、或安装真实全局钩子的排查手段（包括直接启动
 `cursorwrap.exe` 做探针），**必须先征得用户同意**。编译、单测、协议往返、
-静态校验都不需要征求。
+静态校验、以及下面这个 dev shell 都不需要征求。
+
+### 先用 `cw_devshell`，再用真机
+
+验证 GUI 与判定逻辑时**优先**用它，它不移动真实光标：
+
+```powershell
+cmake --build build --target cw_devshell
+python tests/devshell_scenarios.py                 # 全部场景
+build\cw_devshell.exe gui                          # 真窗口，键盘 1/2/3
+build\cw_devshell.exe run tests\scenarios\<x>.txt   # 单场景
+```
+
+它链接的是插件发布的同一批源文件，所以**壳子里错的就是线上的错**。发现新缺陷时
+把复现写成 `tests/scenarios/*.txt` 场景（必须 `monitor` 声明布局 + 至少一条
+`expect`），而不是只留一次性的调试代码。
+
+shell 覆盖不到的只有三件事，这些才需要真机与用户同意：真实钩子的安装/重连、
+`SetCursorPos` 失败路径、以及**手感**。
 
 验证证据按工作台规范（`winshun-dev/DEVELOPMENT.md`）：仓库内只放精选证据与
 机器可读结果（≤5MB），原始素材不进本仓库；验证 README 必含"没测的"一节。

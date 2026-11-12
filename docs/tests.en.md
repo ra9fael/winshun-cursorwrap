@@ -125,6 +125,42 @@ Run on 2026-11-12: **118 checks passed**, process exit code 0.
 WinShun's plugin loading, permission confirmation, timeouts or restart logic. Host
 integration is L4 item 1.
 
+## L3.5 — GUI and logic scenarios without the host or a real mouse (`cw_devshell`)
+
+`cw_tests` calls `WrapEngine` directly, so it cannot reach the GUI. The
+real-machine probes need a real mouse, and over a Remote Desktop session
+`SetCursorPos` returns `FALSE`; worse, any movement of the user's own hand voids
+the round. `cw_devshell` fills that gap: it **links the same source files the
+plugin ships** (`wrap_logic.cpp`, `wrap_topology.cpp`, `overlay.cpp`,
+`data_window.cpp`, `settings_store.cpp`) and replaces only the INPUT with a
+scripted sample stream, so it **never moves the real pointer** — it runs over RDP
+and runs safely while the user works.
+
+```powershell
+cmake --build build --target cw_devshell
+python tests/devshell_scenarios.py            # every scenario
+python tests/devshell_scenarios.py --list     # what is covered
+build\cw_devshell.exe diag                    # the real layout and its edges
+build\cw_devshell.exe gui                     # real windows, keys 1/2/3, q quits
+```
+
+| Scenario | Covers |
+|---|---|
+| `impact-speed.txt` | Both user complaints: braking into the edge does **not** wrap, a fast flick **must**, a slow drift is refused; no reading exceeds the 20000 px/s ceiling; the single-display right edge lands on `x=1` |
+| `gui-layout.txt` | Dual `[-2560,0..0,1440;0,0..2560,1440]`: outer edges wrap to the layout's opposite outer edge, the **seam (inner edge) never wraps**, `vertical` mode wraps only top/bottom; both windows open and close mid-run |
+| `windows.txt` | The windows are driven by **settings** (not a second switch), are independent of each other, leave nothing behind when closed, and the engine still wraps with no windows at all |
+| `visual-demo.txt` | Feeds the windows two clusters of arrival speeds for a human to inspect the histogram, readout and decision log (pair with `tools/devshell/capture.ps1`) |
+
+A scenario file holds one command per line (`#` comments): `monitor`, `set`,
+`move`, `stroke`, `brake`, `modifier`, `drag`, `wait`, `show`, `dump`,
+`expect wrap|no-wrap|speed>=N|speed<N`. A failed expectation is a non-zero exit.
+
+**What it can and cannot prove**: it proves the *behaviour* of the decision logic
+and the GUI — which edges are drawn, what a reading is, which gate refused, the
+windows following their settings. It cannot prove real-hardware *feel*, the real
+hook's install/reinstall path, or the `SetCursorPos` failure path; those remain
+L4 only.
+
 ## L4 — Interactive E2E on real hardware (Windows 11, WinShun 0.22.0+)
 
 Needs a real desktop and at least two displays. **The single-display part,
@@ -208,6 +244,7 @@ coordinates.
 - L1 green (currently 131 cases + 6 fixtures, all synthetic geometry;
   `live-single.json` is read by the probe only, not by L1)
 - L3 fully passing (currently 118/118)
+- L3.5 scenarios passing (currently 4, via `python tests/devshell_scenarios.py`)
 - L0 static validation passing
 - The single-display (including Remote Desktop) part of L4 has been measured and
   passed; **all multi-display boxes must be checked** before multi-display can be

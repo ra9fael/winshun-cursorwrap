@@ -9,6 +9,43 @@ single source of truth; release tags are `v<version>`.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-13
+
+### Added
+
+- **`cw_devshell`: the GUI and the decision logic, testable without the host and
+  without a real mouse.** Every GUI check was blocked by two things: the
+  real-machine probes need a real mouse, and a Remote Desktop session refuses
+  `SetCursorPos` (it returns `FALSE`); and any movement of the user's own hand
+  voids the round. This shell **links the same source files the plugin ships**
+  (`wrap_logic.cpp`, `wrap_topology.cpp`, `overlay.cpp`, `data_window.cpp`,
+  `settings_store.cpp`) and replaces only the input with a scripted sample
+  stream, so it **never moves the real pointer**. Three modes:
+  - `cw_devshell diag`: the real layout, outer edges, gaps and suggested gate;
+  - `cw_devshell gui`: real windows (the real `Overlay` and `DataWindow`), keys
+    `1` slow drift / `2` fast flick / `3` braking flick, `q` to quit;
+  - `cw_devshell run <scenario>`: replay a scenario file and assert on it, with
+    the exit code as the verdict.
+- **`tests/scenarios/` plus `tests/devshell_scenarios.py`**: four scenarios
+  covering both user complaints (braking into the edge does not wrap, a fast
+  flick does, no reading exceeds the ceiling), the dual-display outer
+  edges/seam/vertical mode, and the windows following their settings. All pass,
+  and none of it needs a real mouse.
+- `tools/devshell/capture.ps1` screenshots the GUI for a visual check of the
+  overlay and the panels. `validate.py` gained static checks: every scenario must
+  declare a layout and assert something, and CMake must build the same sources
+  into the shell — otherwise "it passed in the dev shell" would stop meaning
+  anything.
+
+### Fixed
+
+- **A scenario changing a setting did not drive its window**: `cw_devshell`
+  initially pushed settings to the engine only, so the overlay kept drawing after
+  `set tuningOverlay off` and any visual check would have concluded the wrong
+  thing. Settings now sync the windows (the same contract as the plugin's
+  `applyWindowSettings()`), which is what lets a pixel comparison prove the
+  overlay paints only when it is on.
+
 ## [0.2.2] - 2026-11-13
 
 ### Fixed

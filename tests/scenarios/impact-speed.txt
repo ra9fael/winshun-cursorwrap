@@ -1,0 +1,50 @@
+# The two defects the user reported, as a replayable scenario.
+#
+#   Q1 "a fast flight from far away that brakes into the edge still wrapped"
+#   Q2 "readings sometimes come out in the tens of thousands"
+#
+# Run: build/cw_devshell.exe run tests/scenarios/impact-speed.txt
+#
+# Exit code 0 means every expectation held. Nothing here moves the real
+# pointer, so it is safe to run while the user is working, and it works over a
+# Remote Desktop session where SetCursorPos is refused.
+
+# A single 1920x1080 display, the user's Remote Desktop layout.
+monitor 0,0,1920,1080
+
+set impactGate on
+set speed 2000
+set band 150
+set guard 50
+set mode both
+
+# --- Q1: the speed must be measured AT the edge, not over the flight --------
+# A hand braking from 4000 px/s to 250 px/s is already slow when it arrives.
+# This is the case the user reported as a false trigger.
+expect no-wrap
+brake 1600 4000 250 right 8
+
+# The same shape but harsher: still not a hit at the edge.
+expect no-wrap
+brake 1400 6000 150 right 8
+
+# A genuinely fast flick is fast AT the edge, so it must wrap.
+expect wrap
+stroke 1400 540 1919 540 12 8
+
+# A slow uniform drift: under the gate the whole way.
+expect no-wrap
+stroke 1500 540 1919 540 60 8
+
+# --- Q2: no absurd reading, and the landing is the documented one ----------
+# A 99 px step in one event. Whatever the timestamps say, the reading must stay
+# inside the documented 20000 px/s ceiling — the user's "tens of thousands".
+move 1820 540 8
+expect speed<20001
+
+# On a single display the right edge wraps to x=1 (one pixel inside): one move
+# both asserts the landing and the ceiling. The guard radius then blocks an
+# immediate reverse, so this must be the only push to the edge here.
+move 1919 540 8
+expect wrap
+expect speed<20001

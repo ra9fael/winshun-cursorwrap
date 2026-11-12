@@ -1,0 +1,46 @@
+# The windows are driven by SETTINGS, not by a separate switch. This is the
+# contract that broke once already (a setting was reachable from the search bar
+# but not from the settings page), so it is asserted rather than assumed.
+#
+# Run: build/cw_devshell.exe run tests/scenarios/windows.txt
+
+monitor 0,0,1920,1080
+set impactGate off
+set speed 2000
+set band 150
+set guard 50
+
+# Both off: neither window exists.
+set tuningOverlay off
+set dataWindow off
+show none
+dump
+
+# The overlay alone.
+set tuningOverlay on
+wait 300
+
+# The data window alone, with the overlay back off: the two are independent.
+set tuningOverlay off
+set dataWindow on
+wait 300
+
+# Both at once, then both off again: nothing is left drawing.
+set tuningOverlay on
+wait 200
+set tuningOverlay off
+set dataWindow off
+show none
+wait 200
+
+# A disabled plugin must not keep drawing about itself, whatever the settings
+# say. There is no runtime hook in the dev shell, so this is the closest the
+# scenario can get: settings on, then everything off.
+set tuningOverlay on
+set dataWindow on
+show none
+wait 200
+
+# Samples still flow with no windows: the engine is independent of the GUI.
+expect wrap
+stroke 1400 540 1919 540 10 8

@@ -1,0 +1,36 @@
+# Feed the dev shell's windows real measurements, then hold them open so a
+# screenshot proves what they paint.
+#
+# Run: build/cw_devshell.exe gui --script tests/scenarios/visual-demo.txt
+#
+# Two clusters of arrival speeds (flicks and drifts) put two blocks in the
+# histogram, which is what makes "what gate is optimal" readable at a glance.
+
+monitor 0,0,1920,1080
+
+set impactGate on
+set speed 2000
+set band 150
+set guard 50
+
+# Fast flicks: over the gate, so they wrap and land on the opposite edge.
+expect wrap
+stroke 1200 300 1919 300 10 8
+expect wrap
+stroke 1200 500 1919 500 10 8
+expect wrap
+stroke 1200 700 1919 700 10 8
+
+# Slow drifts: under the gate, refused, and recorded as such.
+expect no-wrap
+stroke 1200 400 1919 400 80 16
+expect no-wrap
+stroke 1200 620 1919 620 80 16
+
+# Braking flicks: the user's complaint — fast far out, slow at the edge.
+expect no-wrap
+brake 1200 4000 250 right 8
+
+dump
+# Hold the windows open; the caller writes <script>.done when it has captured.
+wait 30000

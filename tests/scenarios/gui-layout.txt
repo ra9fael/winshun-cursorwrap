@@ -1,0 +1,51 @@
+# The GUI surface, driven headlessly: the overlay's edge strips and the data
+# window both run for real here, over a two-display layout this machine does
+# not have.
+#
+# Run: build/cw_devshell.exe run tests/scenarios/gui-layout.txt
+#
+# What is asserted is the part that can be: which edges exist, that an inner
+# edge never wraps, that a vertical-mode layout only wraps top/bottom, and that
+# both windows can be opened and closed while samples flow. The pixels
+# themselves need eyes (or tools/devshell/capture.ps1), which is what `gui` mode
+# is for.
+
+# Two displays side by side, the user's real desk layout.
+monitor -2560,0,0,1440;0,0,2560,1440
+
+set mode horizontal
+set guard 100
+set tol 10
+set edge 1
+
+# --- outer edges wrap, inner ones do not -----------------------------------
+# The right display's right edge is the layout's outer edge.
+expect wrap
+stroke 2400 720 2559 720 8 8
+
+# The seam between the displays (x=0 / x=-1) is an inner edge: Windows already
+# moves the pointer across it, so the plugin must not wrap there.
+expect no-wrap
+stroke 40 720 -40 720 8 8
+
+# The left display's left edge is the layout's other outer edge.
+expect wrap
+stroke -2400 720 -2559 720 8 8
+
+# --- vertical mode changes which edges wrap --------------------------------
+set mode vertical
+# Left/right no longer wrap.
+expect no-wrap
+stroke 2400 720 2559 720 8 8
+# Top/bottom do.
+expect wrap
+stroke 2400 1300 2400 1439 8 8
+
+# --- the windows open and close on request ---------------------------------
+set tuningOverlay on
+set dataWindow on
+show both
+wait 400
+dump
+show none
+wait 200

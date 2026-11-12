@@ -211,6 +211,32 @@ def validate_package(package_dir: Path, manifest: dict) -> None:
     check(package.stat().st_size <= 256 << 20, "package exceeds the 256 MB limit")
 
 
+def validate_devshell() -> None:
+    """The dev shell is a real deliverable: it is how the GUI and the wiring are
+    checked without Win顺. Its sources, its scenarios and its runner must all be
+    present, and every scenario must be a plain-text file the shell can parse."""
+    for rel in ("tools/devshell/devshell.cpp", "tools/devshell/capture.ps1",
+                "tests/devshell_scenarios.py"):
+        check((ROOT / rel).is_file(), f"missing {rel}")
+    scenarios = sorted((ROOT / "tests" / "scenarios").glob("*.txt"))
+    check(bool(scenarios), "tests/scenarios must hold at least one scenario")
+    for path in scenarios:
+        body = path.read_text(encoding="utf-8-sig")
+        check(bool(body.strip()), f"scenario {path.name} is empty")
+        # A scenario with no monitor line and no assertion silently proves
+        # nothing, so both are required.
+        check(any(l.strip().startswith("monitor ") for l in body.splitlines()),
+              f"scenario {path.name} must declare a monitor layout")
+        check("expect " in body, f"scenario {path.name} must assert something")
+    # The build must wire the shell to the same sources the plugin ships, or
+    # "it passes in the dev shell" would stop meaning anything.
+    cmake = text_of("CMakeLists.txt")
+    if cmake:
+        for source in ("src/wrap_logic.cpp", "src/wrap_topology.cpp",
+                       "src/overlay.cpp", "src/data_window.cpp"):
+            check(source in cmake, f"CMakeLists.txt must build {source} into the shell")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -220,6 +246,7 @@ def main() -> int:
 
     manifest = validate_manifest()
     validate_docs()
+    validate_devshell()
     if args.package_dir:
         validate_package(args.package_dir, manifest)
 

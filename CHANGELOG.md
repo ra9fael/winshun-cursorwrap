@@ -9,6 +9,34 @@ single source of truth; release tags are `v<version>`.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-13
+
+### Added
+
+- **`cw_devshell`：不开宿主、不动鼠标就能测 GUI 与判定逻辑。** 之前所有 GUI 验证
+  都卡在两件事上：真机探针要移动真实鼠标，而远程桌面下 `SetCursorPos` 会返回
+  `FALSE`；用户自己动一下鼠标，整轮结果作废。这个壳子**链接插件发布的同一批源文件**
+  （`wrap_logic.cpp`、`wrap_topology.cpp`、`overlay.cpp`、`data_window.cpp`、
+  `settings_store.cpp`），只把输入换成脚本化的合成样本，因此**不移动真实光标**。
+  三种用法：
+  - `cw_devshell diag`：打印真实布局、外边缘、缝隙与建议门槛；
+  - `cw_devshell gui`：真窗口（真 `Overlay` + 真 `DataWindow`），键盘 `1` 慢漂 /
+    `2` 快甩 / `3` 刹车，`q` 退出；
+  - `cw_devshell run <scenario>`：重放场景文件并对结果断言，退出码即结论。
+- **`tests/scenarios/` 场景套件 + `tests/devshell_scenarios.py`**：4 个场景覆盖
+  用户的两次投诉（减速冲边不触发、快甩触发、读数不超上限）、双屏外边缘/接缝/垂直
+  模式、窗口随设置开关。全部场景通过，且**不需要真实鼠标**。
+- `tools/devshell/capture.ps1`：给 GUI 截图，用于肉眼检查遮罩与面板；
+  `validate.py` 新增静态检查（场景必须声明布局且必须有断言；CMake 必须把同一批源
+  文件编进壳子——否则「壳子里过了」就不再意味着什么）。
+
+### Fixed
+
+- **场景里改设置不会驱动窗口**：`cw_devshell` 一开始只把设置推给引擎，所以
+  `set tuningOverlay off` 之后遮罩还在画，任何视觉验证都会得出错误结论。现在
+  设置一变就同步窗口（与插件的 `applyWindowSettings()` 同义），像素对比才能证明
+  遮罩只在开启时绘制。
+
 ## [0.2.2] - 2026-11-13
 
 ### Fixed

@@ -1,0 +1,44 @@
+# Regressions for the defects that actually shipped broken. Each block is a
+# bug the user hit on a real machine, kept here so it cannot come back.
+#
+# Run: build/cw_devshell.exe run tests/scenarios/regressions.txt
+
+monitor 0,0,1920,1080
+set impactGate on
+set speed 2000
+set band 150
+set guard 50
+set mode both
+
+# BUG 1 (v0.2.2) "a fast flight from far away that brakes into the edge still
+# wrapped". The whole-band average hid the deceleration.
+expect no-wrap
+brake 1200 4000 250 right 8
+
+# BUG 1b: and the mirror image — a hand genuinely fast all the way MUST wrap,
+# otherwise the fix would just have made the gate never fire.
+expect wrap
+stroke 1200 540 1919 540 8 8
+
+# BUG 2 (v0.2.2) "readings in the tens of thousands". Nothing may report above
+# the documented ceiling, however the timestamps fall.
+move 1800 540 9
+expect speed<20001
+move 1919 540 9
+expect speed<20001
+move 1919 540 9
+
+# BUG 3 (v0.2.0) "wrapping does nothing at all while the gate is on". On a slow
+# machine the arrival step is clamped by Windows, which used to drag a genuine
+# hit under the gate. A clamped arrival must still wrap.
+set guard 10
+expect wrap
+stroke 1700 800 1919 800 10 9
+
+# BUG 4: the guard exists so a wrap cannot bounce straight back. After a wrap,
+# the landing must NOT be immediately re-wrapped by the next sample.
+set guard 50
+expect wrap
+stroke 1200 300 1919 300 8 8
+expect no-wrap
+move 1 300 8

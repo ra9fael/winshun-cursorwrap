@@ -290,6 +290,7 @@ MinGW. MSVC builds use the static runtime (`/MT`) and likewise ship no external 
 ```powershell
 ctest --test-dir build --output-on-failure       # L1: 131 cases + 6 layout fixtures
 python tests/protocol_roundtrip.py               # L3: 118 protocol round-trip checks
+python tests/devshell_scenarios.py               # L3.5: GUI + logic scenarios without the host
 python tests/repeat_push_probe.py                # L4 single display / RDP: multi-round real SetCursorPos pushes
 python tests/injected_wrap_probe.py              # L4: injected input (LLMHF_INJECTED) still wraps
 python tests/validate.py                         # L0: manifest / bilingual docs / packaging checks
@@ -298,6 +299,25 @@ python tests/validate.py                         # L0: manifest / bilingual docs
 > `tests/live_wrap_probe.py` uses an unsound oracle ("cursor position ≠ target" — a push
 > clamped at the edge also satisfies it); its conclusions are withdrawn. Use
 > `repeat_push_probe.py`, which judges by the plugin's `delta_wraps` counter.
+
+### Test the GUI without the host or a real mouse
+
+`build/cw_devshell.exe` links the **same source files the plugin ships** (engine,
+overlay, data window) and replaces only the input with a scripted sample stream, so
+it **never moves the real pointer**. That is what makes it usable over a Remote
+Desktop session, where `SetCursorPos` fails, and while the user is working — their
+own hand would otherwise void every automated round.
+
+```powershell
+cmake --build build --target cw_devshell
+build\cw_devshell.exe diag                       # the real layout and its edges
+build\cw_devshell.exe gui                        # real windows: 1 slow / 2 flick / 3 braking / q
+build\cw_devshell.exe run tests\scenarios\impact-speed.txt
+tools\devshell\capture.ps1 -Scenario tests\scenarios\visual-demo.txt -Out shot.png
+```
+
+Scenarios live in `tests/scenarios/`, one command per line (`set`, `move`, `stroke`,
+`brake`, `expect wrap|no-wrap|speed>=N`, …).
 
 Design notes: [docs/spec.en.md](docs/spec.en.md). Test plan: [docs/tests.en.md](docs/tests.en.md).
 This round's validation evidence: [docs/validation.en.md](docs/validation.en.md).

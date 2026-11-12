@@ -124,6 +124,37 @@ python tests/protocol_roundtrip.py
 **这不是宿主集成**：它直接驱动 exe 的 stdio，不经过 Win顺 的插件装载、权限确认、
 超时与重启逻辑。宿主集成见 L4 第 1 项。
 
+## L3.5 — 免宿主 / 免真鼠标的 GUI + 逻辑场景（`cw_devshell`）
+
+`cw_tests` 直接调用 `WrapEngine`，测不到 GUI；真机探针要移动真实鼠标，在远程桌面
+下 `SetCursorPos` 会返回 `FALSE`，而且用户自己一动鼠标整轮就作废。`cw_devshell`
+填这个空档：它**链接插件发布的同一批源文件**（`wrap_logic.cpp`、`wrap_topology.cpp`、
+`overlay.cpp`、`data_window.cpp`、`settings_store.cpp`），只把「输入」换成脚本化的
+合成样本，因此**不移动真实光标**，可以在 RDP 会话里跑，也可以边工作边跑。
+
+```powershell
+cmake --build build --target cw_devshell
+python tests/devshell_scenarios.py            # 跑全部场景
+python tests/devshell_scenarios.py --list     # 看覆盖了什么
+build\cw_devshell.exe diag                    # 打印真实布局与外边缘
+build\cw_devshell.exe gui                     # 真窗口，键盘 1/2/3 驱动，q 退出
+```
+
+| 场景 | 覆盖 |
+|---|---|
+| `impact-speed.txt` | 用户的两次投诉：减速冲边**不**回绕、快甩**要**回绕、慢漂拒绝；读数不超过 20000 px/s 上限；单屏右边缘落点为 `x=1` |
+| `gui-layout.txt` | 双屏 `[-2560,0..0,1440;0,0..2560,1440]`：外边缘回绕到对侧最外边缘、**接缝（内边）永不回绕**、`vertical` 模式只回绕上下；两个窗口可在运行中开关 |
+| `windows.txt` | 窗口由**设置**驱动（不是另一个开关）；两个窗口互相独立；关掉后不残留；无窗口时引擎照常回绕 |
+| `visual-demo.txt` | 给窗口喂两簇到达速度，供人肉眼检查直方图 / 读数 / 决策日志（配合 `tools/devshell/capture.ps1` 截图） |
+
+场景文件一行一条命令，`#` 起注释：`monitor`、`set`、`move`、`stroke`、`brake`、
+`modifier`、`drag`、`wait`、`show`、`dump`、`expect wrap|no-wrap|speed>=N|speed<N`。
+期望没满足时退出码非 0。
+
+**它能证明什么 / 不能证明什么**：能证明判定逻辑与 GUI 的**行为**（画在哪些边、
+读数是几、哪条门槛拒绝、窗口随设置开关）；不能证明真机上的**手感**、真实钩子的
+安装/重连、以及 `SetCursorPos` 失败路径——那些仍然只有 L4 覆盖。
+
 ## L4 — 真机交互 E2E（Windows 11，Win顺 0.22.0+）
 
 需真实桌面与至少两块屏。**单屏（含远程桌面单屏）部分已实测**（见下），多屏部分全部未执行。
@@ -199,6 +230,7 @@ python tests/protocol_roundtrip.py
 - L1 全绿（当前 131 用例 + 6 布局 fixture，全部是合成几何；`live-single.json` 只被
   探针读取，不进 L1）
 - L3 全通过（当前 118/118）
+- L3.5 场景全通过（当前 4 个场景，`python tests/devshell_scenarios.py`）
 - L0 静态校验通过
 - L4 单屏与远程桌面单屏部分已实测通过；**多屏部分全部勾选后**才可宣布多屏可发布，
   当前属发布阻塞项

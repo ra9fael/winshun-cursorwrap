@@ -250,6 +250,7 @@ C++ 运行时，目标机器不需要 MinGW。MSVC 构建用静态运行库（`/
 ```powershell
 ctest --test-dir build --output-on-failure       # L1：131 用例 + 6 布局 fixture
 python tests/protocol_roundtrip.py               # L3：118 项协议往返检查
+python tests/devshell_scenarios.py               # L3.5：免宿主 GUI + 逻辑场景
 python tests/repeat_push_probe.py                # L4 单屏 / 远程桌面：真实 SetCursorPos 多轮推送
 python tests/injected_wrap_probe.py              # L4：注入事件（LLMHF_INJECTED）仍能回绕
 python tests/validate.py                         # L0：清单/双语文档/打包静态校验
@@ -257,6 +258,23 @@ python tests/validate.py                         # L0：清单/双语文档/打�
 
 > `tests/live_wrap_probe.py` 的判据（光标位置 ≠ 目标）不成立——被边缘夹住也算「变了」。
 > 它的结论已撤回，请用 `repeat_push_probe.py`（以插件计数器 `delta_wraps` 为判据）。
+
+### 不开宿主、不动鼠标就能测 GUI
+
+`build/cw_devshell.exe` 链接的是插件发布的**同一批源文件**（引擎、遮罩、数据窗口），
+只把输入换成脚本化的合成样本，所以**不会移动真实光标**——远程桌面下
+`SetCursorPos` 会失败、你自己动一下鼠标又会作废整轮，这个壳子都绕开了。
+
+```powershell
+cmake --build build --target cw_devshell
+build\cw_devshell.exe diag                       # 真实布局与外边缘
+build\cw_devshell.exe gui                        # 真窗口，键盘 1 慢漂 / 2 快甩 / 3 刹车 / q 退出
+build\cw_devshell.exe run tests\scenarios\impact-speed.txt
+tools\devshell\capture.ps1 -Scenario tests\scenarios\visual-demo.txt -Out shot.png
+```
+
+场景文件见 `tests/scenarios/`，一行一条命令（`set` / `move` / `stroke` / `brake` /
+`expect wrap|no-wrap|speed>=N` …）。
 
 设计说明见 [docs/spec.md](docs/spec.md)，测试规格见 [docs/tests.md](docs/tests.md)，
 本轮验证证据见 [docs/validation.md](docs/validation.md)。
