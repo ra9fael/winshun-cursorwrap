@@ -452,10 +452,23 @@ void Overlay::buildReadout(const EdgeVerdict& verdict, const Settings& settings,
     wchar_t line[96];
     if (verdict.gateOff || verdict.guardBlocked || verdict.thresholdPps <= 0) {
         const wchar_t* word = verdict.wrapped ? L"wrap" : L"—";
-        TextOutW(layer.dc, 10, 24, word, static_cast<int>(wcslen(word)));
+        TextOutW(layer.dc, 10, 20, word, static_cast<int>(wcslen(word)));
     } else {
         swprintf(line, 96, L"%lld / %lld px/s", verdict.measuredPps, verdict.thresholdPps);
-        TextOutW(layer.dc, 10, 24, line, static_cast<int>(wcslen(line)));
+        TextOutW(layer.dc, 10, 20, line, static_cast<int>(wcslen(line)));
+        // The acceleration line: only when the user turned that condition on, so
+        // the panel does not show a meaningless 0 for everyone else. A negative
+        // value means the hand was braking — the reason it did not wrap.
+        if (verdict.thresholdAccelPps2 > 0) {
+            SelectObject(layer.dc, small);
+            SetTextColor(layer.dc, verdict.accelBlocked ? state : colors.text);
+            if (verdict.accelMeasured)
+                swprintf(line, 96, L"accel %+lld / %lld px/s²", verdict.measuredAccelPps2,
+                         verdict.thresholdAccelPps2);
+            else
+                swprintf(line, 96, L"accel — / %lld px/s²", verdict.thresholdAccelPps2);
+            TextOutW(layer.dc, 10, 46, line, static_cast<int>(wcslen(line)));
+        }
     }
     DeleteObject(small);
     DeleteObject(big);

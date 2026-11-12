@@ -24,6 +24,8 @@ const Token kTokens[] = {
     { "速度", CommandKind::MenuSpeed, 0 },
     { "band", CommandKind::MenuBand, 0 },
     { "区间", CommandKind::MenuBand, 0 },
+    { "accel", CommandKind::MenuAccel, 0 },
+    { "加速度", CommandKind::MenuAccel, 0 },
     { "mode both", CommandKind::SetMode, static_cast<long long>(WrapMode::Both) },
     { "mode vertical", CommandKind::SetMode, static_cast<long long>(WrapMode::VerticalOnly) },
     { "mode horizontal", CommandKind::SetMode, static_cast<long long>(WrapMode::HorizontalOnly) },
@@ -190,6 +192,17 @@ ParsedCommand parseCommand(const std::string& rawText)
             if (n) {
                 cmd.kind = CommandKind::SetBand;
                 cmd.value = clampTo(*n, 50, 500);
+            }
+            break;
+        case CommandKind::MenuAccel:
+            if (n) {
+                cmd.kind = CommandKind::SetAccel;
+                // 0 is meaningful: it turns the acceleration condition off. Any
+                // non-zero value below 200 is noise, so it clamps up to 200.
+                long long v = clampTo(*n, 0, 200000);
+                if (v != 0 && v < 200)
+                    v = 200;
+                cmd.value = v;
             }
             break;
         case CommandKind::MenuGuard:

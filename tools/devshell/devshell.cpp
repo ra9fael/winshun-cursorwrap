@@ -272,6 +272,10 @@ bool applySetting(Settings& settings, const std::string& key, const std::string&
         if (!numeric) { error = "not a number: " + value; return false; }
         raw.impactBandPx = static_cast<double>(n);
         raw.hasImpactBand = true;
+    } else if (key == "impactAccelPps2" || key == "accel") {
+        if (!numeric) { error = "not a number: " + value; return false; }
+        raw.impactAccelPps2 = static_cast<double>(n);
+        raw.hasImpactAccel = true;
     } else if (key == "wrapGuardPx" || key == "guard") {
         if (!numeric) { error = "not a number: " + value; return false; }
         raw.wrapGuardPx = static_cast<double>(n);
@@ -335,6 +339,7 @@ private:
     int m_failures = 0;
     int m_checks = 0;
     long long m_lastSpeed = 0;
+    long long m_lastAccel = 0;
     bool m_lastWrapped = false;
     long long m_clockUs = 1'000'000;
 };
@@ -378,6 +383,14 @@ void Scenario::settle(const std::string& line)
             check(m_lastSpeed < e.value, line + " -> expected speed < " +
                                              std::to_string(e.value) + ", measured " +
                                              std::to_string(m_lastSpeed));
+        else if (e.kind == "accel>=")
+            check(m_lastAccel >= e.value, line + " -> expected accel >= " +
+                                              std::to_string(e.value) + ", measured " +
+                                              std::to_string(m_lastAccel));
+        else if (e.kind == "accel<")
+            check(m_lastAccel < e.value, line + " -> expected accel < " +
+                                             std::to_string(e.value) + ", measured " +
+                                             std::to_string(m_lastAccel));
     }
     m_expect.clear();
 }
@@ -398,8 +411,10 @@ void Scenario::dumpState()
         note(buf);
     }
     const EdgeVerdict v = m_engine->lastVerdict();
-    std::snprintf(buf, sizeof buf, "  last verdict: edge=%s measured=%lld gate=%lld wrapped=%d",
-                  edgeName(v.edge), v.measuredPps, v.thresholdPps, v.wrapped ? 1 : 0);
+    std::snprintf(buf, sizeof buf,
+                  "  last verdict: edge=%s measured=%lld gate=%lld accel=%lld gate=%lld wrapped=%d",
+                  edgeName(v.edge), v.measuredPps, v.thresholdPps, v.measuredAccelPps2,
+                  v.thresholdAccelPps2, v.wrapped ? 1 : 0);
     note(buf);
 }
 
@@ -454,6 +469,12 @@ bool Scenario::run(const std::string& rawLine)
             e.value = std::atoll(what.c_str() + 7);
         } else if (what.rfind("speed<", 0) == 0) {
             e.kind = "speed<";
+            e.value = std::atoll(what.c_str() + 6);
+        } else if (what.rfind("accel>=", 0) == 0) {
+            e.kind = "accel>=";
+            e.value = std::atoll(what.c_str() + 8);
+        } else if (what.rfind("accel<", 0) == 0) {
+            e.kind = "accel<";
             e.value = std::atoll(what.c_str() + 6);
         } else {
             note("FAIL unknown expectation: " + what);
@@ -511,10 +532,12 @@ bool Scenario::run(const std::string& rawLine)
         m_clockUs += dt * 1000;
         const EdgeVerdict v = m_engine->lastVerdict();
         m_lastSpeed = v.measuredPps;
+        m_lastAccel = v.measuredAccelPps2;
         m_lastWrapped = nx != x || ny != y;
         note("move " + std::to_string(x) + "," + std::to_string(y) + " -> " +
              std::to_string(nx) + "," + std::to_string(ny)
-             + (m_lastWrapped ? " WRAP" : "") + " speed=" + std::to_string(m_lastSpeed));
+             + (m_lastWrapped ? " WRAP" : "") + " speed=" + std::to_string(m_lastSpeed)
+             + " accel=" + std::to_string(m_engine->lastVerdict().measuredAccelPps2));
         settle(line);
         return true;
     }
@@ -541,12 +564,14 @@ bool Scenario::run(const std::string& rawLine)
         }
         const EdgeVerdict v = m_engine->lastVerdict();
         m_lastSpeed = v.measuredPps;
+        m_lastAccel = v.measuredAccelPps2;
         m_lastWrapped = landedX != x1 || landedY != y1;
         note("stroke " + std::to_string(x0) + "," + std::to_string(y0) + " -> "
              + std::to_string(x1) + "," + std::to_string(y1) + " in "
              + std::to_string(steps) + " steps: landed " + std::to_string(landedX) + ","
              + std::to_string(landedY) + (m_lastWrapped ? " WRAP" : "")
-             + " speed=" + std::to_string(m_lastSpeed));
+             + " speed=" + std::to_string(m_lastSpeed)
+             + " accel=" + std::to_string(m_engine->lastVerdict().measuredAccelPps2));
         settle(line);
         return true;
     }
@@ -593,6 +618,7 @@ bool Scenario::run(const std::string& rawLine)
         }
         const EdgeVerdict v = m_engine->lastVerdict();
         m_lastSpeed = v.measuredPps;
+        m_lastAccel = v.measuredAccelPps2;
         m_lastWrapped = wrapped;
         note("brake " + std::to_string(static_cast<long long>(v0)) + "->"
              + std::to_string(static_cast<long long>(v1)) + " px/s to the "

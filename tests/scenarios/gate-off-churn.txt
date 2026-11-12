@@ -1,0 +1,57 @@
+# Gate OFF: sweeping continuously across an edge must not wrap repeatedly.
+#
+# With impact mode off, ANY arrival at an outer edge wraps. The risk the user
+# named is "frequent triggering while working at the edge": drag the pointer to
+# the edge, keep moving along it, and the plugin must wrap ONCE, not on every
+# sample. The anti-oscillation guard is what makes that true, and the worst case
+# is a slow sweep that stays inside the band while the hand slides along the
+# edge.
+#
+# Run: build/cw_devshell.exe run tests/scenarios/gate-off-churn.txt
+
+monitor 0,0,1920,1080
+set impactGate off
+set mode both
+set edge 1
+
+# --- one push past the right edge wraps exactly once ----------------------
+set guard 50
+expect wrap
+stroke 1400 540 1919 540 10 8
+
+# The landing is x=1 (1 px inside the left edge). Continuing to push right from
+# there must NOT immediately wrap back: the guard covers the landing point.
+set guard 50
+expect no-wrap
+move 1919 540 8
+
+# --- a slow sweep that lingers at the edge: still one wrap ---------------
+# A hand that reaches the edge and keeps pressing against it produces many
+# samples at the same coordinate. Those are the same arrival, not new ones.
+set guard 50
+expect wrap
+stroke 1500 800 1919 800 6 40
+expect no-wrap
+move 1919 800 40
+expect no-wrap
+move 1919 800 40
+expect no-wrap
+move 1919 800 40
+
+# --- sliding ALONG the bottom edge must not wrap at all -------------------
+# Same outer edge, but travelling parallel to it: nothing arrives, so nothing
+# wraps however long the sweep is.
+set guard 50
+expect no-wrap
+stroke 200 1079 1700 1079 40 8
+
+# --- re-arming: after moving well away, the next arrival wraps again -----
+# The guard must not latch forever. Moving out of the guard radius re-arms it.
+set guard 50
+expect wrap
+stroke 300 300 1919 300 10 8
+# Landed at x=1, y=300; move far away from the landing point, then return.
+move 600 300 8
+move 900 300 8
+expect wrap
+stroke 1700 300 1919 300 8 8

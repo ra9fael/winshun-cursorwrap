@@ -217,7 +217,7 @@ def run(exe: Path) -> int:
         # or through a submenu) so the two surfaces cannot drift apart.
         manifest = json.loads((ROOT / "plugin.json").read_text(encoding="utf-8"))
         setting_keys = [s.get("key") for s in manifest.get("settings", [])]
-        check(len(setting_keys) == 12, f"manifest declares twelve settings (got {len(setting_keys)})")
+        check(len(setting_keys) == 13, f"manifest declares thirteen settings (got {len(setting_keys)})")
         covered = {
             "wrapMode": "cursorwrap.row.mode",
             "activationMode": "cursorwrap.row.activation",
@@ -229,6 +229,7 @@ def run(exe: Path) -> int:
             "impactGate": "cursorwrap.row.impact",
             "impactSpeedPps": "cursorwrap.row.speed",
             "impactBandPx": "cursorwrap.row.band",
+            "impactAccelPps2": "cursorwrap.row.accel",
             "tuningOverlay": "cursorwrap.row.tuner",
             "dataWindow": "cursorwrap.row.data",
         }

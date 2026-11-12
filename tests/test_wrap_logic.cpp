@@ -123,8 +123,11 @@ CW_TEST(engine_direction_feeds_edge_priority)
     // Right and Top; moving up should pick Top.
     WrapEngine e;
     e.rebuild({ box(0, 0, 1920, 1080, true), box(1920, 0, 3840, 1080) });
-    // Approach the corner moving up along the right edge.
-    e.onMouseMove({ 3839, 40 }, false, false);
+    // Start away from every edge (a corner turn needs the pointer to arrive at
+    // the corner, not to be sitting on the right edge already), then move up
+    // into the top-right corner.
+    e.onMouseMove({ 3800, 60 }, false, false);
+    e.onMouseMove({ 3820, 30 }, false, false);
     const auto [x, y] = e.onMouseMove({ 3839, 0 }, false, false);
     // Top edge of monitor 1 is outer and wraps to the outer Bottom edge with
     // the largest position (1079).

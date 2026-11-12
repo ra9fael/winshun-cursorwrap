@@ -34,12 +34,23 @@ struct Settings {
     // Impact gate: wrap only when the pointer reaches the edge fast enough.
     // The speed is measured over the last continuous stroke toward the edge,
     // clipped to the approach band (impactBandPx) so a fast flight that
-    // braked before the edge does not count; per-event acceleration is noise
-    // at 1000 Hz report rates, so the knob is a speed floor (the same
-    // conclusion PowerToys Find My Mouse reached for its shake gate).
+    // braked before the edge does not count.
+    //
+    // Two separate conditions, both optional:
+    //   * impactSpeedPps    — a speed FLOOR: "was the hand moving at the edge".
+    //   * impactAccelPps2   — a forward-acceleration FLOOR: "was the hand
+    //                         speeding UP at the edge". 0 disables it.
+    // The user asked for the second one explicitly: a constant-speed sweep that
+    // merely happens to be fast is not the same gesture as a flick that
+    // accelerates into the edge, and only the second should wrap. Measured on
+    // 1000 Hz-125 Hz report rates, so the acceleration is a two-point slope over
+    // the arrival window rather than a per-event derivative (per-event
+    // acceleration is noise; that conclusion from PowerToys Find My Mouse for its
+    // speed gate applies here too).
     bool impactGate = false;
     int impactSpeedPps = 2000;      // 500..20000 px/s
     int impactBandPx = 150;         // 50..500 px: the approach band speed is measured in
+    int impactAccelPps2 = 0;        // 0 = off; 200..200000 px/s²
     // The two runtime windows. They live in Settings (not only in the command
     // layer) so the host card, the search bar and the persisted overrides all
     // see the same switch: the plugin's settings page must be able to turn on
@@ -62,6 +73,7 @@ struct RawSettings {
     bool impactGate = false;
     double impactSpeedPps = 2000;
     double impactBandPx = 150;
+    double impactAccelPps2 = 0;
     bool tuningOverlay = false;
     bool dataWindow = false;
     bool hasWrapMode = false;
@@ -74,6 +86,7 @@ struct RawSettings {
     bool hasImpactGate = false;
     bool hasImpactSpeed = false;
     bool hasImpactBand = false;
+    bool hasImpactAccel = false;
     bool hasTuningOverlay = false;
     bool hasDataWindow = false;
 };
@@ -162,6 +175,13 @@ struct EdgeVerdict {
     int64_t y = 0;
     long long measuredPps = 0; // the approach speed the gate measured
     long long thresholdPps = 0; // the configured gate (0 = gate off)
+    // The forward acceleration the gate measured, px/s². Negative means the
+    // hand was slowing down at the edge. 0 with thresholdAccelPps2 == 0 means
+    // the acceleration condition is off.
+    long long measuredAccelPps2 = 0;
+    long long thresholdAccelPps2 = 0;
+    bool accelBlocked = false;  // refused because the hand was not speeding up
+    bool accelMeasured = false; // the acceleration could be measured at all
     bool wrapped = false;      // the move wrapped
     bool gateOff = false;      // impact gate disabled: arrival wraps outright
     bool guardBlocked = false; // suppressed by the anti-oscillation guard
@@ -279,6 +299,13 @@ public:
     // timestamps are untrustworthy (a burst-delivered queue), so the value is
     // clamped here rather than shown as an absurd number.
     static constexpr long long kImpactSpeedMaxPps = 20000;
+    // Acceleration needs a window long enough that both halves mean something.
+    // Below this, a half is a single pixel and the slope would be invented.
+    static constexpr long long kImpactAccelMinWindowUs = 12 * 1000; // 12 ms
+    static constexpr long long kImpactAccelMinHalfUs = 4 * 1000;    // 4 ms per half
+    static constexpr long long kImpactAccelMinHalfTravelPx = 4;     // 4 px per half
+    // A hand cannot exceed this; a larger slope means quantisation, not motion.
+    static constexpr long long kImpactAccelMaxPps2 = 2'000'000;
     // 1000 Hz gaming mice: 32 samples were only 32 ms; 128 covers the
     // window with headroom for a busy hook chain.
     static constexpr size_t kHistoryMax = 128;
@@ -286,13 +313,25 @@ public:
     // actually travel toward the edge before its speed means anything.
     static constexpr int64_t kImpactMinTravelPx = 20;
 
+// What the gate measured, in one shot. `speedPps` is the speed at the arrival;
+// `accelPps2` is the forward acceleration over the same window (negative when
+// the hand was braking). Both 0 means "not measurable".
+struct ApproachMeasure {
+    long long speedPps = 0;
+    long long accelPps2 = 0;
+    // Whether the acceleration could be measured at all. A measured 0 (constant
+    // speed) and "could not measure" are different answers: the first must fail
+    // an acceleration floor, the second must not pretend it passed.
+    bool accelMeasured = false;
+};
+
 private:
     bool withinGuard(int64_t x, int64_t y) const;
     CursorDirection direction(const Sample& s) const;
-    // Signed approach speed toward `edge` over the last continuous stroke
-    // clipped to the approach band; 0 when it cannot be measured. The mutex
-    // is held by the caller.
-    long long approachSpeedPps(EdgeType edge, int64_t edgeCoord) const;
+    // Signed approach speed and forward acceleration toward `edge` over the
+    // last continuous stroke clipped to the approach band; 0/0 when it cannot
+    // be measured. The mutex is held by the caller.
+    ApproachMeasure approachSpeedPps(EdgeType edge, int64_t edgeCoord) const;
     void noteSample(const Sample& sample); // mutex held by the caller
 
     mutable std::mutex m_mutex;
@@ -315,6 +354,13 @@ private:
     // The decision log and the last position seen (for the data window).
     std::vector<Decision> m_decisions;
     long long m_decisionSeq = 0;
+    // Set by a wrap; cleared once the pointer has moved out of the band of the
+    // edge it wrapped at, so the next arrival counts again. This is what stops
+    // "hold at the edge" and "slide along the edge" from wrapping on every
+    // sample.
+    bool m_hasWrapEdge = false;
+    EdgeType m_wrapEdge = EdgeType::Left;
+    int64_t m_wrapEdgeCoord = 0;
     Sample m_lastSample { kNever, kNever };
     bool m_hasLastSample = false;
     // The skip reason of the previous sample: a decision is logged when it

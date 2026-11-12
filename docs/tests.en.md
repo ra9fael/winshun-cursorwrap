@@ -16,7 +16,7 @@ original: [tests.md](tests.md).
 | Package contains `plugin.json` / `cursorwrap.exe` / `README.md` / `LICENSE`, no `build/`, `dist/`, `.git` | §8 | `tools/package.py` + `tools/ci_release.py` |
 | Bilingual anchors cross-link (`docs/spec*.md`, `docs/tests*.md`, README, CHANGELOG) | — | pass |
 
-## L1 — Pure logic unit tests (`cw_tests`, ctest target, 131 cases + 6 layout fixtures)
+## L1 — Pure logic unit tests (`cw_tests`, ctest target, 140 cases + 6 layout fixtures)
 
 No OS headers: runs anywhere. Commands:
 
@@ -64,6 +64,8 @@ ctest --test-dir build --output-on-failure
 | Both windows are real settings | `tuningOverlay` / `dataWindow` survive a `RawSettings` round trip; a partial update does not clear them | §7 |
 | Remote Desktop (RDP) | one virtual display 1920×1080 wraps both directions to `x=1` / `x=1918`; `disableOnSingleMonitor` counts as `single-monitor`; **an empty enumeration must not wipe the topology** (keep the last good layout + count `rebuildRefused` + still wrap afterwards); a genuine layout change (unplug, session ends back to two displays) still applies immediately; the impact gate still measures and refuses correctly on one display | §5 §10 |
 | The microsecond clock does not overflow | `counterToUs` returns a positive, correct value after 30 days of uptime and for the real 11.2-day counter value; a 1 ms step is still exactly 1000 µs; `freq<=0` and a negative counter fail closed with 0; **end to end**: an engine fed the "11 days up" clock still wraps a 6000 px/s hit with `measuredPps>=2000` (the old code yielded `measured_pps=0` and the gate refused everything) | §5 §9 |
+| The acceleration floor | a constant sweep (`accel=0`) is refused; a real accelerating flick wraps; braking into the edge (negative) is refused; `accelMeasured` separates "measured 0" from "could not measure"; setting 0 stays off, a non-zero below 200 clamps up to 200, an out-of-range value falls back to the default | §7 impact mode |
+| No churn at an edge | 20 events held at the edge wrap once; a 60-sample slide along the bottom edge does not wrap again; leaving and returning wraps normally; a corner turn is still a new arrival | §6 §7 |
 | The impact gate measures the speed at arrival | **Braking into the edge does not wrap**: 4000→250 px/s at 1/2/4/8 ms polling; 6000→150 at bands 50/100/150/250 (the old whole-band average false-triggered, worse as the band widened); uniform 3000 px/s wraps at 1000 Hz–125 Hz; uniform 900 px/s is always refused | §7 impact mode |
 | Queued delivery cannot inflate a reading | 20 px per event delivered 500 µs apart (40000 px/s on paper) with the driver 8 ms apart (a real 2500 px/s): with `osMs` the reading is 2500 and wraps; without it the reading is the 20000 clamp | §7 impact mode |
 | Reading ceiling | Extreme input like 99 px in 1 ms never reports above `kImpactSpeedMaxPps` (20000) and never 0 | §7 impact mode |
@@ -241,10 +243,10 @@ coordinates.
 
 ## Acceptance criteria
 
-- L1 green (currently 131 cases + 6 fixtures, all synthetic geometry;
+- L1 green (currently 140 cases + 6 fixtures, all synthetic geometry;
   `live-single.json` is read by the probe only, not by L1)
-- L3 fully passing (currently 118/118)
-- L3.5 scenarios passing (currently 4, via `python tests/devshell_scenarios.py`)
+- L3 fully passing (currently 119/119)
+- L3.5 scenarios passing (currently 8, via `python tests/devshell_scenarios.py`)
 - L0 static validation passing
 - The single-display (including Remote Desktop) part of L4 has been measured and
   passed; **all multi-display boxes must be checked** before multi-display can be

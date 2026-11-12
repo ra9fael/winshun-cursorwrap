@@ -1,0 +1,58 @@
+# The acceleration condition, and "no wrap churn with the gate off".
+#
+# The user asked for two things:
+#   1. the gate should require a POSITIVE forward acceleration above a settable
+#      value, not merely a speed — so a constant-speed sweep does not wrap;
+#   2. with impact mode OFF, sweeping continuously across an edge must not
+#      produce repeated wraps.
+#
+# Run: build/cw_devshell.exe run tests/scenarios/acceleration.txt
+#
+# Why the accelerating case is spelled out as explicit `move` lines: `stroke`
+# divides a line into EQUAL steps, which is by definition constant speed. An
+# accelerating hand covers more distance per equal time step.
+
+monitor 0,0,1920,1080
+set mode both
+set band 400
+set guard 20
+set speed 700
+set impactGate on
+
+# --- acceleration OFF: a fast constant sweep wraps (the old behaviour) -----
+set accel 0
+expect wrap
+stroke 1319 540 1919 540 8 30
+
+# --- acceleration ON: the SAME constant sweep is refused -------------------
+# This is the user's complaint: fast, but not speeding up.
+set accel 3000
+wait 200
+set guard 20
+expect no-wrap
+stroke 1319 300 1919 300 8 30
+
+# --- acceleration ON: a genuinely accelerating flick wraps -----------------
+# Equal 40 ms steps whose distance GROWS: the hand speeds up into the edge.
+set guard 20
+move 1520 700 40
+move 1532 700 40
+move 1547 700 40
+move 1565 700 40
+move 1586 700 40
+move 1610 700 40
+move 1637 700 40
+move 1667 700 40
+move 1700 700 40
+move 1736 700 40
+move 1775 700 40
+move 1817 700 40
+move 1862 700 40
+expect wrap
+move 1919 700 40
+
+# --- acceleration ON: braking into the edge is refused ---------------------
+# Fast far out, decelerating on arrival: negative acceleration.
+set guard 20
+expect no-wrap
+brake 1400 4000 250 right 8

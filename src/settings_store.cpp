@@ -105,6 +105,12 @@ Settings loadOverrides(const std::string& jsonText, bool& valid, std::string& pr
             raw.hasImpactBand = true;
         }
     });
+    applyKey(s, "impactAccelPps2", out, [](RawSettings& raw, const winshun::Json& v) {
+        if (v.isNumber()) {
+            raw.impactAccelPps2 = v.toNumber();
+            raw.hasImpactAccel = true;
+        }
+    });
     applyKey(s, "wrapGuardPx", out, [](RawSettings& raw, const winshun::Json& v) {
         if (v.isNumber()) {
             raw.wrapGuardPx = v.toNumber();
@@ -152,6 +158,8 @@ std::string dumpOverrides(const Settings& settings)
         inner["impactSpeedPps"] = static_cast<long long>(settings.impactSpeedPps);
     if (settings.impactBandPx != defaults.impactBandPx)
         inner["impactBandPx"] = static_cast<long long>(settings.impactBandPx);
+    if (settings.impactAccelPps2 != defaults.impactAccelPps2)
+        inner["impactAccelPps2"] = static_cast<long long>(settings.impactAccelPps2);
     if (settings.wrapGuardPx != defaults.wrapGuardPx)
         inner["wrapGuardPx"] = static_cast<long long>(settings.wrapGuardPx);
     if (settings.edgeThresholdPx != defaults.edgeThresholdPx)
@@ -183,7 +191,8 @@ bool overridesImpact(const Settings& o)
 {
     const Settings defaults;
     return o.impactGate != defaults.impactGate || o.impactSpeedPps != defaults.impactSpeedPps
-           || o.impactBandPx != defaults.impactBandPx;
+           || o.impactBandPx != defaults.impactBandPx
+           || o.impactAccelPps2 != defaults.impactAccelPps2;
 }
 
 } // namespace cw

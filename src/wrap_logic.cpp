@@ -101,6 +101,7 @@ void WrapEngine::rebuild(const std::vector<MonitorBox>& monitors)
     m_history.clear();
     m_hasPrevious = false;
     m_hasLastWrap = false;
+    m_hasWrapEdge = false;
     m_previous = { kNever, kNever };
     m_lastWrap = { kNever, kNever };
 }
@@ -111,6 +112,7 @@ void WrapEngine::resetState()
     m_history.clear();
     m_hasPrevious = false;
     m_hasLastWrap = false;
+    m_hasWrapEdge = false;
     m_previous = { kNever, kNever };
     m_lastWrap = { kNever, kNever };
     m_verdict = {};
@@ -190,12 +192,43 @@ CursorDirection WrapEngine::direction(const Sample& s) const
 
 bool WrapEngine::withinGuard(int64_t x, int64_t y) const
 {
-    if (!m_hasLastWrap)
-        return false;
-    const int64_t dx = x - m_lastWrap.x;
-    const int64_t dy = y - m_lastWrap.y;
-    const int64_t guard = m_settings.wrapGuardPx;
-    return dx * dx + dy * dy <= guard * guard;
+    // Near the LANDING point: a wrap teleports the pointer, so the hand is still
+    // where it was. Without this the next sample wraps straight back.
+    if (m_hasLastWrap) {
+        const int64_t dx = x - m_lastWrap.x;
+        const int64_t dy = y - m_lastWrap.y;
+        const int64_t guard = m_settings.wrapGuardPx;
+        if (dx * dx + dy * dy <= guard * guard)
+            return true;
+    }
+    // The pointer has not yet LEFT the edge it wrapped at. This is the case the
+    // user reported: holding the pointer at x=1919 keeps producing samples, and
+    // each one is a fresh "arrival" unless the plugin demands that the pointer
+    // leave first. Measured before this check: every event at the edge wrapped,
+    // and sliding ALONG the bottom edge wrapped repeatedly although nothing was
+    // arriving from outside.
+    //
+    // "Left" is measured against the approach band, not against the single edge
+    // line: a hand that is still within impactBandPx of the same edge has not
+    // gone anywhere, while a deliberate move of more than that is a new
+    // approach. Without the band the check would either latch forever (never
+    // wraps again) or fire on every pixel of a slow slide.
+    if (m_hasWrapEdge) {
+        // Still within the edge BAND of the edge that wrapped? Then the pointer
+        // has not left it and this sample is the same arrival, not a new one.
+        //
+        // The test is per-axis and small: only the perpendicular distance to
+        // that one edge matters. Using the wide impactBandPx here would swallow
+        // a deliberate move to a DIFFERENT edge of the same monitor (a corner
+        // turn), which is a genuine second arrival and must wrap.
+        const int64_t away = (m_wrapEdge == EdgeType::Left || m_wrapEdge == EdgeType::Right)
+            ? std::llabs(x - m_wrapEdgeCoord)
+            : std::llabs(y - m_wrapEdgeCoord);
+        const int64_t slack = std::max<int64_t>(m_settings.edgeThresholdPx, 2);
+        if (away <= slack)
+            return true; // still on that edge: not a new arrival
+    }
+    return false;
 }
 
 void WrapEngine::noteSample(const Sample& sample)
@@ -205,7 +238,8 @@ void WrapEngine::noteSample(const Sample& sample)
         m_history.erase(m_history.begin(), m_history.begin() + (m_history.size() - kHistoryMax));
 }
 
-long long WrapEngine::approachSpeedPps(EdgeType edge, int64_t edgeCoord) const
+WrapEngine::ApproachMeasure WrapEngine::approachSpeedPps(EdgeType edge,
+                                                         int64_t edgeCoord) const
 {
     // The speed of the FREE motion that arrived at the edge — not the speed
     // of the arrival event itself. Four mechanisms:
@@ -227,7 +261,7 @@ long long WrapEngine::approachSpeedPps(EdgeType edge, int64_t edgeCoord) const
     // Fail closed otherwise: fewer than two timestamped samples, a
     // non-monotonic clock or a zero window all mean "cannot measure".
     if (m_history.size() < 2)
-        return 0;
+        return {};
     const auto coord = [](const Sample& s, EdgeType e) -> long long {
         return horizontal(e) ? s.x : s.y;
     };
@@ -246,10 +280,10 @@ long long WrapEngine::approachSpeedPps(EdgeType edge, int64_t edgeCoord) const
            && coord(m_history[last], edge) == coord(m_history[last - 1], edge))
         --last;
     if (last == 0)
-        return 0;
+        return {};
     const Sample& newest = m_history[last];
     if (newest.tUs <= 0)
-        return 0;
+        return {};
 
     // (2) Decide whether the arrival sample is usable. When the hand runs into
     // the edge, Windows clamps the pointer, so that last step covers LESS
@@ -268,7 +302,7 @@ long long WrapEngine::approachSpeedPps(EdgeType edge, int64_t edgeCoord) const
             end = last - 1;
     }
     if (end == 0)
-        return 0;
+        return {};
 
     // (3)(4) Measure the SHORTEST window that is still meaningful: walk back one
     // step at a time and stop as soon as the walk carries kImpactMinTravelPx.
@@ -301,14 +335,54 @@ long long WrapEngine::approachSpeedPps(EdgeType edge, int64_t edgeCoord) const
             break;
     }
 
+    // (3b) Acceleration needs a LONGER window than speed does. Comparing the two
+    // halves of a 2-sample window would just divide quantisation noise; the
+    // slope only means something when each half carries real travel and real
+    // time. So the window is widened — within the same band and the same
+    // no-reversal rule — until each half is measurable. Widening past the
+    // speed window is safe: the reported speed still comes from the short
+    // window above, so a decelerating arrival cannot sneak back in.
+    if (m_settings.impactAccelPps2 > 0) {
+        size_t j = i;
+        while (j > 0) {
+            const long long span = elapsedUs(m_history[j], m_history[end]);
+            if (span >= 2 * kImpactAccelMinHalfUs && span >= kImpactAccelMinWindowUs) {
+                // Split and check both halves carry travel; the caller does the
+                // arithmetic, so only the extent has to be right here.
+                const long long halfUs = span / 2;
+                size_t mid = j;
+                for (size_t k = j + 1; k <= end; ++k) {
+                    if (elapsedUs(m_history[j], m_history[k]) >= halfUs) {
+                        mid = k;
+                        break;
+                    }
+                }
+                if (mid > j && mid < end
+                    && travel(m_history[j], m_history[mid]) >= kImpactAccelMinHalfTravelPx
+                    && travel(m_history[mid], m_history[end]) >= kImpactAccelMinHalfTravelPx) {
+                    i = j; // a window whose halves both mean something
+                    break;
+                }
+            }
+            const Sample& prev = m_history[j - 1];
+            if (prev.tUs <= 0 || elapsedUs(prev, m_history[end]) > kImpactWindowUs)
+                break; // clock gap or window end
+            if (travel(prev, m_history[j]) < 0)
+                break; // reversed
+            if (std::llabs(coord(prev, edge) - edgeCoord) > band)
+                break; // left the approach band
+            --j;
+        }
+    }
+
     // (5) Minimal travel: a stroke shorter than kImpactMinTravelPx is jitter at
     // the edge, not a hit — fail closed.
     const long long stroke = travel(m_history[i], m_history[end]);
     if (stroke < kImpactMinTravelPx)
-        return 0;
+        return {};
     const long long windowUs = elapsedUs(m_history[i], m_history[end]);
     if (windowUs <= 0)
-        return 0;
+        return {};
     // Queued-delivery guard: the samples may have been stamped when they were
     // DELIVERED rather than when they happened, which inflates the speed by an
     // arbitrary factor. MSLLHOOKSTRUCT.time carries the driver's own tick, so
@@ -316,12 +390,64 @@ long long WrapEngine::approachSpeedPps(EdgeType edge, int64_t edgeCoord) const
     // reading slower, never faster.
     const long long pps = stroke * 1'000'000LL / windowUs;
     if (pps <= 0)
-        return 0;
+        return {};
+    ApproachMeasure out;
     // Nobody moves a mouse faster than kImpactSpeedMaxPps. A larger value
     // means the timestamps do not describe hand motion — the usual cause is
     // queued delivery. Clamping keeps the reading honest
     // instead of printing a six-digit number, and the gate still passes it.
-    return pps > kImpactSpeedMaxPps ? kImpactSpeedMaxPps : pps;
+    out.speedPps = pps > kImpactSpeedMaxPps ? kImpactSpeedMaxPps : pps;
+
+    // Forward acceleration: split the measured window in half and compare the
+    // two halves' speeds. This is the user's request ("it should accelerate at
+    // the edge, not merely be fast"), and a two-point slope is the only honest
+    // way to get it: a per-event derivative at 1000 Hz is pure noise, and the
+    // whole point of the trailing window is that both halves sit at the edge.
+    //
+    // sign convention: POSITIVE means the hand was speeding up as it approached.
+    // The first half is farther from the edge, the second half is the arrival.
+    // A hand that brakes into the edge gives a negative value, which is exactly
+    // what must refuse to wrap.
+    if (windowUs >= kImpactAccelMinWindowUs) {
+        // Split at the sample nearest the middle of the window in TIME, so an
+        // uneven report rate cannot bias one half.
+        const long long halfUs = windowUs / 2;
+        size_t mid = i;
+        for (size_t k = i + 1; k <= end; ++k) {
+            if (elapsedUs(m_history[i], m_history[k]) >= halfUs) {
+                mid = k;
+                break;
+            }
+        }
+        if (mid > i && mid < end) {
+            const long long earlyTravel = travel(m_history[i], m_history[mid]);
+            const long long lateTravel = travel(m_history[mid], m_history[end]);
+            const long long earlyUs = elapsedUs(m_history[i], m_history[mid]);
+            const long long lateUs = elapsedUs(m_history[mid], m_history[end]);
+            // Both halves must carry real movement: a half made of one pixel
+            // cannot represent a speed, and dividing by it would invent an
+            // enormous slope.
+            if (earlyUs > 0 && lateUs > 0 && earlyTravel > 0 && lateTravel > 0) {
+                const long long earlyPps = earlyTravel * 1'000'000LL / earlyUs;
+                const long long latePps = lateTravel * 1'000'000LL / lateUs;
+                // px/s over px/s → px/s². The time base is the pair of half
+                // windows, i.e. the moment the early half ended and the moment
+                // the late half ended, which is what "how fast is this changing
+                // at the edge" means.
+                const long long dtUs = (earlyUs + lateUs) / 2;
+                if (dtUs > 0) {
+                    long long accel = (latePps - earlyPps) * 1'000'000LL / dtUs;
+                    if (accel > kImpactAccelMaxPps2)
+                        accel = kImpactAccelMaxPps2;
+                    if (accel < -kImpactAccelMaxPps2)
+                        accel = -kImpactAccelMaxPps2;
+                    out.accelPps2 = accel;
+                    out.accelMeasured = true;
+                }
+            }
+        }
+    }
+    return out;
 }
 
 std::pair<int64_t, int64_t> WrapEngine::onMouseMove(const Sample& sample, bool modifierHeld,
@@ -357,8 +483,10 @@ std::pair<int64_t, int64_t> WrapEngine::onMouseMove(const Sample& sample, bool m
         m_verdict.guardBlocked = true;
         return skip(SkipReason::Guard);
     }
-    if (m_hasLastWrap && !withinGuard(sample.x, sample.y))
-        m_hasLastWrap = false;
+    // Past the guard: the pointer is neither near the landing point nor on an
+    // outer edge, so the next arrival is a genuine new one.
+    m_hasLastWrap = false;
+    m_hasWrapEdge = false;
     const int index = m_topology.nearestMonitor(sample.x, sample.y);
     if (index < 0)
         return skip(SkipReason::OffMonitor); // no monitors at all
@@ -373,16 +501,24 @@ std::pair<int64_t, int64_t> WrapEngine::onMouseMove(const Sample& sample, bool m
     }
 
     // Impact gate: reaching the edge must look like a hit, not a drift.
-    // Measured over the last continuous stroke, inside the approach band;
-    // a sample without a timestamp (tUs == 0) cannot prove speed and fails
-    // closed.
+    // Measured over the last continuous stroke, inside the approach band; a
+    // sample without a timestamp (tUs == 0) cannot prove speed and fails closed.
+    //
+    // Two conditions, both mandatory when enabled:
+    //   1. the speed at the arrival must reach impactSpeedPps;
+    //   2. the hand must be SPEEDING UP into the edge (impactAccelPps2, 0 = off).
+    // The second is the user's request: a constant-speed sweep that happens to
+    // be fast is a different gesture from a flick that accelerates at the edge,
+    // and only the flick should wrap. It also refuses a hand that is still fast
+    // but already braking, which the speed floor alone accepts.
     bool gatedOut = false;
     if (m_settings.impactGate) {
         const MonitorBox box = m_topology.monitors()[static_cast<size_t>(index)];
         const int64_t edgeCoord = (edge == EdgeType::Left || edge == EdgeType::Top)
             ? (edge == EdgeType::Left ? box.left : box.top)
             : (edge == EdgeType::Right ? box.right - 1 : box.bottom - 1);
-        const long long pps = approachSpeedPps(edge, edgeCoord);
+        const ApproachMeasure measure = approachSpeedPps(edge, edgeCoord);
+        const long long pps = measure.speedPps;
         m_verdict.tUs = sample.tUs;
         m_verdict.monitorIndex = index;
         m_verdict.edge = edge;
@@ -391,10 +527,26 @@ std::pair<int64_t, int64_t> WrapEngine::onMouseMove(const Sample& sample, bool m
         m_verdict.y = sample.y;
         m_verdict.measuredPps = pps;
         m_verdict.thresholdPps = m_settings.impactSpeedPps;
+        m_verdict.measuredAccelPps2 = measure.accelPps2;
+        m_verdict.accelMeasured = measure.accelMeasured;
+        m_verdict.thresholdAccelPps2 = m_settings.impactAccelPps2;
         m_verdict.gateOff = false;
         m_verdict.wrapped = false;
         m_verdict.guardBlocked = false;
-        gatedOut = pps < m_settings.impactSpeedPps;
+        m_verdict.accelBlocked = false;
+
+        const bool tooSlow = pps < m_settings.impactSpeedPps;
+        // Acceleration only applies when the user enabled it. When the stroke is
+        // too short in time to measure a slope at all, the speed condition alone
+        // decides — refusing there would make the gate unusable at a coarse
+        // report rate, which is a real configuration. A MEASURED 0 (constant
+        // speed) is different: it fails an acceleration floor, which is exactly
+        // what the user asked for ("not merely fast, but speeding up").
+        const bool accelEnabled = m_settings.impactAccelPps2 > 0;
+        const bool accelTooLow = accelEnabled && measure.accelMeasured
+            && measure.accelPps2 < m_settings.impactAccelPps2;
+        gatedOut = tooSlow || accelTooLow;
+        m_verdict.accelBlocked = !tooSlow && accelTooLow;
         if (!gatedOut)
             m_verdict.wrapped = true;
     } else {
@@ -409,6 +561,9 @@ std::pair<int64_t, int64_t> WrapEngine::onMouseMove(const Sample& sample, bool m
             : (edge == EdgeType::Top) ? box.top : box.bottom - 1;
         m_verdict.measuredPps = 0;
         m_verdict.thresholdPps = 0;
+        m_verdict.measuredAccelPps2 = 0;
+        m_verdict.thresholdAccelPps2 = 0;
+        m_verdict.accelBlocked = false;
         m_verdict.gateOff = true;
         m_verdict.wrapped = true;
         m_verdict.guardBlocked = false;
@@ -452,6 +607,18 @@ std::pair<int64_t, int64_t> WrapEngine::onMouseMove(const Sample& sample, bool m
     if (nx != sample.x || ny != sample.y) {
         m_lastWrap = { nx, ny };
         m_hasLastWrap = true;
+        // The pointer has not left the band of this edge yet: another sample at
+        // the same edge is the same arrival, not a new one.
+        m_hasWrapEdge = true;
+        m_wrapEdge = edge;
+        // The edge coordinate this wrap happened at, derived from the landing
+        // side so it does not depend on a gate-only local variable.
+        {
+            const MonitorBox box = m_topology.monitors()[static_cast<size_t>(index)];
+            m_wrapEdgeCoord = (edge == EdgeType::Left) ? box.left
+                : (edge == EdgeType::Right) ? box.right - 1
+                : (edge == EdgeType::Top) ? box.top : box.bottom - 1;
+        }
         ++m_stats.wraps;
         noteDecision(sample, SkipReason::None, true, m_verdict, index);
         m_lastReason = SkipReason::None;
@@ -623,6 +790,12 @@ void applySettings(const RawSettings& raw, Settings& out, bool merge)
                                      fallback.impactSpeedPps, previous.impactSpeedPps);
     out.impactBandPx = applyNumber(raw.impactBandPx, raw.hasImpactBand, 50, 500,
                                    fallback.impactBandPx, previous.impactBandPx);
+    // 0 is meaningful here (acceleration condition off), so it must survive the
+    // clamp: the range is 0..200000 rather than 200..200000.
+    out.impactAccelPps2 = applyNumber(raw.impactAccelPps2, raw.hasImpactAccel, 0, 200000,
+                                      fallback.impactAccelPps2, previous.impactAccelPps2);
+    if (out.impactAccelPps2 != 0 && out.impactAccelPps2 < 200)
+        out.impactAccelPps2 = 200; // below this is noise, not a usable floor
     (void)merge; // partial updates: untouched fields keep `previous` above
 }
 

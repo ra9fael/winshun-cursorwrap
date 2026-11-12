@@ -11,6 +11,9 @@
 //   speed <n> | 速度 <n>        -> Set impactSpeedPps (with the gate on)
 //   band | 区间                 -> MenuBand (submenu) when no value follows
 //   band <n> | 区间 <n>         -> Set impactBandPx
+//   accel | 加速度              -> MenuAccel (submenu) when no value follows
+//   accel <n> | 加速度 <n>      -> Set impactAccelPps2 (px/s²; 0 turns the
+//                                  acceleration condition off)
 //   mode | 模式                 -> MenuMode (submenu) when no value follows
 //   mode both|vertical|horizontal | 模式 双向|上下|左右 -> Set wrapMode
 //   ctrl | shift | always | 按住ctrl | 按住shift | 总是 -> Set activation
@@ -49,6 +52,7 @@ enum class CommandKind {
     MenuImpact,     // impact submenu (drill-down)
     MenuSpeed,      // speed submenu
     MenuBand,       // band submenu
+    MenuAccel,      // acceleration submenu
     MenuMode,       // mode submenu
     MenuActivation, // activation submenu
     MenuGuard,      // guard submenu
@@ -63,6 +67,7 @@ enum class CommandKind {
     SetImpact,      // value: 0 = off, 1 = on
     SetImpactSpeed, // value: px/s
     SetBand,        // value: px
+    SetAccel,       // value: px/s² (0 = off)
     CycleMode,
     SetMode,        // value: WrapMode
     SetActivation,  // value: ActivationMode

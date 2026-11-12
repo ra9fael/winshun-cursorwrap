@@ -113,6 +113,7 @@ cw::RawSettings rawFromJson(const Json& s)
     boolField("impactGate", raw.impactGate, raw.hasImpactGate);
     numberField("impactSpeedPps", raw.impactSpeedPps, raw.hasImpactSpeed);
     numberField("impactBandPx", raw.impactBandPx, raw.hasImpactBand);
+    numberField("impactAccelPps2", raw.impactAccelPps2, raw.hasImpactAccel);
     boolField("tuningOverlay", raw.tuningOverlay, raw.hasTuningOverlay);
     boolField("dataWindow", raw.dataWindow, raw.hasDataWindow);
     return raw;
@@ -295,6 +296,8 @@ protected:
             return speedMenu();
         case cw::CommandKind::MenuBand:
             return bandMenu();
+        case cw::CommandKind::MenuAccel:
+            return accelMenu();
         case cw::CommandKind::MenuMode:
             return modeMenu();
         case cw::CommandKind::MenuActivation:
@@ -335,6 +338,7 @@ protected:
             switch (cmd.kind) {
             case cw::CommandKind::SetImpactSpeed: return speedMenu();
             case cw::CommandKind::SetBand: return bandMenu();
+            case cw::CommandKind::SetAccel: return accelMenu();
             case cw::CommandKind::SetGuard: return guardMenu();
             case cw::CommandKind::SetEdge: return edgeMenu();
             case cw::CommandKind::SetTolerance: return toleranceMenu();
@@ -384,6 +388,7 @@ protected:
             m_settings.impactGate = defaults.impactGate;
             m_settings.impactSpeedPps = defaults.impactSpeedPps;
             m_settings.impactBandPx = defaults.impactBandPx;
+            m_settings.impactAccelPps2 = defaults.impactAccelPps2;
             m_settings.wrapGuardPx = defaults.wrapGuardPx;
             m_settings.edgeThresholdPx = defaults.edgeThresholdPx;
             m_settings.adjacencyTolerancePx = defaults.adjacencyTolerancePx;
@@ -407,6 +412,9 @@ protected:
                 } else if (field == "band") {
                     m_settings.impactBandPx = static_cast<int>(value);
                     after = bandMenu();
+                } else if (field == "accel") {
+                    m_settings.impactAccelPps2 = static_cast<int>(value);
+                    after = accelMenu();
                 } else if (field == "guard") {
                     m_settings.wrapGuardPx = static_cast<int>(value);
                     after = guardMenu();
@@ -722,6 +730,9 @@ private:
         case cw::CommandKind::SetBand:
             m_settings.impactBandPx = static_cast<int>(cmd.value);
             break;
+        case cw::CommandKind::SetAccel:
+            m_settings.impactAccelPps2 = static_cast<int>(cmd.value);
+            break;
         case cw::CommandKind::SetMode:
             m_settings.wrapMode = static_cast<cw::WrapMode>(cmd.value);
             break;
@@ -765,6 +776,7 @@ private:
             m_settings.impactGate = defaults.impactGate;
             m_settings.impactSpeedPps = defaults.impactSpeedPps;
             m_settings.impactBandPx = defaults.impactBandPx;
+            m_settings.impactAccelPps2 = defaults.impactAccelPps2;
             m_settings.wrapGuardPx = defaults.wrapGuardPx;
             m_settings.edgeThresholdPx = defaults.edgeThresholdPx;
             m_settings.adjacencyTolerancePx = defaults.adjacencyTolerancePx;
@@ -800,8 +812,12 @@ private:
         const bool chinese = winshun::Plugin::chinese();
         if (!m_settings.impactGate)
             return chinese ? "撞击模式：关" : "Impact mode: off";
-        return std::string(chinese ? "撞击模式：开，门槛 " : "Impact mode: on, gate ")
+        std::string text = std::string(chinese ? "撞击模式：开，门槛 " : "Impact mode: on, gate ")
             + intText(m_settings.impactSpeedPps) + " px/s";
+        if (m_settings.impactAccelPps2 > 0)
+            text += std::string(chinese ? "，加速度 " : ", acceleration ")
+                + intText(m_settings.impactAccelPps2) + " px/s²";
+        return text;
     }
 
     Item unknownRow(const std::string& text)
@@ -971,6 +987,17 @@ private:
                                 chinese ? "Enter 选择区间" : "Enter to pick a band",
                                 "cursorwrap band "));
 
+        // The acceleration floor: "the hand must be speeding up at the edge",
+        // not merely fast. 0 (off) keeps the old speed-only behaviour.
+        rows.push_back(drillRow("cursorwrap.row.accel",
+                                std::string(chinese ? "撞击加速度：" : "Impact acceleration: ")
+                                    + (m_settings.impactAccelPps2 == 0
+                                           ? (chinese ? "关（只看速度）" : "off (speed only)")
+                                           : intText(m_settings.impactAccelPps2) + " px/s²"),
+                                chinese ? "Enter 选择加速度门槛；开启后必须「加速冲进边缘」才回绕"
+                                        : "Enter to pick an acceleration floor · when on, the hand must speed up into the edge",
+                                "cursorwrap accel "));
+
         rows.push_back(Item("cursorwrap.row.mode",
                             std::string(chinese ? "回绕模式：" : "Wrap mode: ")
                                 + modeLabel(m_settings.wrapMode, chinese),
@@ -1073,6 +1100,13 @@ private:
                                     + intText(m_settings.impactBandPx) + " px",
                                 chinese ? "Enter 选择区间" : "Enter to pick a band",
                                 "cursorwrap band "));
+        rows.push_back(drillRow("cursorwrap.impact.accel",
+                                std::string(chinese ? "撞击加速度：" : "Impact acceleration: ")
+                                    + (m_settings.impactAccelPps2 == 0
+                                           ? (chinese ? "关（只看速度）" : "off (speed only)")
+                                           : intText(m_settings.impactAccelPps2) + " px/s²"),
+                                chinese ? "必须加速冲进边缘才回绕" : "the hand must speed up into the edge",
+                                "cursorwrap accel "));
         return rows;
     }
 
@@ -1096,6 +1130,23 @@ private:
             std::string title = intText(v) + " px";
             rows.push_back(valueRow("cursorwrap.band", std::move(title), "band", v,
                                     m_settings.impactBandPx == v));
+        }
+        return rows;
+    }
+
+    // The acceleration floor. 0 is a real choice (the condition off), so it gets
+    // its own row rather than being implied by an empty value.
+    Items accelMenu()
+    {
+        const bool chinese = winshun::Plugin::chinese();
+        Items rows;
+        rows.push_back(backRow());
+        rows.push_back(valueRow("cursorwrap.accel", chinese ? "关闭（只看速度）" : "off (speed only)",
+                                "accel", 0, m_settings.impactAccelPps2 == 0));
+        for (const long long v : { 2000, 5000, 10000, 20000, 40000, 80000 }) {
+            std::string title = intText(v) + " px/s²";
+            rows.push_back(valueRow("cursorwrap.accel", std::move(title), "accel", v,
+                                    m_settings.impactAccelPps2 == v));
         }
         return rows;
     }
@@ -1236,6 +1287,14 @@ private:
                                 chinese ? "Enter 选择门槛值（读数里的分母）"
                                         : "Enter to pick the gate (the readout's denominator)",
                                 "cursorwrap speed "));
+        rows.push_back(drillRow("cursorwrap.tuner.accel",
+                                std::string(chinese ? "加速度门槛：" : "Acceleration gate: ")
+                                    + (m_settings.impactAccelPps2 == 0
+                                           ? (chinese ? "关（只看速度）" : "off (speed only)")
+                                           : intText(m_settings.impactAccelPps2) + " px/s²"),
+                                chinese ? "Enter 选择加速度门槛（读数里的第二行）"
+                                        : "Enter to pick the acceleration floor (the readout's second line)",
+                                "cursorwrap accel "));
         rows.push_back(drillRow("cursorwrap.tuner.guard",
                                 std::string(chinese ? "防震半径：" : "Guard radius: ")
                                     + intText(m_settings.wrapGuardPx) + " px",
@@ -1460,6 +1519,10 @@ private:
         if (d.settings.impactGate) {
             text += "impact speed: " + intText(d.settings.impactSpeedPps) + " px/s\n";
             text += "impact band: " + intText(d.settings.impactBandPx) + " px\n";
+            text += std::string("impact acceleration: ")
+                + (d.settings.impactAccelPps2 == 0
+                       ? std::string("off")
+                       : intText(d.settings.impactAccelPps2) + " px/s²") + "\n";
         }
         for (const std::string& gap : d.gaps)
             text += "gap: " + gap + "\n";

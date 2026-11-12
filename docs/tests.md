@@ -17,7 +17,7 @@
 | 打包物含 `plugin.json` / `cursorwrap.exe` / `README.md` / `LICENSE`，无 `build/`、`dist/`、`.git` | §8 | `tools/package.py` + `tools/ci_release.py` |
 | 双语文档锚点互链（`docs/spec*.md`、`docs/tests*.md`、README、CHANGELOG） | — | 通过 |
 
-## L1 — 纯逻辑单测（`cw_tests`，ctest 目标，131 用例 + 6 布局 fixture）
+## L1 — 纯逻辑单测（`cw_tests`，ctest 目标，140 用例 + 6 布局 fixture）
 
 不引 OS 头文件，任何平台可跑。运行：
 
@@ -64,6 +64,8 @@ ctest --test-dir build --output-on-failure
 | 用户真机配置复现 | 双屏 `[-2560,0..0,1440] + [0,0..2560,1440]`、`wrapMode=horizontal`、`guard=100`、`tol=10`：关门槛双向回绕落点正确；内边永不回绕；开门槛时 5000 px/s 命中回绕；慢漂只被 `impact-gate` 拦下且其他原因计数为 0；拖拽计入 `dragging` | §5 §9 |
 | 远程桌面（RDP） | 单虚拟屏 1920×1080 双向回绕落点为 `x=1` / `x=1918`；`disableOnSingleMonitor` 计入 `single-monitor`；**空枚举不得清空拓扑**（保留上一份布局 + 计入 `rebuildRefused` + 之后仍能回绕）；真正的布局变化（拔屏、会话结束回双屏）仍然立即生效；单屏下撞击门槛仍可测速并正确拦截 | §5 §10 |
 | 微秒时钟不溢出 | `counterToUs` 在开机 30 天、11.2 天真实计数值下都返回正数且数值正确；1ms 步长仍精确为 1000µs；`freq<=0` / 负计数 fail closed 返回 0；**端到端**：用「开机 11 天」的计数器喂引擎，6000 px/s 的撞击仍然回绕且 `measuredPps>=2000`（旧实现在这里 `measured_pps=0`，门槛拒绝一切） | §5 §9 |
+| 撞击加速度门槛 | 匀速 sweep（`accel=0`）被拒绝；真加速冲边回绕；减速冲边（负值）拒绝；`accelMeasured` 区分「测出 0」与「测不出」；设置 0 保留为关闭、非零低于 200 抬到 200、超范围回退默认 | §7 撞击模式 |
+| 边缘不反复触发 | 停在边缘 20 个事件只回绕 1 次；沿底边滑动 60 个样本不再回绕；离开边缘再回来正常回绕；角落换边仍是新到达 | §6 §7 |
 | 撞击测的是「到达时的速度」 | **减速冲边不触发**：4000→250 px/s 在 1/2/4/8 ms 报点率下都不回绕；6000→150 在区间 50/100/150/250 下都不回绕（旧实现整段平均会误判，区间越宽越严重）；匀速 3000 px/s 在 1000Hz–125Hz 全部回绕，匀速 900 px/s 全部拒绝 | §7 撞击模式 |
 | 排队投递不能抬高读数 | 20px/事件、投递间隔 500µs（纸面 40000 px/s）、驱动间隔 8ms（真实 2500 px/s）：带 `osMs` 读出 2500 并回绕；不带给 20000（上限） | §7 撞击模式 |
 | 读数上限 | 99px/1ms 之类的极端输入，`measuredPps` 不会超过 `kImpactSpeedMaxPps`（20000），且不为 0 | §7 撞击模式 |
@@ -227,10 +229,10 @@ build\cw_devshell.exe gui                     # 真窗口，键盘 1/2/3 驱动�
 
 ## 验收标准
 
-- L1 全绿（当前 131 用例 + 6 布局 fixture，全部是合成几何；`live-single.json` 只被
+- L1 全绿（当前 140 用例 + 6 布局 fixture，全部是合成几何；`live-single.json` 只被
   探针读取，不进 L1）
-- L3 全通过（当前 118/118）
-- L3.5 场景全通过（当前 4 个场景，`python tests/devshell_scenarios.py`）
+- L3 全通过（当前 119/119）
+- L3.5 场景全通过（当前 8 个场景，`python tests/devshell_scenarios.py`）
 - L0 静态校验通过
 - L4 单屏与远程桌面单屏部分已实测通过；**多屏部分全部勾选后**才可宣布多屏可发布，
   当前属发布阻塞项

@@ -416,8 +416,8 @@ have no real-machine wrap confirmation.
 
 | Item | Result |
 |---|---|
-| `cw_tests` | **131 cases + 6 布局 fixtures green** (14 new in v0.2.0; 5 `rdp_*` plus 4 clock-overflow cases in v0.2.1, 6 speed cases in v0.2.2) |
-| `protocol_roundtrip.py` | **118/118 checks passed**, exit code 0 (15 new: the twelve manifest settings key by key, the `data` submenu, the settings list agreeing with the submenu, the `window` alias, diagnostics carrying the skip split and hook health) |
+| `cw_tests` | **140 cases + 6 布局 fixtures green** (14 new in v0.2.0; 5 `rdp_*` plus 4 clock-overflow cases in v0.2.1, 6 speed cases in v0.2.2) |
+| `protocol_roundtrip.py` | **119/119 checks passed**, exit code 0 (15 new: the twelve manifest settings key by key, the `data` submenu, the settings list agreeing with the submenu, the `window` alias, diagnostics carrying the skip split and hook health) |
 | `tests/validate.py` | static validation passed (including the new `[0.2.0]` CHANGELOG heading matching `plugin.json`) |
 | The user's real configuration | dual displays `[-2560,0..0,1440] + [0,0..2560,1440]`, `wrapMode=horizontal`, `guard=100`, `tol=10`: with the gate off both directions land correctly (`x=-2559` / `x=2558`); inner edges never wrap; a 5000 px/s hit wraps with the gate on; a slow drift is refused by **only** `impact-gate` (every other reason counts 0) |
 | Data-window render | rendered once and read back: header `enabled · hook live · 2 monitor(s), 6 outer edge(s)`, pointer `-827, 615`, an 8-hit histogram, the per-reason counters and a populated decision log |

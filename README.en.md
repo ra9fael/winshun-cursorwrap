@@ -118,6 +118,11 @@ distant part of a flight does not count, so "flicked over but already slow at th
 edge" does not wrap — that is exactly what "accelerate at the edge" means. So:
 
 - to wrap on a flick, set `speed` slightly below your hand speed at the edge;
+- `accel` (off by default) makes the gate require the hand to be **speeding up**
+  into the edge: a constant sweep never wraps however fast, a hand already braking
+  does not either, and only a genuine accelerating flick does. Start at 5000 and
+  lower it to 2000 if it feels hard to trigger; the readout gains an
+  `accel measured / gate` line (negative = braking);
 - `band` is the sampling range used for the measurement (150 px default) and is a
   **hard** limit: the fast distant part of the flight never counts. When the
   in-band travel is under 20 px nothing can be measured and the gate does not
@@ -288,8 +293,8 @@ MinGW. MSVC builds use the static runtime (`/MT`) and likewise ship no external 
 ## Tests
 
 ```powershell
-ctest --test-dir build --output-on-failure       # L1: 131 cases + 6 layout fixtures
-python tests/protocol_roundtrip.py               # L3: 118 protocol round-trip checks
+ctest --test-dir build --output-on-failure       # L1: 140 cases + 6 layout fixtures
+python tests/protocol_roundtrip.py               # L3: 119 protocol round-trip checks
 python tests/devshell_scenarios.py               # L3.5: GUI + logic scenarios without the host
 python tests/repeat_push_probe.py                # L4 single display / RDP: multi-round real SetCursorPos pushes
 python tests/injected_wrap_probe.py              # L4: injected input (LLMHF_INJECTED) still wraps

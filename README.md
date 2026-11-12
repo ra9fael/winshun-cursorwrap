@@ -45,6 +45,7 @@ Enter 就是该行的主操作，不用记组合键：
 | `cursorwrap impact` / `撞击` | 返回 · 撞击开关 · 撞击速度 · 测速区间 |
 | `cursorwrap speed` / `速度` | 返回 · 500/1000/2000/3000/5000/8000/12000/20000 px/s |
 | `cursorwrap band` / `区间` | 返回 · 50/80/120/150/200/300/500 px |
+| `cursorwrap accel` / `加速度` | 返回 · 关闭 · 2000/5000/10000/20000/40000/80000 px/s² |
 | `cursorwrap mode` / `模式` | 返回 · 双向 · 仅上下 · 仅左右 |
 | `cursorwrap activation` / `激活` | 返回 · 总是 · 按住 Ctrl · 按住 Shift |
 | `cursorwrap guard` / `防震` | 返回 · 10/30/50/80/120/200 px |
@@ -104,6 +105,9 @@ Enter 就是该行的主操作，不用记组合键：
 已经慢下来」不会回绕，这正是「在边沿处加速才行」的意思。所以：
 
 - 想要「甩一下回绕」，`speed` 设成比你贴边那一刻的手速略低；
+- `加速度`（默认关闭）开启后**要求手在加速冲进边缘**：匀速滑到边缘再快也不回绕，
+  到边缘已经减速的也不回绕，只有真正加速撞过去才回绕。建议先设 5000，觉得太难触发
+  再降到 2000；读数面板会多一行 `accel 实测 / 门槛`（负值=正在减速）；
 - `区间` 是测速的取样范围（默认 150px），是**硬限制**：区间外的高速飞行段不计入。
   区间内可测行程不足 20px 时测不出速度、不会回绕——这时把区间调大（粗采样或想
   更灵敏都可以试 200–300）；
@@ -248,8 +252,8 @@ C++ 运行时，目标机器不需要 MinGW。MSVC 构建用静态运行库（`/
 ## 测试
 
 ```powershell
-ctest --test-dir build --output-on-failure       # L1：131 用例 + 6 布局 fixture
-python tests/protocol_roundtrip.py               # L3：118 项协议往返检查
+ctest --test-dir build --output-on-failure       # L1：140 用例 + 6 布局 fixture
+python tests/protocol_roundtrip.py               # L3：119 项协议往返检查
 python tests/devshell_scenarios.py               # L3.5：免宿主 GUI + 逻辑场景
 python tests/repeat_push_probe.py                # L4 单屏 / 远程桌面：真实 SetCursorPos 多轮推送
 python tests/injected_wrap_probe.py              # L4：注入事件（LLMHF_INJECTED）仍能回绕

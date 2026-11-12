@@ -1081,3 +1081,230 @@ CW_TEST(impact_driver_timestamp_can_only_lower_the_speed)
     CW_CHECK(e.lastVerdict().measuredPps > 0);
     CW_CHECK(e.lastVerdict().measuredPps <= WrapEngine::kImpactSpeedMaxPps);
 }
+
+// --- regression: no wrap churn at an edge ----------------------------------
+//
+// The user reported that with impact mode off, working near an edge produced
+// repeated wraps. Two mechanisms caused it, both now pinned down here:
+// holding the pointer AT the edge (Windows keeps delivering samples there) and
+// sliding ALONG it (every sample is "on an outer edge" but nothing arrives).
+//
+// The rule: a wrap must be followed by the pointer LEAVING that edge before
+// another arrival counts. Moving away re-arms the plugin.
+
+CW_TEST(holding_at_the_edge_wraps_only_once)
+{
+    WrapEngine e;
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    // Arrive at the right edge: one wrap.
+    e.onMouseMove({ 1800, 540 }, false, false);
+    const auto [x1, y1] = e.onMouseMove({ 1919, 540 }, false, false);
+    CW_CHECK_EQ(x1, 1);
+    CW_CHECK_EQ(e.stats().wraps, 1);
+    // The hand keeps pushing: Windows keeps reporting the edge. Each of these is
+    // the SAME arrival, so none may wrap.
+    for (int i = 0; i < 20; ++i) {
+        const auto [x, y] = e.onMouseMove({ 1919, 540 }, false, false);
+        CW_CHECK_EQ(x, 1919);
+        (void)y;
+    }
+    CW_CHECK_EQ(e.stats().wraps, 1);
+}
+
+CW_TEST(sliding_along_an_outer_edge_wraps_at_most_once)
+{
+    WrapEngine e;
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    // Reaching the bottom edge IS an arrival, so the first sample there wraps
+    // (that is the feature). Everything after it is the same arrival: sliding
+    // ALONG the edge must not wrap again, however long the sweep. Starting away
+    // from the edge is what makes this "arrive then slide", not "already there".
+    e.onMouseMove({ 200, 900 }, false, false);
+    const auto [nx0, ny0] = e.onMouseMove({ 200, 1079 }, false, false);
+    (void)nx0;
+    // The bottom edge wraps vertically, so the Y is what changes (to y=1).
+    CW_CHECK(ny0 != 1079);
+    const long long after = e.stats().wraps;
+    CW_CHECK_EQ(after, 1);
+    for (int x = 240; x <= 1700; x += 25) {
+        const auto [nx, ny] = e.onMouseMove({ x, 1079 }, false, false);
+        CW_CHECK_EQ(nx, x); // no further wraps while sliding
+        (void)ny;
+    }
+    CW_CHECK_EQ(e.stats().wraps, after);
+}
+
+CW_TEST(leaving_the_edge_re_arms_the_wrap)
+{
+    WrapEngine e;
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    e.onMouseMove({ 1800, 540 }, false, false);
+    const auto [x1, y1] = e.onMouseMove({ 1919, 540 }, false, false);
+    CW_CHECK_EQ(x1, 1);
+    CW_CHECK_EQ(e.stats().wraps, 1);
+    // Deliberately move well away from any edge and back: the second arrival is
+    // a genuine one and must wrap.
+    e.onMouseMove({ 900, 540 }, false, false);
+    e.onMouseMove({ 1500, 540 }, false, false);
+    const auto [x2, y2] = e.onMouseMove({ 1919, 540 }, false, false);
+    CW_CHECK_EQ(x2, 1);
+    CW_CHECK_EQ(e.stats().wraps, 2);
+    (void)y2;
+}
+
+CW_TEST(corner_turn_from_one_edge_to_another_still_wraps)
+{
+    // Turning a corner is a real second arrival: the pointer left the right edge
+    // (perpendicular distance grew) and reached the top edge.
+    WrapEngine e;
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    e.onMouseMove({ 1800, 60 }, false, false);
+    const auto [x1, y1] = e.onMouseMove({ 1919, 40 }, false, false);
+    CW_CHECK_EQ(x1, 1); // wrapped off the right edge
+    CW_CHECK_EQ(e.stats().wraps, 1);
+    (void)y1;
+    // Away from the right edge, then up into the top edge: a new arrival.
+    e.onMouseMove({ 900, 40 }, false, false);
+    const auto [x2, y2] = e.onMouseMove({ 900, 0 }, false, false);
+    CW_CHECK_EQ(y2, 1078); // top edge wraps to the bottom
+    CW_CHECK_EQ(e.stats().wraps, 2);
+    (void)x2;
+}
+
+// --- the acceleration condition -------------------------------------------
+
+namespace {
+// Build a stroke whose per-step distance GROWS (accelerating, +) or SHRINKS
+// (braking, -). `steps` events, `dtUs` apart.
+void driveAccel(WrapEngine& e, int64_t x0, int steps, int64_t step0, int64_t growth,
+                long long dtUs, long long& t)
+{
+    int64_t x = x0;
+    int64_t step = step0;
+    for (int i = 0; i < steps; ++i) {
+        x += step;
+        if (x > 1919)
+            x = 1919;
+        e.onMouseMove({ x, 540, t }, false, false);
+        t += dtUs;
+        step += growth;
+        if (step < 1)
+            step = 1;
+        if (x >= 1919)
+            break;
+    }
+}
+} // namespace
+
+CW_TEST(acceleration_off_means_speed_only)
+{
+    // Default: no acceleration condition, so a fast constant sweep wraps.
+    Settings s;
+    s.impactGate = true;
+    s.impactSpeedPps = 700;
+    s.impactBandPx = 400;
+    s.impactAccelPps2 = 0;
+    WrapEngine e(s);
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    // Constant speed, and the stroke must END exactly on the edge: a stroke
+    // that stops short never arrives and would prove nothing.
+    long long t = 1'000'000;
+    for (int64_t x = 1300; x < 1919; x += 60) {
+        e.onMouseMove({ x, 540, t }, false, false);
+        t += 40'000;
+    }
+    const auto [nx, ny] = e.onMouseMove({ 1919, 540, t }, false, false);
+    (void)ny;
+    CW_CHECK_EQ(nx, 1);
+    CW_CHECK_EQ(e.stats().wraps, 1);
+}
+
+CW_TEST(acceleration_floor_refuses_a_constant_speed_sweep)
+{
+    // Fast (measured ~1500 px/s) but not speeding up: the acceleration floor
+    // must refuse it even though the speed floor passes.
+    Settings s;
+    s.impactGate = true;
+    s.impactSpeedPps = 700;
+    s.impactBandPx = 400;
+    s.impactAccelPps2 = 1000;
+    WrapEngine e(s);
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    long long t = 1'000'000;
+    for (int64_t x = 1300; x < 1919; x += 60) {
+        e.onMouseMove({ x, 540, t }, false, false);
+        t += 40'000;
+    }
+    const auto [nx, ny] = e.onMouseMove({ 1919, 540, t }, false, false);
+    (void)ny;
+    CW_CHECK_EQ(nx, 1919); // refused
+    CW_CHECK_EQ(e.stats().wraps, 0);
+    CW_CHECK_EQ(e.stats().skipped[static_cast<int>(SkipReason::ImpactGate)], 1);
+    CW_CHECK(e.lastVerdict().accelMeasured);
+    CW_CHECK(e.lastVerdict().measuredAccelPps2 < 1000);
+    CW_CHECK(e.lastVerdict().accelBlocked);
+}
+
+CW_TEST(acceleration_floor_accepts_a_genuinely_accelerating_flick)
+{
+    Settings s;
+    s.impactGate = true;
+    s.impactSpeedPps = 700;
+    s.impactBandPx = 400;
+    s.impactAccelPps2 = 1000;
+    WrapEngine e(s);
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    long long t = 1'000'000;
+    driveAccel(e, 1500, 16, 12, 3, 40'000, t);
+    CW_CHECK_EQ(e.stats().wraps, 1);
+    CW_CHECK(e.lastVerdict().measuredAccelPps2 >= 1000);
+    CW_CHECK(!e.lastVerdict().accelBlocked);
+}
+
+CW_TEST(acceleration_floor_refuses_braking_into_the_edge)
+{
+    // Fast far out, decelerating on arrival: negative acceleration.
+    Settings s;
+    s.impactGate = true;
+    s.impactSpeedPps = 700;
+    s.impactBandPx = 400;
+    s.impactAccelPps2 = 1000;
+    WrapEngine e(s);
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    long long t = 1'000'000;
+    // Shrinking steps: 60, 50, 40, ... px per 40 ms event.
+    int64_t x = 1300;
+    int64_t step = 60;
+    while (x < 1919 && step > 0) {
+        x += step;
+        if (x > 1919)
+            x = 1919;
+        e.onMouseMove({ x, 540, t }, false, false);
+        t += 40'000;
+        step -= 5;
+    }
+    CW_CHECK_EQ(e.stats().wraps, 0);
+    CW_CHECK(e.lastVerdict().measuredAccelPps2 <= 0);
+}
+
+CW_TEST(acceleration_setting_clamps_and_zero_is_off)
+{
+    RawSettings raw;
+    raw.impactAccelPps2 = 0;
+    raw.hasImpactAccel = true;
+    Settings s;
+    applySettings(raw, s, false);
+    CW_CHECK_EQ(s.impactAccelPps2, 0); // 0 survives: it means "off"
+
+    raw.impactAccelPps2 = 50; // below the noise floor
+    applySettings(raw, s, false);
+    CW_CHECK_EQ(s.impactAccelPps2, 200);
+
+    // Out of range is rejected, not clamped: applySettings keeps the default
+    // (a wrong settings file must never break the plugin, and a bogus huge
+    // value must not silently become a usable one).
+    raw.impactAccelPps2 = 9999999;
+    Settings fresh;
+    applySettings(raw, fresh, false);
+    CW_CHECK_EQ(fresh.impactAccelPps2, Settings{}.impactAccelPps2);
+}

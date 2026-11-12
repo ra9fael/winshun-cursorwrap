@@ -281,6 +281,24 @@ defect this release fixes. The band is a user-facing setting for precisely this
 case: with a coarse polling rate, widen it (measured live: band 100 → `0 px/s`,
 band 250 → `3587 px/s`, band 500 → `7266 px/s`).
 
+An extra condition, optional: **forward acceleration**. With
+`impactAccelPps2 > 0` the hand must also be **speeding up** into the edge, not
+merely fast:
+
+- Measured by splitting the speed window in half in TIME and comparing the two
+  halves' speeds (`px/s²`). Positive = speeding up, negative = braking. A
+  per-event derivative is pure noise at 1000 Hz; a two-point slope is the only
+  honest way.
+- Acceleration needs a **longer** window than speed to mean anything, so it
+  widens separately within the same band until each half carries real travel.
+  The **reported speed still comes from the shortest window**, so a decelerating
+  arrival cannot be averaged back in.
+- `0` = off. A constant sweep (`accel=0`) is refused, a hand already braking
+  there (negative) is refused, and only a genuine accelerating flick wraps.
+- When the acceleration cannot be measured (window too short, coarse report
+  rate) the **speed condition alone decides** — refusing there would disable the
+  gate for a 60 Hz mouse.
+
 Design choices:
 
 - **The speed at arrival, not the average over the flight.** This is exactly what

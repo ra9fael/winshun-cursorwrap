@@ -9,6 +9,53 @@ single source of truth; release tags are `v<version>`.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-13
+
+### Added
+
+- **The impact gate gained a forward-acceleration condition (`impactAccelPps2`,
+  settable)**: the user asked for "wrapping should require positive acceleration
+  above a value, not merely a speed". When on, the hand must be **speeding up
+  into the edge** — a constant-speed sweep never wraps however fast, and neither
+  does a hand that has already slowed down at the edge. `0` = off (the old
+  speed-only behaviour). Search bar `accel` submenu, a row in the settings list,
+  the impact submenu and the tuner submenu, and a new `plugin.json` entry
+  (default 0). Measurement: split the speed window in half in TIME and compare
+  the two halves' speeds (`px/s²`). Acceleration needs a longer window than speed
+  to mean anything, so it widens separately within the same band until both
+  halves carry travel — while the REPORTED speed still comes from the shortest
+  window, so a decelerating arrival cannot be averaged back in. Measured
+  magnitudes: constant speed `accel=0`, a real accelerating flick `accel=7500`,
+  braking into the edge negative.
+- **The readout and diagnostics show the acceleration**: with the acceleration
+  floor on, the tuning overlay's speed readout gains a line
+  `accel <measured> / <gate> px/s²` (negative means braking), `diag` gains
+  `impact acceleration`, and the data window's decision log distinguishes the
+  refusal reason.
+- **New `tests/scenarios/acceleration.txt` and `gate-off-churn.txt`**: the first
+  covers "acceleration off → a fast flick wraps / acceleration on → a constant
+  sweep does not / acceleration on → a real accelerating flick does / braking into
+  the edge does not"; the second covers "with impact mode off, sweeping across an
+  edge must not trigger repeatedly".
+
+### Fixed
+
+- **With impact mode off, working near an edge triggered repeated wraps** (the
+  user: "I do not want frequent wrapping at the edge"). The anti-oscillation
+  guard only asked "is the pointer far enough from the landing point": holding at
+  `x=1919` wraps to `x=1`, which is 1918 px away and far outside the 50 px radius,
+  so **every single event wrapped again**. Sliding parallel to an edge had the
+  same problem — every sample is "on an outer edge" but none of them is a new
+  arrival. A wrap now remembers WHICH edge it happened at, and the pointer must
+  leave that edge (perpendicular distance beyond the edge threshold) before
+  another arrival counts; moving away re-arms it, so it never latches.
+  Measured: 20 events held at the edge and a 60-sample slide along the bottom edge
+  both wrap 0 times (beyond the first arrival), while leaving and returning wraps
+  normally.
+- `engine_direction_feeds_edge_priority` used to rely on the old "every arrival
+  at an edge wraps" behaviour; it now approaches the corner from outside the edge,
+  which is what the test always meant.
+
 ## [0.3.0] - 2026-11-13
 
 ### Added
