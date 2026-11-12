@@ -410,7 +410,7 @@ RDP 会话对本插件的影响有三点，且都不是"不支持"：
 
 ### 已实测
 
-- 单元测试 `cw_tests`：102 个用例 + 7 个布局 fixture 文件全绿（`ctest` 1/1 通过）。
+- 单元测试 `cw_tests`：102 个用例 + 6 个布局 fixture 文件全绿（`ctest` 1/1 通过）。
 - 协议往返 `tests/protocol_roundtrip.py`：103 项检查全通过（initialize → query →
   action ×4 → settingsChanged ×2 → cancel → shutdown），进程退出码 0。
 - 构建：MinGW-w64 GCC 13.2 / CMake 3.29 / Ninja Release，`cursorwrap.exe` 静态链接

@@ -189,7 +189,7 @@ PowerToys 的 `CursorWrapCore` 与设置由宿主主线程读写、钩子线程�
 
 1. 撞击模式（速度门槛 + fail closed）——PowerToys 无
 2. 搜索栏设置 + 数据目录覆盖层——PowerToys 依赖自己的设置管道
-3. 纯核心可无屏单测（80 用例 + 7 布局 fixture）——PowerToys 的测试靠
+3. 纯核心可无屏单测（纯逻辑用例 + 6 个合成布局 fixture，无需显示器）——PowerToys 的测试靠
    Python 复刻算法 + 真机布局采集，C++ 核心本身没有单测
 4. 真机手势证据链（`live_wrap_probe.py`：真实钩子 + 真实 `SetCursorPos` +
    落点回读 + injected 标志检查）——PowerToys 仓库没有等价自动化

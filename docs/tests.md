@@ -17,7 +17,7 @@
 | 打包物含 `plugin.json` / `cursorwrap.exe` / `README.md` / `LICENSE`，无 `build/`、`dist/`、`.git` | §8 | `tools/package.py` + `tools/ci_release.py` |
 | 双语文档锚点互链（`docs/spec*.md`、`docs/tests*.md`、README、CHANGELOG） | — | 通过 |
 
-## L1 — 纯逻辑单测（`cw_tests`，ctest 目标，125 用例 + 7 布局 fixture）
+## L1 — 纯逻辑单测（`cw_tests`，ctest 目标，125 用例 + 6 布局 fixture）
 
 不引 OS 头文件，任何平台可跑。运行：
 
@@ -192,7 +192,8 @@ python tests/protocol_roundtrip.py
 
 ## 验收标准
 
-- L1 全绿（当前 125 用例 + 7 fixture，含真机采集的 `live-single.json`）
+- L1 全绿（当前 125 用例 + 6 布局 fixture，全部是合成几何；`live-single.json` 只被
+  探针读取，不进 L1）
 - L3 全通过（当前 118/118）
 - L0 静态校验通过
 - L4 单屏与远程桌面单屏部分已实测通过；**多屏部分全部勾选后**才可宣布多屏可发布，

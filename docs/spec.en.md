@@ -483,7 +483,7 @@ names or user text).
 
 ### Measured
 
-- Unit tests `cw_tests`: 102 cases plus 7 layout fixture files, all green
+- Unit tests `cw_tests`: 102 cases plus 6 layout fixture files, all green
   (`ctest` 1/1 passed).
 - Protocol round trip `tests/protocol_roundtrip.py`: 103 checks passed
   (initialize → query → action ×4 → settingsChanged ×2 → cancel → shutdown), exit

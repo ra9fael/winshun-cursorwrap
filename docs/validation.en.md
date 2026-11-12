@@ -29,7 +29,7 @@ New repository `ra9fael.cursorwrap`, v0.1.0:
 | `src/monitor_watcher.{h,cpp}` | message-only window, 500 ms debounced topology rebuild |
 | `src/main.cpp` | derives `winshun::Plugin`; the `cursorwrap` keyword plus three actions |
 | `plugin.json` | resident / eager / `ui` permission / 7 settings |
-| `tests/` | 102 unit cases, 7 layout fixtures (6 synthetic + 1 captured), 103-check protocol round trip, L0 static validation |
+| `tests/` | 102 unit cases, 6 layout fixtures (5 synthetic + 1 captured), 103-check protocol round trip, L0 static validation |
 | `docs/` | bilingual spec and test plan, including the not-tested list |
 
 ## Measured
@@ -351,7 +351,7 @@ have no real-machine wrap confirmation.
 
 | Item | Result |
 |---|---|
-| `cw_tests` | **125 cases + 7 fixtures green** (14 new in v0.2.0; 5 further `rdp_*` cases plus 4 clock-overflow cases in v0.2.1) |
+| `cw_tests` | **125 cases + 6 布局 fixtures green** (14 new in v0.2.0; 5 further `rdp_*` cases plus 4 clock-overflow cases in v0.2.1) |
 | `protocol_roundtrip.py` | **118/118 checks passed**, exit code 0 (15 new: the twelve manifest settings key by key, the `data` submenu, the settings list agreeing with the submenu, the `window` alias, diagnostics carrying the skip split and hook health) |
 | `tests/validate.py` | static validation passed (including the new `[0.2.0]` CHANGELOG heading matching `plugin.json`) |
 | The user's real configuration | dual displays `[-2560,0..0,1440] + [0,0..2560,1440]`, `wrapMode=horizontal`, `guard=100`, `tol=10`: with the gate off both directions land correctly (`x=-2559` / `x=2558`); inner edges never wrap; a 5000 px/s hit wraps with the gate on; a slow drift is refused by **only** `impact-gate` (every other reason counts 0) |

@@ -16,7 +16,7 @@ original: [tests.md](tests.md).
 | Package contains `plugin.json` / `cursorwrap.exe` / `README.md` / `LICENSE`, no `build/`, `dist/`, `.git` | §8 | `tools/package.py` + `tools/ci_release.py` |
 | Bilingual anchors cross-link (`docs/spec*.md`, `docs/tests*.md`, README, CHANGELOG) | — | pass |
 
-## L1 — Pure logic unit tests (`cw_tests`, ctest target, 125 cases + 7 layout fixtures)
+## L1 — Pure logic unit tests (`cw_tests`, ctest target, 125 cases + 6 layout fixtures)
 
 No OS headers: runs anywhere. Commands:
 
@@ -201,8 +201,8 @@ coordinates.
 
 ## Acceptance criteria
 
-- L1 green (currently 125 cases + 7 fixtures, including the captured
-  `live-single.json`)
+- L1 green (currently 125 cases + 6 fixtures, all synthetic geometry;
+  `live-single.json` is read by the probe only, not by L1)
 - L3 fully passing (currently 118/118)
 - L0 static validation passing
 - The single-display (including Remote Desktop) part of L4 has been measured and
