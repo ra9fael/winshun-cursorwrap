@@ -17,3 +17,6 @@ __pycache__/
 .vs/
 .vscode/
 .idea/
+
+# Dev shell: the marker the caller drops to let it exit
+*.txt.done
