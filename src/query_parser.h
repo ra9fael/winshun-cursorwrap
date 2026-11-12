@@ -14,14 +14,23 @@
 //   mode | 模式                 -> MenuMode (submenu) when no value follows
 //   mode both|vertical|horizontal | 模式 双向|上下|左右 -> Set wrapMode
 //   ctrl | shift | always | 按住ctrl | 按住shift | 总是 -> Set activation
+//   activation | 激活           -> MenuActivation (submenu) when no value follows
 //   guard | 防震                -> MenuGuard (submenu) when no value follows
 //   guard <n> | 防震 <n>        -> Set wrapGuardPx
 //   edge | 边缘                 -> MenuEdge (submenu) when no value follows
 //   edge <n> | 边缘 <n>         -> Set edgeThresholdPx
 //   tol | 容差                  -> MenuTolerance (submenu) when no value follows
 //   tol <n> | 容差 <n>          -> Set adjacencyTolerancePx
+//   drag | 拖拽                 -> MenuDrag (submenu) when no value follows
+//   drag on|off | 拖拽 开|关    -> Set disableDuringDrag
+//   single | 单屏               -> MenuSingle (submenu) when no value follows
+//   single on|off | 单屏 开|关  -> Set disableOnSingleMonitor
+//   tune | tuner | 调参 | 可视化 -> MenuTuner (the overlay's own submenu)
+//   tune on|off | 调参 开|关    -> Set overlayOn (turn the overlay on or off)
+//   trace | 轨迹                -> Copy the arrival trace as CSV (CopyTrace)
+//   clear | 清除轨迹            -> Drop the recorded arrivals (ClearTrace)
+//   best | 最优                 -> MenuBest (the suggested gate, and apply it)
 //   diag | 诊断                 -> Copy diagnostics (CopyDiagnostics)
-//   tune | 调参                 -> Toggle the tuning overlay (ToggleTuner)
 //   reset | 恢复默认            -> ResetToDefaults
 //   anything else               -> Unknown (an error row suggests the words)
 #pragma once
@@ -43,6 +52,10 @@ enum class CommandKind {
     MenuGuard,      // guard submenu
     MenuEdge,       // edge submenu
     MenuTolerance,  // tolerance submenu
+    MenuDrag,       // "no wrap while dragging" submenu
+    MenuSingle,     // "disable on a single monitor" submenu
+    MenuTuner,      // tuning-overlay submenu
+    MenuBest,       // the suggested gate: show it, apply it, explain it
     ToggleImpact,
     SetImpact,      // value: 0 = off, 1 = on
     SetImpactSpeed, // value: px/s
@@ -53,8 +66,13 @@ enum class CommandKind {
     SetGuard,       // value: px
     SetEdge,        // value: px
     SetTolerance,   // value: px
+    SetDrag,        // value: 0 = wrap while dragging, 1 = do not
+    SetSingle,      // value: 0 = wrap on one monitor, 1 = do not
+    SetOverlay,     // value: 0 = overlay off, 1 = overlay on
     CopyDiagnostics,
-    ToggleTuner,
+    CopyTrace,   // copy the recorded arrivals as CSV
+    ClearTrace,  // drop the recorded arrivals
+    ToggleTuner, // kept for compatibility: same as SetOverlay with the inverse
     ResetToDefaults,
     Unknown,
 };

@@ -395,3 +395,83 @@ CW_TEST(impact_band_boundary_value_settings)
     applySettings(raw, s, true);
     CW_CHECK_EQ(s.impactBandPx, 150);
 }
+
+// --- regression: the clamped tail at an edge -------------------------------
+//
+// Windows clamps the pointer to the desktop, so once the hand reaches an edge
+// every further event repeats the same coordinate. Those repeats are the
+// wall, not deceleration, and averaging them in made a genuine 2000 px/s hit
+// measure 1986, 1787, 1625 ... 0 while the hand kept pushing — the bug that
+// made wrapping "completely stop working" on the real machine.
+
+CW_TEST(impact_clamped_tail_keeps_the_measured_speed)
+{
+    WrapEngine e(gateOn(2000, 150));
+    e.rebuild({ box(0, 0, 2560, 1440, true) });
+    long long t = 1'000'000;
+    // 16 px every 8 ms = 2000 px/s, exactly at the gate, up to the edge.
+    for (int i = 0; i < 40; ++i) {
+        const int x = 2400 + i * 16 > 2559 ? 2559 : 2400 + i * 16;
+        const auto [nx, ny] = e.onMouseMove({ x, 720, t }, false, false);
+        if (x == 2559) {
+            CW_CHECK_EQ(nx, 1); // wrapped on arrival to the same monitor's left edge
+            CW_CHECK_EQ(e.stats().wraps, 1);
+            return;
+        }
+        CW_CHECK_EQ(nx, x); // no wrap yet
+        t += 8000;
+    }
+    CW_CHECK(false && "the cursor never reached the edge");
+}
+
+CW_TEST(impact_clamped_tail_does_not_dilute_a_marginal_hit)
+{
+    // 2100 px/s: just over a 2000 px/s gate. Twelve repeats at the edge must
+    // not drag it under the gate.
+    WrapEngine e(gateOn(2000, 150));
+    e.rebuild({ box(0, 0, 2560, 1440, true) });
+    long long t = 1'000'000;
+    int64_t x = 2400;
+    int wraps = 0;
+    for (int i = 0; i < 60 && !wraps; ++i) {
+        const auto [nx, ny] = e.onMouseMove({ x, 720, t }, false, false);
+        if (nx != x)
+            ++wraps;
+        t += 8000;
+        x = x + 17 > 2559 ? 2559 : x + 17;
+    }
+    CW_CHECK_EQ(wraps, 1);
+}
+
+CW_TEST(impact_still_fails_closed_when_only_repeats_exist)
+{
+    // Standing still at the edge produces nothing but repeats: no measurable
+    // stroke means no wrap, which is the point of the gate.
+    WrapEngine e(gateOn(2000, 150));
+    e.rebuild({ box(0, 0, 2560, 1440, true) });
+    long long t = 1'000'000;
+    for (int i = 0; i < 40; ++i) {
+        const auto [nx, ny] = e.onMouseMove({ 2559, 720, t }, false, false);
+        CW_CHECK_EQ(nx, 2559);
+        t += 8000;
+    }
+    CW_CHECK_EQ(e.stats().wraps, 0);
+}
+
+CW_TEST(impact_clamped_tail_error_readout_is_the_stroke_speed)
+{
+    // The verdict the overlay shows must be the stroke speed, not a value
+    // diluted by the clamped samples: 24 px in 8 ms is 3000 px/s.
+    WrapEngine e(gateOn(2000, 200));
+    e.rebuild({ box(0, 0, 2560, 1440, true) });
+    long long t = 1'000'000;
+    e.onMouseMove({ 2530, 720, t }, false, false);
+    t += 8000;
+    e.onMouseMove({ 2554, 720, t }, false, false);
+    t += 8000;
+    e.onMouseMove({ 2559, 720, t }, false, false); // the hit
+    const EdgeVerdict v = e.lastVerdict();
+    CW_CHECK(v.gateOff == false);
+    CW_CHECK(v.wrapped || v.measuredPps >= 3000);
+    CW_CHECK(v.measuredPps >= 3000);
+}

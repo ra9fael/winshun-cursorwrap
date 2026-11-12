@@ -221,6 +221,7 @@ protected:
 
     Items query(const Query& q) override
     {
+        const bool chinese = winshun::Plugin::chinese();
         // Some host builds expose only the full raw query. In keyword mode,
         // remove the matched alias before parsing the command tail.
         std::string input = q.text;
@@ -268,6 +269,25 @@ protected:
             return edgeMenu();
         case cw::CommandKind::MenuTolerance:
             return toleranceMenu();
+        case cw::CommandKind::MenuDrag:
+            return boolMenu("cursorwrap.row.drag", chinese ? "拖拽时不回绕" : "No wrap while dragging",
+                            chinese ? "按住左键拖动窗口时禁用回绕，防止把窗口甩到对角"
+                                    : "disables wrapping while the left button is held",
+                            m_settings.disableDuringDrag, "drag");
+        case cw::CommandKind::MenuSingle:
+            return boolMenu("cursorwrap.row.single",
+                            chinese ? "单屏时禁用" : "Disable on a single monitor",
+                            chinese ? "只接一块屏时也回绕到本屏对边；不想这样可打开此项"
+                                    : "on one display the cursor still wraps to the same display's opposite edge",
+                            m_settings.disableOnSingleMonitor, "single");
+        case cw::CommandKind::MenuTuner:
+            return tunerMenu();
+        case cw::CommandKind::MenuBest:
+            return bestMenu();
+        case cw::CommandKind::CopyTrace:
+            // Like the diagnostics row: the text rides in the copy field, and
+            // Enter runs the plugin action that flashes "copied".
+            return { traceRow() };
         default: {
             // A setting change: apply it, persist it, show the new state.
             applyCommand(cmd);
@@ -356,6 +376,20 @@ protected:
                 } else if (field == "tol") {
                     m_settings.adjacencyTolerancePx = static_cast<int>(value);
                     after = toleranceMenu();
+                } else if (field == "drag") {
+                    m_settings.disableDuringDrag = value != 0;
+                    after = boolMenu("cursorwrap.row.drag",
+                                     chinese ? "拖拽时不回绕" : "No wrap while dragging",
+                                     chinese ? "按住左键拖动窗口时禁用回绕，防止把窗口甩到对角"
+                                             : "disables wrapping while the left button is held",
+                                     m_settings.disableDuringDrag, "drag");
+                } else if (field == "single") {
+                    m_settings.disableOnSingleMonitor = value != 0;
+                    after = boolMenu("cursorwrap.row.single",
+                                     chinese ? "单屏时禁用" : "Disable on a single monitor",
+                                     chinese ? "只接一块屏时也回绕到本屏对边；不想这样可打开此项"
+                                             : "on one display the cursor still wraps to the same display's opposite edge",
+                                     m_settings.disableOnSingleMonitor, "single");
                 } else if (field == "mode") {
                     m_settings.wrapMode = static_cast<cw::WrapMode>(value);
                     after = modeMenu();
@@ -381,6 +415,9 @@ protected:
         if (a.action == "copyDiagnostics") {
             return { effect::copy(diagnosticsText()), effect::keep(),
                      effect::notify(chinese ? "诊断已复制" : "Diagnostics copied") };
+        }
+        if (a.action == "copyTrace") {
+            return { effect::copy(traceCsv()), effect::hide() };
         }
         if (a.action == "copyDiagRow") {
             // Enter on the diagnostics row (its copy field already carries
@@ -537,6 +574,23 @@ private:
         case cw::CommandKind::SetTolerance:
             m_settings.adjacencyTolerancePx = static_cast<int>(cmd.value);
             break;
+        case cw::CommandKind::SetDrag:
+            m_settings.disableDuringDrag = cmd.value != 0;
+            break;
+        case cw::CommandKind::SetSingle:
+            m_settings.disableOnSingleMonitor = cmd.value != 0;
+            break;
+        case cw::CommandKind::SetOverlay:
+            m_tunerOn = cmd.value != 0;
+            if (m_tunerOn && m_engine)
+                m_overlay.start(m_engine->monitorsSnapshot());
+            else
+                m_overlay.stop();
+            break;
+        case cw::CommandKind::ClearTrace:
+            if (m_engine)
+                m_engine->clearArrivals();
+            break;
         case cw::CommandKind::CopyDiagnostics:
             // The copy effect only runs on action responses, so this query
             // returns a diagnostics row: its copy field carries the text,
@@ -590,11 +644,11 @@ private:
         const bool chinese = winshun::Plugin::chinese();
         Item row("cursorwrap.unknown",
                  chinese ? "不认识的词：" + text : "Unknown words: " + text,
-                 chinese ? "试试：impact 撞击 · speed 速度 · band 区间 · mode 模式 · "
-                         "activation 激活 · guard 防震 · edge 边缘 · tol 容差 · "
-                         "diag 诊断 · reset 恢复"
-                         : "try: impact · speed · band · mode · activation · guard · "
-                           "edge · tol · diag · reset");
+                 chinese ? "试试：best 最优 · trace 轨迹 · tuner 调参 · impact 撞击 · "
+                         "speed 速度 · band 区间 · mode 模式 · drag 拖拽 · single 单屏 · "
+                         "activation 激活 · guard 防震 · edge 边缘 · tol 容差 · diag 诊断"
+                         : "try: best · trace · tuner · impact · speed · band · mode · "
+                           "drag · single · activation · guard · edge · tol · diag");
         row.invalid();
         return row;
     }
@@ -772,13 +826,35 @@ private:
                                 chinese ? "Enter 选择容差" : "Enter to pick one",
                                 "cursorwrap tol "));
 
-        Item tuner("cursorwrap.row.tuner",
-                   std::string(chinese ? "调参可视化：" : "Tuning overlay: ")
-                       + (m_tunerOn ? (chinese ? "开" : "on") : (chinese ? "关" : "off")),
-                   chinese ? "Enter 切换 · 贴边显示测速区间/速度/防震圈"
-                           : "Enter to toggle · shows the band/speed/guard on the edges");
-        tuner.withActions({ {"toggleTuner", chinese ? "切换" : "Toggle", "Enter"} });
-        rows.push_back(std::move(tuner));
+        rows.push_back(drillRow("cursorwrap.row.drag",
+                                std::string(chinese ? "拖拽时不回绕：" : "No wrap while dragging: ")
+                                    + (m_settings.disableDuringDrag ? (chinese ? "开" : "on")
+                                                                    : (chinese ? "关" : "off")),
+                                chinese ? "Enter 选择开关" : "Enter to pick on or off",
+                                "cursorwrap drag "));
+
+        rows.push_back(drillRow("cursorwrap.row.single",
+                                std::string(chinese ? "单屏时禁用：" : "Disable on one monitor: ")
+                                    + (m_settings.disableOnSingleMonitor ? (chinese ? "开" : "on")
+                                                                         : (chinese ? "关" : "off")),
+                                chinese ? "Enter 选择开关" : "Enter to pick on or off",
+                                "cursorwrap single "));
+
+        rows.push_back(drillRow("cursorwrap.row.tuner",
+                                std::string(chinese ? "调参可视化：" : "Tuning overlay: ")
+                                    + (m_tunerOn ? (chinese ? "开" : "on") : (chinese ? "关" : "off")),
+                                chinese ? "Enter 打开子菜单（开关 / 区间 / 门槛 / 防震 / 阈值）"
+                                        : "Enter for the submenu (switch, band, gate, guard, threshold)",
+                                "cursorwrap tune "));
+
+        rows.push_back(drillRow("cursorwrap.row.best",
+                                std::string(chinese ? "建议门槛：" : "Suggested gate: ")
+                                    + bestSummary(chinese),
+                                chinese ? "Enter 看建议（由到达速度分布算出）"
+                                        : "Enter to see the suggestion (derived from the arrival speeds)",
+                                "cursorwrap best "));
+
+        rows.push_back(traceRow());
 
         rows.push_back(diagnosticsRow());
 
@@ -916,6 +992,157 @@ private:
             rows.push_back(valueRow("cursorwrap.tol", std::move(title), "tol", v,
                                     m_settings.adjacencyTolerancePx == v));
         }
+        return rows;
+    }
+
+    // A two-way row (on/off) for a boolean setting that has no dedicated
+    // action: Enter applies set:<field>:<0|1>.
+    Items boolMenu(const char* id, std::string title, std::string hint, bool current,
+                   const char* field)
+    {
+        const bool chinese = winshun::Plugin::chinese();
+        Items rows;
+        rows.push_back(backRow());
+        const std::pair<bool, std::string> choices[] = {
+            { true, chinese ? "开" : "on" },
+            { false, chinese ? "关" : "off" },
+        };
+        for (const auto& [value, label] : choices) {
+            Item row(id, label, current == value
+                                    ? std::string(chinese ? "当前" : "current")
+                                    : std::string(chinese ? "Enter 切换" : "Enter to switch"));
+            if (current != value)
+                row.withActions({ { "set:" + std::string(field) + ":" + intText(value ? 1 : 0),
+                                    chinese ? "切换" : "Switch", "Enter" } });
+            rows.push_back(std::move(row));
+        }
+        (void)title;
+        (void)hint;
+        return rows;
+    }
+
+    // The tuning overlay's own submenu: its switch plus the numbers the
+    // overlay draws, so the user can set what they are looking at without
+    // leaving the tuning screen.
+    Items tunerMenu()
+    {
+        const bool chinese = winshun::Plugin::chinese();
+        Items rows;
+        rows.push_back(backRow());
+
+        Item state("cursorwrap.tuner.state",
+                   std::string(chinese ? "调参可视化：" : "Tuning overlay: ")
+                       + (m_tunerOn ? (chinese ? "开" : "on") : (chinese ? "关" : "off")),
+                   chinese ? "Enter 开关 · 只在能回绕的外边缘画线和测速区间"
+                           : "Enter to toggle · draws the line and measuring band on outer edges only");
+        state.withActions({ {"toggleTuner", chinese ? "切换" : "Toggle", "Enter"} });
+        rows.push_back(std::move(state));
+
+        rows.push_back(drillRow("cursorwrap.tuner.band",
+                                std::string(chinese ? "测速区间：" : "Measuring band: ")
+                                    + intText(m_settings.impactBandPx) + " px",
+                                chinese ? "Enter 选择区间宽度（画出来的带宽一致）"
+                                        : "Enter to pick the band width (drawn at the same size)",
+                                "cursorwrap band "));
+        rows.push_back(drillRow("cursorwrap.tuner.speed",
+                                std::string(chinese ? "速度门槛：" : "Speed gate: ")
+                                    + intText(m_settings.impactSpeedPps) + " px/s",
+                                chinese ? "Enter 选择门槛值（读数里的分母）"
+                                        : "Enter to pick the gate (the readout's denominator)",
+                                "cursorwrap speed "));
+        rows.push_back(drillRow("cursorwrap.tuner.guard",
+                                std::string(chinese ? "防震半径：" : "Guard radius: ")
+                                    + intText(m_settings.wrapGuardPx) + " px",
+                                chinese ? "Enter 选择半径（回绕后这段时间不重复触发）"
+                                        : "Enter to pick the radius (no re-wrap inside it)",
+                                "cursorwrap guard "));
+        rows.push_back(drillRow("cursorwrap.tuner.edge",
+                                std::string(chinese ? "边缘阈值：" : "Edge threshold: ")
+                                    + intText(m_settings.edgeThresholdPx) + " px",
+                                chinese ? "Enter 选择阈值（离边缘多近开始判定）"
+                                        : "Enter to pick how close counts as on the edge",
+                                "cursorwrap edge "));
+        return rows;
+    }
+
+    // The `cursorwrap trace` row: the arrival trace as CSV rides in the copy
+    // field, Enter runs the copyTrace action for the flash.
+    Item traceRow()
+    {
+        const bool chinese = winshun::Plugin::chinese();
+        const size_t count = m_engine ? m_engine->arrivals().size() : 0;
+        Item row("cursorwrap.trace",
+                 chinese ? "光标回绕：到达轨迹" : "Cursor wrap: arrival trace",
+                 chinese ? "Enter 复制 CSV（" + intText(static_cast<long long>(count))
+                         + " 条）· 可离线扫出最优门槛"
+                         : "Press Enter to copy CSV (" + intText(static_cast<long long>(count))
+                               + " rows) · scan for the optimal gate offline");
+        row.withCopy(traceCsv());
+        row.withActions({ { "copyTrace", chinese ? "复制轨迹" : "Copy trace", "Enter" } });
+        return row;
+    }
+
+    std::string bestSummary(bool chinese) const
+    {
+        const std::vector<cw::Arrival> trace = m_engine ? m_engine->arrivals()
+                                                        : std::vector<cw::Arrival> {};
+        const long long suggested = cw::suggestGate(trace);
+        if (suggested <= 0)
+            return chinese ? "数据不足" : "not enough data";
+        return intText(suggested) + " px/s";
+    }
+
+    std::string traceCsv() const
+    {
+        std::string csv = "seq,t_us,monitor,edge,measured_pps,gate_pps,wrapped,gate_off\n";
+        if (!m_engine)
+            return csv;
+        for (const cw::Arrival& a : m_engine->arrivals()) {
+            const char* edge = a.edge == cw::EdgeType::Left    ? "left"
+                : a.edge == cw::EdgeType::Right                ? "right"
+                : a.edge == cw::EdgeType::Top                  ? "top"
+                                                               : "bottom";
+            csv += intText(a.seq) + "," + intText(a.tUs) + "," + intText(a.monitorIndex) + ","
+                + edge + "," + intText(a.measuredPps) + "," + intText(a.gatePps) + ","
+                + (a.wrapped ? "1" : "0") + "," + (a.gateOff ? "1" : "0") + "\n";
+        }
+        return csv;
+    }
+
+    // The `cursorwrap best` submenu: the gate the trace suggests. When the
+    // trace has no clear gap it says so instead of inventing a number.
+    Items bestMenu()
+    {
+        const bool chinese = winshun::Plugin::chinese();
+        Items rows;
+        rows.push_back(backRow());
+        const std::vector<cw::Arrival> trace = m_engine ? m_engine->arrivals() : std::vector<cw::Arrival> {};
+        const long long suggested = cw::suggestGate(trace);        if (suggested <= 0) {
+            Item row("cursorwrap.best.none",
+                     chinese ? "还没有足够数据" : "Not enough data yet",
+                     chinese ? "先甩几次边缘、再慢慢挪几次，然后回来看"
+                             : "push an edge a few times and drift to it a few times, then come back");
+            row.invalid();
+            rows.push_back(std::move(row));
+            return rows;
+        }
+        Item head("cursorwrap.best.value",
+                  std::string(chinese ? "建议门槛：" : "Suggested gate: ")
+                      + intText(suggested) + " px/s",
+                  std::string(chinese ? "当前 " : "current ") + intText(m_settings.impactSpeedPps)
+                      + std::string(chinese ? " px/s · 取自到达速度分布里的空档" : " px/s · the gap in the arrival-speed distribution"));
+        rows.push_back(std::move(head));
+        if (suggested != m_settings.impactSpeedPps) {
+            Item apply("cursorwrap.best.apply", chinese ? "采用这个门槛" : "Use this gate",
+                       chinese ? "Enter 写入并立即生效" : "Enter to apply immediately");
+            apply.withActions({ { "set:speed:" + intText(suggested),
+                                  chinese ? "采用" : "Apply", "Enter" } });
+            rows.push_back(std::move(apply));
+        }
+        rows.push_back(drillRow("cursorwrap.best.trace",
+                                chinese ? "查看数据" : "See the data",
+                                chinese ? "Enter 复制 CSV 离线分析" : "Enter to copy the CSV",
+                                "cursorwrap trace "));
         return rows;
     }
 

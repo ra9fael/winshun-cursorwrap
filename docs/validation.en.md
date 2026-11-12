@@ -29,7 +29,7 @@ New repository `ra9fael.cursorwrap`, v0.1.0:
 | `src/monitor_watcher.{h,cpp}` | message-only window, 500 ms debounced topology rebuild |
 | `src/main.cpp` | derives `winshun::Plugin`; the `cursorwrap` keyword plus three actions |
 | `plugin.json` | resident / eager / `ui` permission / 7 settings |
-| `tests/` | 86 unit cases, 7 layout fixtures (6 synthetic + 1 captured), 63-check protocol round trip, L0 static validation |
+| `tests/` | 102 unit cases, 7 layout fixtures (6 synthetic + 1 captured), 103-check protocol round trip, L0 static validation |
 | `docs/` | bilingual spec and test plan, including the not-tested list |
 
 ## Measured
@@ -56,7 +56,7 @@ $ .\build\cw_tests.exe .\tests\layouts
 all tests passed (0 failures)
 ```
 
-All 86 cases are green, covering single display, two side by side, two stacked,
+All 102 cases are green, covering single display, two side by side, two stacked,
 L-shape with three displays, non-overlap projection, three in a row, mixed DPI,
 negative coordinates, extreme coordinates, zero-area displays, adjacency tolerance,
 gap diagnostics, all three modes, all three activation modes, drag suppression,
@@ -71,7 +71,7 @@ boundary values 500/20000 are accepted while 499/20001 fall back).
 ```
 $ python tests/protocol_roundtrip.py
 ...
-all 63 protocol checks passed
+all 103 protocol checks passed
 ```
 
 Covers `initialize → query(empty/with text) → action(cycleMode×3 / toggleEnabled /
@@ -193,6 +193,34 @@ as well. Note for future runs: the first probe run saw `observed_moves: 0` every
 because a `settingsChanged` notification is only delivered when the probe pumps
 messages — one `pump(50)` after the notification fixed it; the probe now does this
 and the pitfall is documented here.
+
+### Tuning overlay on real hardware (L4, two displays, 2026-11-12)
+
+Window enumeration and screenshots from a probe that runs the real `Overlay` class
+directly rather than through the host; **the mouse was not moved**:
+
+| Check | Result |
+|---|---|
+| Window count = outer-edge count | two 2560×1440 displays → **6** visible `WinShunCursorWrapTuner` windows |
+| Outer edges only | window rects: `[-2560,0..0,150]`, `[-2560,1290..0,1440]`, `[-2560,0..-2410,1440]`, `[0,0..2560,150]`, `[0,1290..2560,1440]`, `[2410,0..2560,1440]` — **no window on the inner seam at x=0 / x=2560**, none in the middle |
+| Per-pixel alpha works | the screenshots show a crisp 2px line with a translucent strip inside it and the desktop visible through — not an opaque sheet |
+| Flat memory | working set 24,076 KB, still 24,076 KB after 6 s of continuous drawing (the old per-frame 4K DIB crashed) |
+| Clean stop | 0 windows after `stop()` |
+| Trace histogram | after injecting 28 arrivals (14 slow ≈600 px/s, 14 fast ≈5000 px/s) the panel draws two humps with `gate 2000` and `best 2800` in the gap between them, header `28 hits · 14 wrap` |
+| Taskbar does not cut it | placed inside `rcWork`, fully visible |
+
+**This proves the overlay is no longer a screen-covering sheet**: nothing is drawn in
+the middle of a monitor, only narrow strips along the outer edges.
+
+### The speed-dilution defect (reproduced on hardware, then fixed)
+
+The reported symptom was "impact mode stopped working entirely". Reproducing with
+real 125 Hz timing showed why: once the hand reaches the edge Windows clamps the
+pointer, and those repeated coordinates were averaged into the measured speed — a
+real 2000 px/s push measured 1986 → 1787 → 1625 → … → 0 after arrival, so nothing ever
+passed a 2000 px/s gate. After the fix (strip the clamped tail; measure the last step
+to the last **free** sample) the same 2100 px/s case passes consistently, while
+resting at the edge still fails closed. Four regression tests cover it.
 
 ### Cleanup
 

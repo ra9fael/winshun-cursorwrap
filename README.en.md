@@ -35,6 +35,11 @@ setting, where Enter is that row's main action, so there are no chords to rememb
 | `Wrap guard: <n> px` | drill down to the radius submenu |
 | `Edge threshold: <n> px` | drill down to the threshold submenu |
 | `Adjacency tolerance: <n> px` | drill down to the tolerance submenu |
+| `No wrap while dragging: on/off` | drill down to the on/off submenu |
+| `Disable on one monitor: on/off` | drill down to the on/off submenu |
+| `Tuning overlay: on/off` | drill down to the tuning submenu |
+| `Suggested gate: <n>/not enough data` | drill down to the suggestion submenu |
+| `Cursor wrap: arrival trace` | copy the trace CSV |
 | `Cursor wrap: diagnostics` | copy the full diagnostics |
 | `Restore host settings` | clear the search-bar overrides |
 
@@ -51,6 +56,10 @@ row is one choice, and Enter applies it):
 | `cursorwrap guard` | back · 10/30/50/80/120/200 px |
 | `cursorwrap edge` | back · 1/2/5/10/20 px |
 | `cursorwrap tol` | back · 10/30/50/80/120/200 px |
+| `cursorwrap drag` | back · on · off |
+| `cursorwrap single` | back · on · off |
+| `cursorwrap tune` | back · switch · band · gate · guard · threshold |
+| `cursorwrap best` | back · suggested gate · apply · see the data |
 
 **With a number, set directly** (skips the submenu):
 
@@ -64,9 +73,14 @@ row is one choice, and Enter applies it):
 | `cursorwrap guard 120` | the anti-oscillation radius (10–200 px) |
 | `cursorwrap edge 5` | the edge threshold (1–20 px) |
 | `cursorwrap tol 80` | the adjacency tolerance (10–200 px) |
+| `cursorwrap drag on` / `off` | whether dragging wraps |
+| `cursorwrap single on` / `off` | whether one display disables wrapping |
+| `cursorwrap tune on` / `off` | the tuning overlay |
+| `cursorwrap trace` | a trace row; Enter copies the CSV |
+| `cursorwrap best` | the suggestion: see / apply / inspect |
+| `cursorwrap clear` | drop the recorded arrivals |
 | `cursorwrap reset` | clear the search-bar overrides; the host card applies again |
 | `cursorwrap diag` | a diagnostics row; Enter copies the full text |
-| `cursorwrap tune` | toggle the tuning overlay |
 
 Changes **apply immediately** and persist in the plugin's data directory
 (`settings.json`, only keys that differ from the defaults); the host's settings card
@@ -75,27 +89,61 @@ are active.
 
 ## Tuning overlay
 
-Impact parameters are hard to set by feel — `cursorwrap tune` draws a
-**click-through overlay** along every monitor's edges so you can watch while you
-push:
+Impact parameters are hard to set by feel — `cursorwrap tune` opens the tuning
+submenu (switch plus band / gate / guard / threshold), and `tune on` / `tune off`
+flips it directly. When on, **only outer edges are drawn; the middle of a monitor
+is untouched**:
 
-- **Measuring band**: a translucent `impactBandPx`-wide strip along each edge —
-  the band's size at a glance;
-- **Speed readout**: on arrival, the edge centre shows `measured/threshold`
-  (e.g. `21/20` for 2100/2000 px/s), `wrap` (passed) or `edge` (gate off) —
-  set `speed` straight from what your flicks actually measure;
-- **Guard circle**: a circle of `wrapGuardPx` radius around the last landing
-  point — leave the circle before another wrap can fire;
-- **State colour**: green = wrapped; amber = gate blocked; white = arrival with
-  the gate off.
+- **Outer edge line**: a 2px accent line on every edge that can actually wrap —
+  inner edges (two monitors touching) draw nothing, since nothing wraps there;
+- **Measuring band**: a **translucent** `impactBandPx`-wide strip inside that
+  line, so the band's size is visible at a glance;
+- **Speed readout**: on arrival, a small panel by that edge shows
+  `measured / gate px/s` with a state-coloured border — green wrapped, amber
+  blocked, grey gate off. Set `speed` straight from what your flicks measure;
+- **Arrival trace**: a histogram panel at the primary monitor's bottom-right
+  (next section).
 
-The overlay never takes focus and has no Alt+Tab entry; colours follow the host
-theme. Run `tune` again to turn it off; the toggle does not persist across
-restarts.
+The overlay is click-through, never takes focus and has no Alt+Tab entry; colours
+follow the host theme, and panels sit inside `rcWork` so the taskbar cannot cut
+them. The toggle does not persist across restarts.
 
-**A smoothness fix that came with this**: the wrap landing moved from "on the
-destination edge line" to **one pixel inside** — a landing inside the detection
-band made the guard eat an immediate re-trigger.
+## Arrival trace: finding the optimal gate
+
+A live readout alone can never tell you the optimal value — it answers one
+question at a time. The real question is a distribution one: **where do the
+speeds of intentional pushes separate from the speeds of walking past the edge?**
+
+So the plugin records one row per arrival at an outer edge (up to 512 rows):
+
+```
+seq,t_us,monitor,edge,measured_pps,gate_pps,wrapped,gate_off
+```
+
+Two things matter:
+
+1. **Blocked arrivals are recorded too** — recording only accepted hits leaves
+   the slow cluster out, the histogram has one hump, and no suggestion is
+   possible;
+2. **One row per arrival** — a hand resting at the edge makes Windows clamp the
+   pointer, producing hundreds of identical samples that all belong to one
+   arrival.
+
+The tuner's histogram draws exactly those rows on a log axis (500…20000 px/s):
+the accent line is the **current gate**, the green line is the **suggested gate**.
+
+`cursorwrap best` puts the gate in the **widest gap** between arrival speeds; when
+there is no gap worth the name (one cluster only) it says "not enough data"
+instead of inventing a number. "Use this gate" applies it immediately.
+
+`cursorwrap trace` copies the CSV so the suggestion can be checked offline;
+`cursorwrap clear` empties the trace.
+
+**Two fixes that came with this**: the wrap landing moved from "on the destination
+edge line" to **one pixel inside** (a landing inside the detection band made the
+guard eat an immediate re-trigger), and the measured speed no longer averages in
+the clamped samples at the edge — pushing against the edge used to dilute a real
+2000 px/s hit down to 0, which is why wrapping appeared to stop working entirely.
 
 ## Settings
 
@@ -186,8 +234,8 @@ MinGW. MSVC builds use the static runtime (`/MT`) and likewise ship no external 
 ## Tests
 
 ```powershell
-ctest --test-dir build --output-on-failure       # L1: 86 cases + 7 layout fixtures
-python tests/protocol_roundtrip.py               # L3: 63 protocol round-trip checks
+ctest --test-dir build --output-on-failure       # L1: 102 cases + 7 layout fixtures
+python tests/protocol_roundtrip.py               # L3: 103 protocol round-trip checks
 python tests/live_wrap_probe.py                  # L4 single display: real SetCursorPos gestures
 python tests/validate.py                         # L0: manifest / bilingual docs / packaging checks
 ```

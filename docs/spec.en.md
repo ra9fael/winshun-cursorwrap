@@ -27,21 +27,27 @@ Line-by-line comparison against the PowerToys original: [comparison.md](comparis
 
 Empty text returns a **multi-row settings list**, one row per setting, where Enter
 is that row's main action — so every setting has its own key, free of the host's
-three-keys-per-row limit:
+three-keys-per-row limit. **All ten manifest settings are reachable here**; the
+protocol test checks each one, so the two surfaces cannot drift apart silently:
 
-| Row | Title | Enter |
-|---|---|---|
-| 1 | `Cursor wrap: on/off` | turn wrapping on/off |
-| 2 | `Impact mode: on/off` | toggle impact mode |
-| 3 | `Impact speed: <n> px/s` | drill down to the speed submenu |
-| 4 | `Impact band: <n> px` | drill down to the band submenu |
-| 5 | `Wrap mode: <mode>` | cycle both → vertical → horizontal |
-| 6 | `Activation: <mode>` | drill down to the activation submenu |
-| 7 | `Wrap guard: <n> px` | drill down to the radius submenu |
-| 8 | `Edge threshold: <n> px` | drill down to the threshold submenu |
-| 9 | `Adjacency tolerance: <n> px` | drill down to the tolerance submenu |
-| 10 | `Cursor wrap: diagnostics` | copy the full diagnostics |
-| 11 | `Restore host settings` | clear the search-bar overrides |
+| Row | Title | Enter | Manifest setting |
+|---|---|---|---|
+| 1 | `Cursor wrap: on/off` | turn wrapping on/off | — (runtime switch) |
+| 2 | `Impact mode: on/off` | toggle impact mode | `impactGate` |
+| 3 | `Impact speed: <n> px/s` | drill down to the speed submenu | `impactSpeedPps` |
+| 4 | `Impact band: <n> px` | drill down to the band submenu | `impactBandPx` |
+| 5 | `Wrap mode: <mode>` | cycle both → vertical → horizontal | `wrapMode` |
+| 6 | `Activation: <mode>` | drill down to the activation submenu | `activationMode` |
+| 7 | `Wrap guard: <n> px` | drill down to the radius submenu | `wrapGuardPx` |
+| 8 | `Edge threshold: <n> px` | drill down to the threshold submenu | `edgeThresholdPx` |
+| 9 | `Adjacency tolerance: <n> px` | drill down to the tolerance submenu | `adjacencyTolerancePx` |
+| 10 | `No wrap while dragging: on/off` | drill down to the on/off submenu | `disableDuringDrag` |
+| 11 | `Disable on one monitor: on/off` | drill down to the on/off submenu | `disableOnSingleMonitor` |
+| 12 | `Tuning overlay: on/off` | drill down to the tuning submenu | — (runtime switch + parameter entry) |
+| 13 | `Suggested gate: <n>/not enough data` | drill down to the suggestion submenu | a `impactSpeedPps` suggestion from the trace |
+| 14 | `Cursor wrap: arrival trace` | copy the trace CSV | — |
+| 15 | `Cursor wrap: diagnostics` | copy the full diagnostics | — |
+| 16 | `Restore host settings` | clear the search-bar overrides | — |
 
 Status-row subtitle: `mode <mode> · activation <mode> · impact on/off [gate] ·
 N display(s)`; when the search bar has overridden settings, ` · search-bar
@@ -65,7 +71,10 @@ choice, and Enter applies it:
 | `guard` | back · 10/30/50/80/120/200 px |
 | `edge` | back · 1/2/5/10/20 px |
 | `tol` | back · 10/30/50/80/120/200 px |
-| `tune` | toggle the tuning overlay (see "Tuning overlay" below) |
+| `drag` | back · on · off (no wrap while dragging) |
+| `single` | back · on · off (disable on one monitor) |
+| `tune` | back · switch · band · gate · guard · edge threshold (see "Tuning overlay") |
+| `best` | back · suggested gate · apply · see the data (see "Arrival trace") |
 
 ### With a number: set directly (skip the submenu)
 
@@ -82,9 +91,14 @@ the new value marked "current":
 | `guard 120` | the anti-oscillation radius (10–200) |
 | `edge 5` | the edge threshold (1–20) |
 | `tol 80` | the adjacency tolerance (10–200) |
+| `drag on` / `drag off` | whether dragging wraps |
+| `single on` / `single off` | whether one display disables wrapping |
+| `tune on` / `tune off` | the tuning overlay (with no value it opens the submenu) |
+| `trace` | a trace row; Enter copies the CSV |
+| `best` | the suggestion submenu: see / apply / inspect |
+| `clear` | drop the recorded arrivals |
 | `reset` | clear the search-bar overrides; the host card applies again |
 | `diag` | a diagnostics row; Enter copies the full text |
-| `tune` | toggle the tuning overlay |
 | anything else | a `valid:false` hint row listing the words |
 
 **Persistence and precedence**: the host has no plugin→host settings channel (the
@@ -158,21 +172,71 @@ detection band would make the guard eat an immediate re-trigger.
 
 ### Tuning overlay
 
-Search-bar `tune` (or the "Tuning overlay" row in the settings list, Enter to
-toggle) draws one overlay per monitor along the edges, so the user can pick
-parameters by watching the real edge:
+Search-bar `tune` opens the tuning submenu (switch plus drill-downs for band,
+gate, guard and threshold); `tune on` / `tune off` flips it directly. When on:
+
+**Only outer edges are drawn; the middle of a monitor is untouched.** That took
+two rewrites to get right: the first version used colour-key transparency over
+whole monitors, so when the key failed the desktop turned into an opaque sheet
+(the teal panel in the reported screenshot) — and the middle never needed
+anything drawn on it anyway. What is drawn now:
 
 | Visualization | What is drawn |
 |---|---|
-| Measuring band | a translucent `impactBandPx`-wide strip along every edge (gate on) |
-| Speed readout | at the edge, `measured/threshold` (pps/100 shorthand), `wrap` (passed) or `edge` (gate off) |
-| Guard circle | a circle of `wrapGuardPx` radius around the last wrap's landing point |
-| State colour | green = wrapped; amber = gate blocked; white = arrival with the gate off |
+| Outer edge line | a 2px accent line (alpha 235) on every edge that can actually wrap |
+| Measuring band | a **translucent** strip (alpha 24), `impactBandPx` wide (min 8px), inside that line |
+| Inner edges | **nothing** — two monitors touching never wrap, so drawing them is noise |
+| Speed readout | on the last arrival, a small panel by that edge: `measured / gate px/s` with a state-coloured border (green wrapped, amber blocked, grey gate off) |
+| Arrival trace | a histogram panel at the primary monitor's bottom-right (next section) |
 
-The overlay is a layered window (click-through, never activates, no Alt+Tab
-entry) repainted every 30 ms from a verdict snapshot taken by the hook thread
-(the hook's hot path never paints). Colours follow the host theme's `accent` /
-`text`. The toggle is not persisted: the overlay starts off after a restart.
+Implementation notes:
+
+- **Per-pixel alpha is required** (translucent band + crisp line), so it uses
+  `UpdateLayeredWindow(ULW_ALPHA)` rather than `LWA_COLORKEY` (a colour key is
+  all-or-nothing per pixel).
+- **Each edge strip builds one DIB** — ~1.5 MB for a 150px band on a 4K panel.
+  The earlier version allocated a full `2560×1440` DIB per frame (~33 MB) and
+  blew the plugin's 64 MB job cap, which crashed it.
+- Static strips are rebuilt only when the topology or the band width changes;
+  the readout repaints only when the verdict or its numbers change.
+- Window styles `WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE |
+  WS_EX_TOOLWINDOW | WS_EX_TOPMOST` with `WM_NCHITTEST → HTTRANSPARENT` for
+  click-through; panels are placed inside `rcWork` so the taskbar cannot cut them.
+- Colours follow the host's `appearance` (`accent` / `text` / `background`).
+  The toggle is not persisted: the overlay starts off after a restart.
+
+### Arrival trace and the "optimal gate"
+
+A live readout alone can never tell you the optimal value — it answers one
+question at a time. The real question is a **distribution** one: where do the
+speeds from *intentional pushes* separate from the speeds of *walking past the
+edge*?
+
+The engine therefore records an **arrival trace** (`Arrival`): one row per
+arrival at an outer edge — `t_us / monitor / edge / measured_pps / gate_pps /
+wrapped / gate_off` — capped at 512 rows (`kTraceMax`). Three decisions matter:
+
+1. **Blocked arrivals are recorded too.** The first version only recorded
+   accepted hits, so the slow cluster was always missing, the histogram had one
+   hump, and no suggestion was possible. Recording happens *before* the gate
+   decides.
+2. **One row per arrival.** A hand resting at the edge makes Windows clamp the
+   pointer, producing hundreds of identical samples; they are one arrival
+   (deduplicated by `edge + monitor`).
+3. **One row answers every threshold**: `measured_pps` alone decides "would gate
+   X have wrapped this?", so 512 rows are enough to sweep 500…20000.
+
+`best` returns the suggestion (`suggestGate`, a pure function):
+
+- sort the measurable speeds, drop the outer 10% on each side as outliers, and
+  put the gate in the middle of the **widest relative gap** between consecutive
+  values;
+- a relative gap under 25% means one cluster only (no gap) → return 0 and say
+  "not enough data" in the UI; **never invent a number**;
+- clamp the result to 500–20000.
+
+`trace` copies the CSV (`seq,t_us,monitor,edge,measured_pps,gate_pps,wrapped,
+gate_off`) so the suggestion can be checked offline; `clear` empties the trace.
 
 Invalid values (wrong type, out of range, NaN/Inf) fall back to the manifest
 default. A bad settings file must never error out or produce out-of-range
@@ -276,9 +340,9 @@ names or user text).
 
 ### Measured
 
-- Unit tests `cw_tests`: 86 cases plus 7 layout fixture files, all green
+- Unit tests `cw_tests`: 102 cases plus 7 layout fixture files, all green
   (`ctest` 1/1 passed).
-- Protocol round trip `tests/protocol_roundtrip.py`: 63 checks passed
+- Protocol round trip `tests/protocol_roundtrip.py`: 103 checks passed
   (initialize → query → action ×4 → settingsChanged ×2 → cancel → shutdown), exit
   code 0.
 - Build: MinGW-w64 GCC 13.2 / CMake 3.29 / Ninja Release; `cursorwrap.exe` links

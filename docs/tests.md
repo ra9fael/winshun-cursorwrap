@@ -15,7 +15,7 @@
 | 打包物含 `plugin.json` / `cursorwrap.exe` / `README.md` / `LICENSE`，无 `build/`、`dist/`、`.git` | §8 | `tools/package.py` + `tools/ci_release.py` |
 | 双语文档锚点互链（`docs/spec*.md`、`docs/tests*.md`、README、CHANGELOG） | — | 通过 |
 
-## L1 — 纯逻辑单测（`cw_tests`，ctest 目标，86 用例 + 7 布局 fixture）
+## L1 — 纯逻辑单测（`cw_tests`，ctest 目标，102 用例 + 7 布局 fixture）
 
 不引 OS 头文件，任何平台可跑。运行：
 
@@ -51,6 +51,9 @@ ctest --test-dir build --output-on-failure
 | 撞击模式 | 关闭时行为不变；慢速漂移不回绕；快速撞击回绕；只看垂直分量（沿边滑动不触发）；时间戳缺失/混合/程序化瞬移判负；回绕后历史清零；速度门槛边界值 500/20000 接受、499/20001 回默认 | §7 撞击模式 |
 | 撞击测速区间与去抖 | 远处冲刺后贴边慢行不回绕（区间截断）；远处冲刺后区间内减速也不回绕；贴边 2px 抖动判负（位移下限）；折返后只量最后一段（快回弹判正、慢回判负）；停顿超过窗口重新起算；区间 20px 整位移恰好通过；左右/上下边缘对称；区间边界值 50/500 接受、49/501 回默认 | §7 撞击模式 |
 | 调参判定快照 | 关门槛时 verdict 标 `gateOff`/`wrapped` 且带落点；门槛拦截时带测得速度与门槛值；快速通过时带落点坐标；guard 吸收不产生新 verdict；`resetState` 清空 verdict | §7 调参可视化 |
+| 钳位样本不稀释测速 | 贴边连续同坐标样本（Windows 钳位）后，测得速度仍是那一段的自由速度；12 个重复样本不足以把 2100 px/s 压到 2000 px/s 以下；只有重复样本时 fail closed 不回绕 | §5 撞击模式 |
+| 到达轨迹 | 每次到达外边记一行；被门槛拦下的也记；同一次到达（手停在边缘被钳位）只记一行；上限 `kTraceMax`；`clearArrivals` 清空；`resetState` 清空 | §7 记录曲线 |
+| 建议门槛 `suggestGate` | 样本不足 6 条返回 0；两簇之间取最宽相对空档的中点；单一簇返回 0（不编造）；忽略不可测样本；结果钳在 500–20000 | §7 记录曲线 |
 | 诊断结构 | 屏数/外边数/钩子标志/缝隙文本 | §3 |
 | 布局 fixture | `tests/layouts/*.json` 六个合成布局逐条断言 | §5 |
 
@@ -76,17 +79,23 @@ fixture 是**合成几何**，不是真机采集，因此可安全提交（不�
 python tests/protocol_roundtrip.py
 ```
 
-2026-11-10 实跑：**63 项检查全部通过**，进程退出码 0。
+2026-11-10 实跑：**103 项检查全部通过**，进程退出码 0。
 
 | 检查 | 对应 |
 |---|---|
 | `initialize` 无 error、`protocolVersion == "1"` | §8 |
-| 空查询返回**多行设置列表**（≥5 行），首行 `id == cursorwrap.status`，含 10 个设置行 id | §3 |
+| 空查询返回**多行设置列表**（≥5 行），首行 `id == cursorwrap.status` | §3 |
 | 状态行只有 `toggleEnabled` 一个动作（其他设置各占一行） | §3 |
-| 下钻行（speed/band/activation/guard/edge/tol）带 `setQuery` | §3 |
+| **清单 10 个设置逐项都有对应行**（读 `plugin.json` 的 `settings`，逐键核对列表里的行 id） | §3 §7 |
+| 下钻行（speed/band/activation/guard/edge/tol/drag/single/tuner）带 `setQuery` | §3 |
 | 带文字查询仍只返回一行（查询无副作用） | §3 |
 | `impact` 打开子菜单（首行 `← 返回`），`impact on/off` 直接设值 | §3 |
 | `speed 3500` 打开速度子菜单，状态行副标题含 `3500` | §3 |
+| `drag` / `single` 子菜单可开可关，列表行跟着变 | §3 |
+| `tune` 打开调参子菜单（开关 + 区间 / 门槛 / 防震 / 阈值四个下钻），`tune on/off` 直接开关 | §7 |
+| `trace` 返回轨迹行，`copy` 字段带 CSV 表头 | §7 |
+| `best` 打开建议子菜单；没有轨迹时返回「数据不足」行而不是编造数字 | §7 |
+| `clear` 被接受且后续查询正常 | §7 |
 | `cycleMode` 三次报告三种不同模式，每次 `replace` + `notify` | §3 |
 | `toggleEnabled` 生效，替换后的状态行显示「已关闭」 | §3 |
 | `copyDiagnostics` 产出一条 `copy`，内容含 mode/activation/monitors/outer edges/wraps | §3 |
@@ -165,7 +174,7 @@ python tests/protocol_roundtrip.py
 ## 验收标准
 
 - L1 全绿（当前 86 用例 + 7 fixture，含真机采集的 `live-single.json`）
-- L3 全通过（当前 32/32）
+- L3 全通过（当前 103/103）
 - L0 静态校验通过
 - L4 单屏部分已实测通过；**多屏部分全部勾选后**才可宣布 v0.1.0 多屏可发布，
   当前属发布阻塞项

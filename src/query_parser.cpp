@@ -51,8 +51,37 @@ const Token kTokens[] = {
     { "容差", CommandKind::MenuTolerance, 0 },
     { "diag", CommandKind::CopyDiagnostics, 0 },
     { "诊断", CommandKind::CopyDiagnostics, 0 },
-    { "tune", CommandKind::ToggleTuner, 0 },
-    { "调参", CommandKind::ToggleTuner, 0 },
+    { "drag on", CommandKind::SetDrag, 1 },
+    { "drag off", CommandKind::SetDrag, 0 },
+    { "drag", CommandKind::MenuDrag, 0 },
+    { "拖拽 开", CommandKind::SetDrag, 1 },
+    { "拖拽 关", CommandKind::SetDrag, 0 },
+    { "拖拽", CommandKind::MenuDrag, 0 },
+    { "single on", CommandKind::SetSingle, 1 },
+    { "single off", CommandKind::SetSingle, 0 },
+    { "single", CommandKind::MenuSingle, 0 },
+    { "单屏 开", CommandKind::SetSingle, 1 },
+    { "单屏 关", CommandKind::SetSingle, 0 },
+    { "单屏", CommandKind::MenuSingle, 0 },
+    { "tune on", CommandKind::SetOverlay, 1 },
+    { "tune off", CommandKind::SetOverlay, 0 },
+    { "tuner on", CommandKind::SetOverlay, 1 },
+    { "tuner off", CommandKind::SetOverlay, 0 },
+    { "调参 开", CommandKind::SetOverlay, 1 },
+    { "调参 关", CommandKind::SetOverlay, 0 },
+    { "可视化 开", CommandKind::SetOverlay, 1 },
+    { "可视化 关", CommandKind::SetOverlay, 0 },
+    { "tune", CommandKind::MenuTuner, 0 },
+    { "tuner", CommandKind::MenuTuner, 0 },
+    { "调参", CommandKind::MenuTuner, 0 },
+    { "可视化", CommandKind::MenuTuner, 0 },
+    { "trace", CommandKind::CopyTrace, 0 },
+    { "轨迹", CommandKind::CopyTrace, 0 },
+    { "clear", CommandKind::ClearTrace, 0 },
+    { "清除轨迹", CommandKind::ClearTrace, 0 },
+    { "清除", CommandKind::ClearTrace, 0 },
+    { "best", CommandKind::MenuBest, 0 },
+    { "最优", CommandKind::MenuBest, 0 },
     { "reset", CommandKind::ResetToDefaults, 0 },
     { "恢复默认", CommandKind::ResetToDefaults, 0 },
     { "恢复", CommandKind::ResetToDefaults, 0 },
@@ -172,6 +201,18 @@ ParsedCommand parseCommand(const std::string& rawText)
                 cmd.kind = CommandKind::SetTolerance;
                 cmd.value = clampTo(*n, 10, 200);
             }
+            break;
+        case CommandKind::MenuDrag:
+        case CommandKind::MenuSingle:
+            // "drag" / "single" alone open the submenu; "drag on/off" and
+            // "single on/off" matched the longer tokens above.
+            break;
+        case CommandKind::MenuTuner:
+            // "tune" alone opens the overlay submenu; "tune on/off" matched
+            // the longer tokens above.
+            break;
+        case CommandKind::MenuBest:
+            // "best" alone opens the suggestion submenu.
             break;
         case CommandKind::MenuMode:
             // "mode" alone opens the submenu; "mode both" etc. already

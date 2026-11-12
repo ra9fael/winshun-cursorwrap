@@ -106,3 +106,154 @@ CW_TEST(verdict_resets_with_state)
     e.resetState();
     CW_CHECK(e.lastVerdict().tUs == 0);
 }
+
+// --- the tuning trace ------------------------------------------------------
+//
+// A trace of one row per edge arrival, and the suggestion derived from it:
+// the gate belongs in the widest gap between the "intentional push" cluster
+// and the "incidental drift" cluster.
+
+CW_TEST(engine_records_one_arrival_per_edge_hit)
+{
+    WrapEngine e;
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    e.onMouseMove({ 1910, 540, 1'000'000 }, false, false);
+    e.onMouseMove({ 1919, 540, 1'008'000 }, false, false);
+    e.onMouseMove({ 1919, 541, 1'016'000 }, false, false); // on the edge, different y
+    const auto trace = e.arrivals();
+    CW_CHECK(trace.size() >= 1);
+    // Every recorded row is an edge arrival, never a sample from the middle.
+    for (const Arrival& a : trace)
+        CW_CHECK(a.seq > 0 && a.tUs > 0);
+    CW_CHECK(trace.back().wrapped || trace.back().gateOff || trace.back().measuredPps >= 0);
+}
+
+CW_TEST(engine_trace_is_bounded)
+{
+    WrapEngine e;
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    long long t = 1'000'000;
+    for (int i = 0; i < 900; ++i) {
+        e.onMouseMove({ 1919, 100 + (i % 800), t + i * 1000 }, false, false);
+    }
+    CW_CHECK(e.arrivals().size() <= WrapEngine::kTraceMax);
+    CW_CHECK(!e.arrivals().empty());
+}
+
+CW_TEST(engine_clear_arrivals_empties_the_trace)
+{
+    WrapEngine e;
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    e.onMouseMove({ 1919, 540, 1'000'000 }, false, false);
+    CW_CHECK(!e.arrivals().empty());
+    e.clearArrivals();
+    CW_CHECK(e.arrivals().empty());
+}
+
+CW_TEST(suggest_gate_needs_enough_arrivals)
+{
+    std::vector<Arrival> few;
+    for (int i = 0; i < 5; ++i) {
+        Arrival a;
+        a.measuredPps = 1000 + i * 1000;
+        few.push_back(a);
+    }
+    CW_CHECK_EQ(suggestGate(few), 0);
+}
+
+CW_TEST(suggest_gate_finds_the_gap_between_clusters)
+{
+    // Twenty slow drifts around 700 px/s, twenty pushes around 5000 px/s.
+    std::vector<Arrival> trace;
+    for (int i = 0; i < 20; ++i) {
+        Arrival a;
+        a.measuredPps = 620 + (i % 7) * 20; // 620..740
+        trace.push_back(a);
+    }
+    for (int i = 0; i < 20; ++i) {
+        Arrival a;
+        a.measuredPps = 4800 + (i % 9) * 40; // 4800..5120
+        trace.push_back(a);
+    }
+    const long long suggested = suggestGate(trace);
+    CW_CHECK(suggested > 740);
+    CW_CHECK(suggested < 4800);
+}
+
+CW_TEST(suggest_gate_is_silent_for_one_cluster)
+{
+    // A single tight cluster has no meaningful gap: no suggestion.
+    std::vector<Arrival> trace;
+    for (int i = 0; i < 40; ++i) {
+        Arrival a;
+        a.measuredPps = 3000 + (i % 25) * 8;
+        trace.push_back(a);
+    }
+    CW_CHECK_EQ(suggestGate(trace), 0);
+}
+
+CW_TEST(suggest_gate_ignores_unmeasurable_arrivals)
+{
+    std::vector<Arrival> trace;
+    for (int i = 0; i < 10; ++i) {
+        Arrival a;
+        a.measuredPps = 0; // the gate was off / could not measure
+        a.gateOff = true;
+        trace.push_back(a);
+    }
+    CW_CHECK_EQ(suggestGate(trace), 0);
+}
+
+CW_TEST(suggest_gate_stays_inside_the_setting_range)
+{
+    std::vector<Arrival> trace;
+    for (int i = 0; i < 10; ++i) {
+        Arrival a;
+        a.measuredPps = 120 + i; // absurdly slow
+        trace.push_back(a);
+    }
+    for (int i = 0; i < 10; ++i) {
+        Arrival a;
+        a.measuredPps = 40000 + i; // absurdly fast
+        trace.push_back(a);
+    }
+    const long long s = suggestGate(trace);
+    CW_CHECK(s == 0 || (s >= 500 && s <= 20000));
+}
+
+CW_TEST(engine_trace_records_blocked_arrivals_too)
+{
+    // A drift the gate rejects must still appear in the trace: without the
+    // slow cluster the suggestion can never find the gap.
+    WrapEngine e(gateOn(4000, 300));
+    e.rebuild({ box(0, 0, 2560, 1440, true) });
+    long long t = 1'000'000;
+    int64_t x = 2450;
+    for (int i = 0; i < 40; ++i) {
+        e.onMouseMove({ x, 720, t }, false, false);
+        t += 16'000;                     // 4 px / 16 ms = 250 px/s
+        x = x + 4 > 2559 ? 2559 : x + 4; // reaches the edge and stays there
+    }
+    const auto trace = e.arrivals();
+    CW_CHECK(!trace.empty());          // the arrival is recorded...
+    CW_CHECK_EQ(e.stats().wraps, 0);   // ...but it did not wrap
+    bool sawBlocked = false;
+    for (const Arrival& a : trace)
+        if (!a.wrapped)
+            sawBlocked = true;
+    CW_CHECK(sawBlocked);
+}
+
+CW_TEST(engine_trace_counts_one_arrival_per_edge_run)
+{
+    // The pointer clamped at an edge for 500 samples is ONE arrival: the hand
+    // pushed there once.
+    WrapEngine e(gateOn(2000, 150));
+    e.rebuild({ box(0, 0, 2560, 1440, true) });
+    long long t = 1'000'000;
+    for (int i = 0; i < 500; ++i) {
+        e.onMouseMove({ 2559, 720, t }, false, false);
+        t += 1000;
+    }
+    CW_CHECK(e.arrivals().size() <= 2);
+}

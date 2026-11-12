@@ -16,7 +16,7 @@ original: [tests.md](tests.md).
 | Package contains `plugin.json` / `cursorwrap.exe` / `README.md` / `LICENSE`, no `build/`, `dist/`, `.git` | §8 | `tools/package.py` + `tools/ci_release.py` |
 | Bilingual anchors cross-link (`docs/spec*.md`, `docs/tests*.md`, README, CHANGELOG) | — | pass |
 
-## L1 — Pure logic unit tests (`cw_tests`, ctest target, 80 cases + 7 layout fixtures)
+## L1 — Pure logic unit tests (`cw_tests`, ctest target, 102 cases + 7 layout fixtures)
 
 No OS headers: runs anywhere. Commands:
 
@@ -52,6 +52,9 @@ ctest --test-dir build --output-on-failure
 | Impact mode | gate off behaves as before; a slow drift does not wrap; a fast hit wraps; only the perpendicular axis counts (sliding along the edge never triggers); missing/mixed timestamps and programmatic teleports fail closed; history clears after a wrap; the speed boundary values 500/20000 are accepted, 499/20001 fall back | §7 impact mode |
 | Impact band and de-jitter | a distant sprint then a slow crawl does not wrap (band cut); a distant sprint with braking inside the band does not wrap; edge jitter over 2 px fails (minimal travel); after a reversal only the last stroke counts (fast return wraps, slow return fails); a pause over the window restarts the stroke; exactly 20 px of travel passes; left/right/top/bottom edge symmetry; band boundary values 50/500 are accepted, 49/501 fall back | §7 impact mode |
 | Tuning verdict snapshot | with the gate off the verdict flags `gateOff`/`wrapped` and carries the landing; a gate block carries the measured speed and threshold; a fast hit carries the landing coordinates; a guard absorption produces no new verdict; `resetState` clears the verdict | §7 tuning overlay |
+| Clamped samples do not dilute the speed | after repeated same-coordinate samples at the edge (Windows clamping), the measured speed is still the free stroke's speed; twelve repeats cannot drag 2100 px/s below a 2000 px/s gate; with nothing but repeats the gate fails closed | §5 impact mode |
+| Arrival trace | one row per edge arrival; blocked arrivals are recorded too; one row per arrival run (a hand resting at the edge records once); capped at `kTraceMax`; `clearArrivals` and `resetState` empty it | §7 arrival trace |
+| `suggestGate` | returns 0 under six samples; puts the gate mid-way in the widest relative gap between two clusters; returns 0 for a single cluster (never invents a number); ignores unmeasurable arrivals; clamps to 500–20000 | §7 arrival trace |
 | Diagnostics shape | display count, outer-edge count, hook flag, gap text | §3 |
 | Layout fixtures | `tests/layouts/*.json` — six synthetic layouts asserted case by case | §5 |
 
@@ -78,17 +81,23 @@ The hook callback and settings delivery can be tested without a real hook:
 python tests/protocol_roundtrip.py
 ```
 
-Run on 2026-11-10: **63 checks passed**, process exit code 0.
+Run on 2026-11-10: **103 checks passed**, process exit code 0.
 
 | Check | Spec |
 |---|---|
 | `initialize` has no error and reports `protocolVersion == "1"` | §8 |
-| An empty query returns the **multi-row settings list** (≥5 rows), first row `id == cursorwrap.status`, with all 10 setting row ids present | §3 |
+| An empty query returns the **multi-row settings list** (≥5 rows), first row `id == cursorwrap.status` | §3 |
 | The status row has only `toggleEnabled` (every other setting has its own row) | §3 |
-| Drill-down rows (speed/band/activation/guard/edge/tol) carry `setQuery` | §3 |
+| **Every manifest setting has a row**: the test reads `plugin.json`'s `settings` and checks each key's row id is in the list | §3 §7 |
+| Drill-down rows (speed/band/activation/guard/edge/tol/drag/single/tuner) carry `setQuery` | §3 |
 | A query with text still returns one row (queries have no side effects) | §3 |
 | `impact` opens the submenu (first row `← Back`); `impact on/off` set the value directly | §3 |
 | `speed 3500` opens the speed submenu and the status row subtitle shows `3500` | §3 |
+| `drag` / `single` submenus toggle and the list row follows | §3 |
+| `tune` opens the tuning submenu (switch plus band / gate / guard / threshold drill-downs); `tune on/off` flips it directly | §7 |
+| `trace` returns the trace row whose `copy` field carries a CSV header | §7 |
+| `best` opens the suggestion submenu; with no trace it returns "not enough data" rather than inventing a gate | §7 |
+| `clear` is accepted and the next query still answers | §7 |
 | `cycleMode` reports three distinct modes, each with `replace` + `notify` | §3 |
 | `toggleEnabled` takes effect and the replaced row says the plugin is off | §3 |
 | `copyDiagnostics` emits one `copy` containing mode/activation/monitors/outer edges/wraps | §3 |
@@ -170,9 +179,9 @@ Evidence: `tests/layouts/live-wrap-evidence.json`, `tests/layouts/live-single.js
 
 ## Acceptance criteria
 
-- L1 green (currently 86 cases + 7 fixtures, including the captured
+- L1 green (currently 102 cases + 7 fixtures, including the captured
   `live-single.json`)
-- L3 fully passing (currently 63/63)
+- L3 fully passing (currently 103/103)
 - L0 static validation passing
 - The single-display part of L4 has been measured and passed; **all multi-display
   boxes must be checked** before v0.1.0 can be called releasable for multi-display,

@@ -27,7 +27,7 @@
       "id": "cursorwrap",
       "keyword": ["cursorwrap", "wrap", "环绕"],
       "title": {"zh": "光标回绕", "en": "Cursor wrap"},
-      "hint": {"zh": "留空看状态；不需要输入文字", "en": "empty shows status; no text needed"},
+      "hint": {"zh": "留空列出设置；也可输 tune / best / trace", "en": "empty lists the settings; try tune / best / trace"},
       "icon": "glyph:U+E8DE",
       "actions": [
         {"id": "toggleEnabled", "title": {"zh": "开启 / 关闭回绕", "en": "Toggle wrapping"}, "key": "Enter"},
@@ -35,7 +35,7 @@
         {"id": "copyDiagnostics", "title": {"zh": "复制诊断信息", "en": "Copy diagnostics"}, "key": "Shift+Enter"}
       ],
       "ai": {
-        "description": "Show the cursor-wrap status: whether wrapping is enabled, the wrap mode, the activation mode, monitor count and outer-edge count. Read-only; nothing changes until an action runs."
+        "description": "Show the cursor-wrap settings list: enabled state, impact mode and speed gate, wrap mode, activation, monitor count and outer-edge count, plus entries for the tuning overlay and the arrival trace. Read-only; nothing changes until a row's action runs."
       }
     }
   ],

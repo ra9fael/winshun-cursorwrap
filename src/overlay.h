@@ -1,16 +1,22 @@
-// overlay.h — the per-monitor tuning overlay (settings visualization).
+// overlay.h — the edge tuning overlay (settings visualization).
 //
 // When the user turns the tuner on (search bar: `tune` / `调参`), the plugin
-// draws, over every monitor's outer edges:
-//   * the impact measuring band as a translucent strip (impactBandPx wide),
-//   * the anti-oscillation guard circle after each wrap (wrapGuardPx),
-//   * a live readout at the edge: measured approach speed vs the gate, and
-//   * the edge state in colour (grey: off-edge, amber: gate blocked,
-//     green: wrapped).
+// draws — over every OUTER edge only, never over the middle of a monitor:
+//   * a thin translucent strip (impactBandPx wide) along the measuring band,
+//   * a crisp 2px accent line exactly where a wrap can happen,
+//   * nothing on inner edges (two monitors touching): no wrap happens there,
+//   * a small floating panel near the last edge hit with the measured approach
+//     speed against the gate, hidden again two seconds later.
 //
-// The overlay is a layered, click-through, non-activating tool window per
-// monitor, repainted on a 30 ms timer from an atomic verdict snapshot fed
-// by the hook thread. Nothing here blocks the hook.
+// Design notes (both learned the hard way):
+//   * A whole-monitor layered window with colour-key transparency is wrong.
+//     A colour key is all-transparent or all-opaque per pixel, so a
+//     translucent band is impossible and the window becomes a solid sheet
+//     over the desktop. The middle of a monitor must stay untouched anyway.
+//   * Per-pixel alpha needs UpdateLayeredWindow, which needs a DIB. Building a
+//     monitor-sized (33 MB at 4K) DIB per frame blew the plugin's 64 MB job
+//     cap. Every strip here owns ONE small DIB (≈1.5 MB) painted once; only
+//     the 196x60 readout repaints, and only when its numbers change.
 #pragma once
 
 #include "wrap_logic.h"
@@ -20,6 +26,7 @@
 #include <thread>
 #include <vector>
 #include <windows.h>
+
 namespace cw {
 
 class Overlay {
@@ -29,7 +36,7 @@ public:
     Overlay(const Overlay&) = delete;
     Overlay& operator=(const Overlay&) = delete;
 
-    // Show the overlay over these monitors. Safe from any thread.
+    // Show the overlay over this monitor layout. Safe from any thread.
     void start(const std::vector<MonitorBox>& monitors);
     void stop();
     bool active() const { return m_running.load(); }
@@ -37,9 +44,9 @@ public:
     // The engine to poll for the latest verdict (and current settings).
     void setEngine(WrapEngine* engine) { m_engine = engine; }
 
-    // Theme colours (#AARRGGBB) from the host's appearance notification.
+    // Theme colours from the host's appearance notification.
     struct Colors {
-        COLORREF accent = RGB(0x0e, 0x74, 0x90);
+        COLORREF accent = RGB(0x22, 0xa7, 0xc4);
         COLORREF text = RGB(0xf2, 0xf2, 0xf5);
         COLORREF background = RGB(0x1d, 0x1d, 0x20);
         bool dark = true;
@@ -47,17 +54,67 @@ public:
     void setColors(const Colors& colors);
 
 private:
+    // One layered surface with its own top-down 32bpp DIB.
+    struct Layer {
+        HWND hwnd = nullptr;
+        int x = 0;
+        int y = 0;
+        int w = 0;
+        int h = 0;
+        HDC dc = nullptr; // memory DC holding the DIB
+        HDC screenDc = nullptr;
+        HBITMAP dib = nullptr;
+        HGDIOBJ oldBitmap = nullptr;
+        uint32_t* bits = nullptr; // 0xAARRGGBB while painting
+        bool shown = false;
+    };
+
+    struct Strip {
+        Layer layer;
+        int monitorIndex = 0;
+        EdgeType edge = EdgeType::Left;
+    };
+
     void run();
-    void paintWindow(HWND hwnd, const MonitorBox& box);
+    bool createLayer(Layer& layer, int x, int y, int w, int h);
+    void destroyLayer(Layer& layer);
+    void present(Layer& layer);
+    // Store a coverage value in the top byte of every pixel in a rectangle.
+    void setAlpha(const Layer& layer, int x0, int y0, int x1, int y1, uint8_t alpha);
+    void rebuildStrips(const Settings& settings, const Colors& colors);
+    void buildReadout(const EdgeVerdict& verdict, const Settings& settings,
+                      const Colors& colors);
+    // The trace panel: a log-bucketed histogram of arrival speeds with the
+    // current gate and the suggested gate drawn in, plus the counts. This is
+    // what makes "what is optimal" answerable at a glance.
+    void buildTrace(const std::vector<Arrival>& arrivals, const Settings& settings,
+                    const Colors& colors);
+    void hideReadout();
+    void hideTrace();
+    // Fit a histogram of `arrivals` into `buckets`, returning the peak count so
+    // the panel can scale. Pure-ish: no drawing, easy to reason about.
+    static int bucketize(const std::vector<Arrival>& arrivals, int bucketCount,
+                         int* buckets);
+    void repaint(const Settings& settings, const Colors& colors);
+
     static LRESULT CALLBACK wndProcStatic(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
     LRESULT wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
 
     std::vector<MonitorBox> m_monitors;
-    std::vector<HWND> m_windows;
+    std::vector<MonitorEdge> m_edges;
+    std::vector<Strip> m_strips;
+    Layer m_readout;
+    Layer m_trace;
     std::thread m_thread;
     std::atomic<bool> m_running { false };
     DWORD m_threadId = 0;
     WrapEngine* m_engine = nullptr;
+    int m_bandPx = 0; // the band width the strips were built for
+    long long m_drawnVerdictUs = -1;
+    long long m_drawnPps = -1;
+    bool m_readoutShown = false;
+    size_t m_drawnArrivals = 0; // rebuild the trace only when this grows
+    long long m_drawnSuggest = -1;
 
     std::mutex m_colorsMutex;
     Colors m_colors;

@@ -98,6 +98,8 @@ struct EdgeVerdict {
     int monitorIndex = -1;
     EdgeType edge = EdgeType::Left;
     int64_t edgeCoord = 0;     // the edge line's coordinate (x for Left/Right)
+    int64_t x = 0;             // where the pointer was, for placing the readout
+    int64_t y = 0;
     long long measuredPps = 0; // the approach speed the gate measured
     long long thresholdPps = 0; // the configured gate (0 = gate off)
     bool wrapped = false;      // the move wrapped
@@ -107,7 +109,26 @@ struct EdgeVerdict {
     int64_t destY = 0;
 };
 
-// Diagnostic snapshot for the Shift+Enter copy row.
+// One edge arrival, recorded for the tuning trace. The measured speed alone
+// answers "would gate X have wrapped this?" for every X, so a full trace
+// makes the optimal gate a reading, not a guess.
+struct Arrival {
+    long long seq = 0;         // monotonically increasing, for incremental drains
+    long long tUs = 0;         // when the arrival happened
+    int monitorIndex = -1;
+    EdgeType edge = EdgeType::Left;
+    long long measuredPps = 0; // the approach speed measured in the band
+    long long gatePps = 0;     // the gate configured at that moment
+    bool wrapped = false;
+    bool gateOff = false;      // gate was off: the arrival wrapped outright
+};
+
+// The gate between the two clusters of arrival speeds: intentional pushes sit
+// in the upper cluster, incidental drifts in the lower one. Returns 0 when the
+// trace has no clear gap yet — never a fabricated number. Pure; unit-tested.
+long long suggestGate(const std::vector<Arrival>& arrivals);
+
+// Diagnostics snapshot for the Shift+Enter copy row.
 struct Diagnostics {
     bool enabled = true;
     bool hookOk = false;
@@ -147,8 +168,20 @@ public:
     // blocks: a small struct copied under the engine mutex.
     EdgeVerdict lastVerdict() const;
 
+    // The recorded edge arrivals, oldest first. The tuner copies these to draw
+    // the histogram and the suggested gate. Bounded (kTraceMax) so a long
+    // session cannot grow without limit.
+    std::vector<Arrival> arrivals() const;
+    // Drop the recorded arrivals (the tuner's "clear" action).
+    void clearArrivals();
+    static constexpr size_t kTraceMax = 512;
+
     // A copy of the current monitor boxes (the overlay windows cover them).
     std::vector<MonitorBox> monitorsSnapshot() const;
+
+    // The edges that can actually wrap, so the tuning overlay draws lines
+    // only where a wrap is possible and leaves inner edges alone.
+    std::vector<MonitorEdge> outerEdgesSnapshot() const;
 
     // Locked topology sizes (the hook thread may rebuild concurrently).
     size_t monitorCount() const;
@@ -184,6 +217,13 @@ private:
     Sample m_lastWrap { kNever, kNever };
     bool m_hasLastWrap = false;
     EdgeVerdict m_verdict; // the latest edge arrival, for the overlay
+    std::vector<Arrival> m_arrivals; // bounded trace, for the tuner
+    long long m_arrivalSeq = 0;
+    // The edge this arrival run belongs to: repeated samples while the pointer
+    // is clamped at one edge are one arrival, not hundreds.
+    EdgeType m_arrivalEdge = EdgeType::Left;
+    int m_arrivalMonitor = -1;
+    bool m_hasArrivalEdge = false;
 };
 
 } // namespace cw

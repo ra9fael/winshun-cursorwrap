@@ -131,8 +131,17 @@ CW_TEST(parser_numeric_settings_clamp)
 
 CW_TEST(parser_tuner_commands)
 {
-    CW_CHECK(parseCommand("tune").kind == CommandKind::ToggleTuner);
-    CW_CHECK(parseCommand("调参").kind == CommandKind::ToggleTuner);
+    auto n = parseCommand("tune");
+    CW_CHECK(n.kind == CommandKind::MenuTuner);
+    CW_CHECK(parseCommand("调参").kind == CommandKind::MenuTuner);
+    CW_CHECK(parseCommand("tuner").kind == CommandKind::MenuTuner);
+    CW_CHECK(parseCommand("可视化").kind == CommandKind::MenuTuner);
+    n = parseCommand("tune on");
+    CW_CHECK(n.kind == CommandKind::SetOverlay && n.value == 1);
+    n = parseCommand("tune off");
+    CW_CHECK(n.kind == CommandKind::SetOverlay && n.value == 0);
+    n = parseCommand("调参 开");
+    CW_CHECK(n.kind == CommandKind::SetOverlay && n.value == 1);
 }
 
 CW_TEST(parser_reset)

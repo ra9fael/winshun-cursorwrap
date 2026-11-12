@@ -198,15 +198,43 @@ def run(exe: Path) -> int:
                            "cursorwrap.row.band", "cursorwrap.row.mode",
                            "cursorwrap.row.activation", "cursorwrap.row.guard",
                            "cursorwrap.row.edge", "cursorwrap.row.tol",
-                           "cursorwrap.diag", "cursorwrap.row.reset"):
+                           "cursorwrap.row.drag", "cursorwrap.row.single",
+                           "cursorwrap.row.tuner", "cursorwrap.diag",
+                           "cursorwrap.row.reset"):
                 check(needle in ids, f"settings list contains {needle}", str(ids))
             # Drill-down rows carry setQuery so Enter fills the search box.
             for rid in ("cursorwrap.row.speed", "cursorwrap.row.band",
                         "cursorwrap.row.activation", "cursorwrap.row.guard",
-                        "cursorwrap.row.edge", "cursorwrap.row.tol"):
+                        "cursorwrap.row.edge", "cursorwrap.row.tol",
+                        "cursorwrap.row.drag", "cursorwrap.row.single",
+                        "cursorwrap.row.tuner"):
                 row = next(r for r in items if r.get("id") == rid)
                 check(bool(row.get("setQuery")),
                       f"{rid} has setQuery for drill-down", str(row.get("setQuery")))
+
+        print("query: every manifest setting is reachable from the search bar")
+        # The manifest declares ten settings; each must have a row (directly
+        # or through a submenu) so the two surfaces cannot drift apart.
+        manifest = json.loads((ROOT / "plugin.json").read_text(encoding="utf-8"))
+        setting_keys = [s.get("key") for s in manifest.get("settings", [])]
+        check(len(setting_keys) == 10, f"manifest declares ten settings (got {len(setting_keys)})")
+        covered = {
+            "wrapMode": "cursorwrap.row.mode",
+            "activationMode": "cursorwrap.row.activation",
+            "disableDuringDrag": "cursorwrap.row.drag",
+            "disableOnSingleMonitor": "cursorwrap.row.single",
+            "edgeThresholdPx": "cursorwrap.row.edge",
+            "wrapGuardPx": "cursorwrap.row.guard",
+            "adjacencyTolerancePx": "cursorwrap.row.tol",
+            "impactGate": "cursorwrap.row.impact",
+            "impactSpeedPps": "cursorwrap.row.speed",
+            "impactBandPx": "cursorwrap.row.band",
+        }
+        list_ids = [r.get("id") for r in items_of(drv.query(""))]
+        for key in setting_keys:
+            rid = covered.get(key)
+            check(rid is not None and rid in list_ids,
+                  f"setting {key} has a row in the list", f"{key} -> {rid}")
 
         print("query with text is ignored (no side effects)")
         q2 = drv.query("anything")
@@ -255,6 +283,85 @@ def run(exe: Path) -> int:
         check("搜索栏覆盖" not in status7.get("subtitle", "")
               and "overrides active" not in status7.get("subtitle", ""),
               "reset clears the override note", status7.get("subtitle", ""))
+
+        print("query: drag / single / tune submenus reach their settings")
+        qd = drv.query("drag")
+        itemsd = items_of(qd)
+        check(itemsd and itemsd[0].get("id") == "cursorwrap.back",
+              "drag query opens the drag submenu", str([r.get("id") for r in itemsd]))
+        drv.query("drag on")
+        qd2 = drv.query("")
+        drag_row = next(r for r in items_of(qd2) if r.get("id") == "cursorwrap.row.drag")
+        check("开" in drag_row["title"] or "on" in drag_row["title"],
+              "drag on shows as on", drag_row["title"])
+        drv.query("drag off")
+        qd3 = drv.query("")
+        drag_row2 = next(r for r in items_of(qd3) if r.get("id") == "cursorwrap.row.drag")
+        check("关" in drag_row2["title"] or "off" in drag_row2["title"],
+              "drag off shows as off", drag_row2["title"])
+
+        qs = drv.query("single")
+        itemss = items_of(qs)
+        check(itemss and itemss[0].get("id") == "cursorwrap.back",
+              "single query opens the single-monitor submenu", str([r.get("id") for r in itemss]))
+        drv.query("single on")
+        qs2 = drv.query("")
+        single_row = next(r for r in items_of(qs2) if r.get("id") == "cursorwrap.row.single")
+        check("开" in single_row["title"] or "on" in single_row["title"],
+              "single on shows as on", single_row["title"])
+        drv.query("single off")
+
+        print("query: the tuning overlay has its own submenu and parameters")
+        qt = drv.query("tune")
+        itemst = items_of(qt)
+        check(itemst and itemst[0].get("id") == "cursorwrap.back",
+              "tune opens the overlay submenu (first row is back)",
+              str([r.get("id") for r in itemst]))
+        tuner_ids = [r.get("id") for r in itemst]
+        for needle in ("cursorwrap.tuner.state", "cursorwrap.tuner.band",
+                       "cursorwrap.tuner.speed", "cursorwrap.tuner.guard",
+                       "cursorwrap.tuner.edge"):
+            check(needle in tuner_ids, f"overlay submenu contains {needle}", str(tuner_ids))
+        state_row = next(r for r in itemst if r.get("id") == "cursorwrap.tuner.state")
+        check("关" in state_row["title"] or "off" in state_row["title"],
+              "the overlay starts off", state_row["title"])
+        # `tune on` turns it on without the wildcard toggle of a bare `tune`.
+        drv.query("tune on")
+        qt2 = drv.query("tune")
+        state_on = next(r for r in items_of(qt2) if r.get("id") == "cursorwrap.tuner.state")
+        check("开" in state_on["title"] or "on" in state_on["title"],
+              "tune on turns the overlay on", state_on["title"])
+        drv.query("tune off")
+        qt3 = drv.query("tune")
+        state_off = next(r for r in items_of(qt3) if r.get("id") == "cursorwrap.tuner.state")
+        check("关" in state_off["title"] or "off" in state_off["title"],
+              "tune off turns the overlay off", state_off["title"])
+        # The overlay's parameter rows drill into the same submenus.
+        for rid in ("cursorwrap.tuner.band", "cursorwrap.tuner.speed",
+                    "cursorwrap.tuner.guard", "cursorwrap.tuner.edge"):
+            row = next(r for r in itemst if r.get("id") == rid)
+            check(bool(row.get("setQuery")),
+                  f"{rid} has setQuery for drill-down", str(row.get("setQuery")))
+
+        print("query: trace and best")
+        qtr = drv.query("trace")
+        tr_items = items_of(qtr)
+        check(tr_items and tr_items[0].get("id") == "cursorwrap.trace",
+              "trace returns the trace row", str([r.get("id") for r in tr_items]))
+        csv_text = tr_items[0].get("copy", "") if tr_items else ""
+        check("measured_pps" in csv_text, "the trace CSV has a header",
+              csv_text[:80])
+        qb = drv.query("best")
+        b_items = items_of(qb)
+        check(b_items and b_items[0].get("id") == "cursorwrap.back",
+              "best opens the suggestion submenu", str([r.get("id") for r in b_items]))
+        # No arrivals were recorded in a protocol session: the plugin must say
+        # so rather than fabricate a gate.
+        check(any(r.get("id") == "cursorwrap.best.none" for r in b_items),
+              "best says 'not enough data' without a trace",
+              str([r.get("id") for r in b_items]))
+        check(drv.query("clear") and items_of(drv.query(""))[0].get("id") == "cursorwrap.status",
+              "clear is accepted and the list still answers")
 
         print("action: cycleMode x3 returns to both")
         # The cycleMode action runs on the mode row, not the status row.
