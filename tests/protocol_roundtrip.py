@@ -199,15 +199,15 @@ def run(exe: Path) -> int:
                            "cursorwrap.row.activation", "cursorwrap.row.guard",
                            "cursorwrap.row.edge", "cursorwrap.row.tol",
                            "cursorwrap.row.drag", "cursorwrap.row.single",
-                           "cursorwrap.row.tuner", "cursorwrap.diag",
-                           "cursorwrap.row.reset"):
+                           "cursorwrap.row.tuner", "cursorwrap.row.data",
+                           "cursorwrap.diag", "cursorwrap.row.reset"):
                 check(needle in ids, f"settings list contains {needle}", str(ids))
             # Drill-down rows carry setQuery so Enter fills the search box.
             for rid in ("cursorwrap.row.speed", "cursorwrap.row.band",
                         "cursorwrap.row.activation", "cursorwrap.row.guard",
                         "cursorwrap.row.edge", "cursorwrap.row.tol",
                         "cursorwrap.row.drag", "cursorwrap.row.single",
-                        "cursorwrap.row.tuner"):
+                        "cursorwrap.row.tuner", "cursorwrap.row.data"):
                 row = next(r for r in items if r.get("id") == rid)
                 check(bool(row.get("setQuery")),
                       f"{rid} has setQuery for drill-down", str(row.get("setQuery")))
@@ -217,7 +217,7 @@ def run(exe: Path) -> int:
         # or through a submenu) so the two surfaces cannot drift apart.
         manifest = json.loads((ROOT / "plugin.json").read_text(encoding="utf-8"))
         setting_keys = [s.get("key") for s in manifest.get("settings", [])]
-        check(len(setting_keys) == 10, f"manifest declares ten settings (got {len(setting_keys)})")
+        check(len(setting_keys) == 12, f"manifest declares twelve settings (got {len(setting_keys)})")
         covered = {
             "wrapMode": "cursorwrap.row.mode",
             "activationMode": "cursorwrap.row.activation",
@@ -229,6 +229,8 @@ def run(exe: Path) -> int:
             "impactGate": "cursorwrap.row.impact",
             "impactSpeedPps": "cursorwrap.row.speed",
             "impactBandPx": "cursorwrap.row.band",
+            "tuningOverlay": "cursorwrap.row.tuner",
+            "dataWindow": "cursorwrap.row.data",
         }
         list_ids = [r.get("id") for r in items_of(drv.query(""))]
         for key in setting_keys:
@@ -343,6 +345,38 @@ def run(exe: Path) -> int:
             check(bool(row.get("setQuery")),
                   f"{rid} has setQuery for drill-down", str(row.get("setQuery")))
 
+        print("query: the data window has its own submenu")
+        qw = drv.query("data")
+        itemsw = items_of(qw)
+        check(itemsw and itemsw[0].get("id") == "cursorwrap.back",
+              "data opens the data-window submenu", str([r.get("id") for r in itemsw]))
+        window_ids = [r.get("id") for r in itemsw]
+        for needle in ("cursorwrap.data.state", "cursorwrap.data.reasons",
+                       "cursorwrap.data.health"):
+            check(needle in window_ids, f"data submenu contains {needle}", str(window_ids))
+        data_state = next(r for r in itemsw if r.get("id") == "cursorwrap.data.state")
+        check("关" in data_state["title"] or "off" in data_state["title"],
+              "the data window starts off", data_state["title"])
+        drv.query("data on")
+        qw2 = drv.query("data")
+        window_on = next(r for r in items_of(qw2) if r.get("id") == "cursorwrap.data.state")
+        check("开" in window_on["title"] or "on" in window_on["title"],
+              "data on turns the window on", window_on["title"])
+        # The settings page and the search bar share the switch: the list row
+        # must agree with the submenu without another command.
+        list_after = items_of(drv.query(""))
+        data_row = next(r for r in list_after if r.get("id") == "cursorwrap.row.data")
+        check("开" in data_row["title"] or "on" in data_row["title"],
+              "the settings list agrees the data window is on", data_row["title"])
+        drv.query("data off")
+        qw3 = drv.query("data")
+        window_off = next(r for r in items_of(qw3) if r.get("id") == "cursorwrap.data.state")
+        check("关" in window_off["title"] or "off" in window_off["title"],
+              "data off turns the window off", window_off["title"])
+        # `window` is an alias (the row title's own word).
+        check(items_of(drv.query("window"))[0].get("id") == "cursorwrap.back",
+              "window is an alias for data")
+
         print("query: trace and best")
         qtr = drv.query("trace")
         tr_items = items_of(qtr)
@@ -406,6 +440,11 @@ def run(exe: Path) -> int:
             diag = copies[0]
             for needle in ("wrap mode", "activation", "monitors", "outer edges", "wraps"):
                 check(needle in diag, f"diagnostics contains '{needle}'")
+            # The per-reason split is what makes "it never wraps" diagnosable.
+            check("skipped " in diag or "suppressed" in diag,
+                  "diagnostics carries the skip counters", diag[:400])
+            check("hook responsive" in diag,
+                  "diagnostics carries the hook health", diag[:400])
             check("ra9fael.cursorwrap diagnostics" in diag, "diagnostics header present")
 
         print("query: diag returns a copyable diagnostics row")

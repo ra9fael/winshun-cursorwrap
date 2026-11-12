@@ -475,3 +475,294 @@ CW_TEST(impact_clamped_tail_error_readout_is_the_stroke_speed)
     CW_CHECK(v.wrapped || v.measuredPps >= 3000);
     CW_CHECK(v.measuredPps >= 3000);
 }
+
+//
+// Per-reason accounting: "it does not wrap at all" is only answerable when
+// the diagnostic names the gate that keeps refusing. A single `suppressed`
+// total cannot tell a dragging suppression from an impact-gate rejection.
+//
+
+CW_TEST(skips_are_counted_per_reason)
+{
+    Settings s;
+    s.disableDuringDrag = true;
+    WrapEngine e(s);
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+
+    // Dragging: suppressed as Dragging, not merely "suppressed".
+    e.onMouseMove({ 900, 540, 1000 }, false, true);
+    CW_CHECK_EQ(e.stats().skipped[static_cast<int>(SkipReason::Dragging)], 1);
+    // Off the edge: NotOnEdge.
+    e.onMouseMove({ 900, 540, 2000 }, false, false);
+    CW_CHECK_EQ(e.stats().skipped[static_cast<int>(SkipReason::NotOnEdge)], 1);
+    // The per-reason counts must add up to the legacy total.
+    const Stats st = e.stats();
+    long long sum = 0;
+    for (int i = 1; i < kSkipReasonCount; ++i)
+        sum += st.skipped[i];
+    CW_CHECK_EQ(sum, st.suppressed);
+}
+
+CW_TEST(impact_gate_rejection_is_its_own_reason)
+{
+    WrapEngine e(gateOn(2000, 150));
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    long long t = 1'000'000;
+    for (int x = 1807; x <= 1919; ++x) {
+        e.onMouseMove({ x, 540, t }, false, false);
+        t += 4000; // 250 px/s, well under the gate
+    }
+    const auto [x, y] = e.onMouseMove({ 1919, 540, t }, false, false);
+    CW_CHECK_EQ(x, 1919);
+    CW_CHECK_EQ(e.stats().wraps, 0);
+    CW_CHECK(e.stats().skipped[static_cast<int>(SkipReason::ImpactGate)] >= 1);
+    // The reason name is what the data window and the diagnostics print.
+    CW_CHECK(std::string(skipReasonName(SkipReason::ImpactGate)) == "impact-gate");
+}
+
+CW_TEST(decisions_record_arrivals_and_new_skip_runs)
+{
+    WrapEngine e;
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    // A run of off-edge moves is one decision, not one per sample: a 1000 Hz
+    // mouse would otherwise flood the log.
+    for (int i = 0; i < 20; ++i)
+        e.onMouseMove({ 100 + i, 540, 1000 + i * 1000 }, false, false);
+    CW_CHECK_EQ(e.decisions().size(), 1u);
+    CW_CHECK(e.decisions().back().reason == SkipReason::NotOnEdge);
+    CW_CHECK(!e.decisions().back().wrapped);
+    // The wrap is recorded as a decision with reason None.
+    const auto [x, y] = e.onMouseMove({ 1919, 540, 9'000'000 }, false, false);
+    CW_CHECK_EQ(x, 1);
+    CW_CHECK_EQ(e.decisions().size(), 2u);
+    CW_CHECK(e.decisions().back().wrapped);
+    CW_CHECK(e.decisions().back().reason == SkipReason::None);
+    CW_CHECK(e.decisions().back().onEdge);
+}
+
+CW_TEST(decisions_are_bounded)
+{
+    WrapEngine e;
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    long long t = 1000;
+    // Alternate between two edges' territory so every move is a new run.
+    for (int i = 0; i < 200; ++i) {
+        const int64_t x = (i % 2 == 0) ? 500 : 1919;
+        const int64_t y = (i % 2 == 0) ? 500 : 540;
+        e.onMouseMove({ x, y, t }, false, false);
+        t += 1000;
+    }
+    CW_CHECK(e.decisions().size() <= WrapEngine::kDecisionMax);
+}
+
+CW_TEST(last_sample_reports_even_skipped_moves)
+{
+    Settings s;
+    s.disableDuringDrag = true;
+    WrapEngine e(s);
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    Sample seen;
+    CW_CHECK(!e.lastSample(seen)); // nothing yet
+    e.onMouseMove({ 640, 480, 1000 }, false, true); // suppressed by the drag
+    CW_CHECK(e.lastSample(seen));
+    CW_CHECK_EQ(seen.x, 640);
+    CW_CHECK_EQ(seen.y, 480);
+}
+
+CW_TEST(window_settings_round_trip)
+{
+    // The two runtime windows are settings so the plugin's settings page can
+    // turn them on: the same key must survive a RawSettings round trip.
+    RawSettings raw;
+    raw.tuningOverlay = true;
+    raw.hasTuningOverlay = true;
+    raw.dataWindow = true;
+    raw.hasDataWindow = true;
+    Settings out;
+    applySettings(raw, out, false);
+    CW_CHECK(out.tuningOverlay);
+    CW_CHECK(out.dataWindow);
+
+    // Merging a partial update must leave them alone.
+    RawSettings partial;
+    partial.impactGate = true;
+    partial.hasImpactGate = true;
+    applySettings(partial, out, true);
+    CW_CHECK(out.tuningOverlay);
+    CW_CHECK(out.dataWindow);
+    CW_CHECK(out.impactGate);
+}
+
+//
+// The user's real configuration, reproduced exactly (report: "on the real
+// dual-monitor machine wrapping does not happen at all, with or without the
+// impact gate"). Two 2560x1440 displays side by side, wrapMode horizontal,
+// guard 100, tolerance 10 — the settings this machine actually ran with.
+//
+namespace {
+Settings userConfig(bool gateOn)
+{
+    Settings s;
+    s.wrapMode = WrapMode::HorizontalOnly;
+    s.adjacencyTolerancePx = 10;
+    s.wrapGuardPx = 100;
+    s.impactBandPx = 100;
+    s.impactGate = gateOn;
+    s.impactSpeedPps = 2000;
+    s.edgeThresholdPx = 1;
+    s.disableDuringDrag = true;
+    return s;
+}
+
+std::vector<MonitorBox> dualScreens()
+{
+    // DISPLAY2 is to the LEFT of the primary: [-2560,0..0,1440] and
+    // [0,0..2560,1440], exactly what EnumDisplayMonitors reports here.
+    return { box(0, 0, 2560, 1440, true), box(-2560, 0, 0, 1440) };
+}
+} // namespace
+
+CW_TEST(user_config_gate_off_wraps_between_two_displays)
+{
+    // Gate off: one sample at the right edge of the primary must land one
+    // pixel inside the left edge of the display to its left.
+    WrapEngine e(userConfig(false));
+    e.rebuild(dualScreens());
+    const auto [x, y] = e.onMouseMove({ 2559, 720, 1'000'000 }, false, false);
+    CW_CHECK_EQ(x, -2559);
+    CW_CHECK_EQ(y, 720);
+    CW_CHECK_EQ(e.stats().wraps, 1);
+}
+
+CW_TEST(user_config_gate_off_wraps_both_ways)
+{
+    WrapEngine e(userConfig(false));
+    e.rebuild(dualScreens());
+    // Right edge of the primary -> the left display.
+    CW_CHECK_EQ(e.onMouseMove({ 2559, 300, 1'000'000 }, false, false).first, -2559);
+    // ...and the other way: the left display's left edge -> the primary.
+    CW_CHECK_EQ(e.onMouseMove({ -2560, 900, 2'000'000 }, false, false).first, 2558);
+}
+
+CW_TEST(user_config_inner_edges_never_wrap)
+{
+    // The seam between the two displays is not an outer edge: Windows already
+    // handles it, and wrapping there would fight it.
+    WrapEngine e(userConfig(false));
+    e.rebuild(dualScreens());
+    // x=0 is the primary's left edge and x=-1 is the left display's right
+    // edge: adjacent within the 10 px tolerance, so neither is outer.
+    CW_CHECK_EQ(e.onMouseMove({ 0, 720, 1'000'000 }, false, false).first, 0);
+    CW_CHECK_EQ(e.onMouseMove({ -1, 720, 2'000'000 }, false, false).first, -1);
+    CW_CHECK_EQ(e.stats().wraps, 0);
+}
+
+CW_TEST(user_config_fast_hit_wraps_with_the_gate_on)
+{
+    // A realistic 1000 Hz hand: 20 px every 4 ms = 5000 px/s. Inside the
+    // 100 px band the measured speed is the hand's, so a 2000 px/s gate
+    // accepts it.
+    WrapEngine e(userConfig(true));
+    e.rebuild(dualScreens());
+    long long t = 1'000'000;
+    int64_t x = 2400;
+    int wraps = 0;
+    int64_t landing = 0;
+    for (int i = 0; i < 40 && !wraps; ++i) {
+        const auto [nx, ny] = e.onMouseMove({ x, 720, t }, false, false);
+        if (nx != x) {
+            ++wraps;
+            landing = nx;
+        }
+        t += 4000;
+        x = x + 20 > 2559 ? 2559 : x + 20;
+    }
+    CW_CHECK_EQ(wraps, 1);
+    CW_CHECK_EQ(landing, -2559);
+    CW_CHECK(e.lastVerdict().measuredPps >= 2000);
+}
+
+CW_TEST(user_config_slow_drift_is_the_only_thing_the_gate_blocks)
+{
+    // The gate must be the ONLY reason a slow drift is refused, and it must
+    // say so: that is what makes the report actionable. The counters count
+    // every move; the decision log keeps one entry per run.
+    WrapEngine e(userConfig(true));
+    e.rebuild(dualScreens());
+    long long t = 1'000'000;
+    for (int64_t x = 2459; x <= 2559; ++x) {
+        e.onMouseMove({ x, 720, t }, false, false);
+        t += 4000; // 250 px/s
+    }
+    CW_CHECK_EQ(e.stats().wraps, 0);
+    CW_CHECK(e.stats().skipped[static_cast<int>(SkipReason::ImpactGate)] >= 1);
+    CW_CHECK(e.stats().skipped[static_cast<int>(SkipReason::NotOnEdge)] >= 1);
+    // Nothing else was in the way: no guard, no drag, no modifier, no
+    // single-monitor rule.
+    CW_CHECK_EQ(e.stats().skipped[static_cast<int>(SkipReason::Guard)], 0);
+    CW_CHECK_EQ(e.stats().skipped[static_cast<int>(SkipReason::Dragging)], 0);
+    CW_CHECK_EQ(e.stats().skipped[static_cast<int>(SkipReason::NoModifier)], 0);
+    CW_CHECK_EQ(e.stats().skipped[static_cast<int>(SkipReason::SingleMonitor)], 0);
+    // The decision log names the arrival as an impact-gate rejection, with the
+    // speed that failed it — the number that tells the user which way to move
+    // the gate.
+    bool sawGateRejection = false;
+    for (const Decision& d : e.decisions()) {
+        if (d.reason == SkipReason::ImpactGate && d.onEdge) {
+            sawGateRejection = true;
+            CW_CHECK(d.measuredPps > 0);
+            CW_CHECK(d.gatePps == 2000);
+            CW_CHECK(d.measuredPps < d.gatePps);
+        }
+    }
+    CW_CHECK(sawGateRejection);
+}
+
+CW_TEST(user_config_drag_suppression_is_named)
+{
+    WrapEngine e(userConfig(false));
+    e.rebuild(dualScreens());
+    // Dragging a selection to the edge must not teleport it.
+    CW_CHECK_EQ(e.onMouseMove({ 2559, 720, 1'000'000 }, false, true).first, 2559);
+    CW_CHECK_EQ(e.stats().skipped[static_cast<int>(SkipReason::Dragging)], 1);
+    CW_CHECK_EQ(e.stats().wraps, 0);
+}
+
+//
+// A pointer outside the union of the monitor rects. The real machine logged
+// 1008 moves as "off-monitor" and refused to wrap: the wrap path used the
+// exact containment test, so any sample outside every rect disabled wrapping
+// everywhere instead of being attributed to the nearest display.
+//
+
+CW_TEST(pointer_outside_every_rect_still_has_a_monitor)
+{
+    Topology t;
+    t.initialize({ box(0, 0, 1920, 1080, true), box(-1920, 0, 0, 1080) }, 10);
+    // Exact containment is unchanged: -1 outside, which the layout tests and
+    // gap detection rely on.
+    CW_CHECK_EQ(t.monitorAt(5000, 100), -1);
+    CW_CHECK_EQ(t.monitorAt(-5000, 100), -1);
+    // ...but the pointer path always lands on the nearest display.
+    CW_CHECK_EQ(t.nearestMonitor(5000, 100), 0);
+    CW_CHECK_EQ(t.nearestMonitor(-5000, 100), 1);
+    CW_CHECK_EQ(t.nearestMonitor(0, 5000), 0);
+    // Inside: identical, and the nearest wins a tie at a shared seam.
+    CW_CHECK_EQ(t.nearestMonitor(100, 100), 0);
+    CW_CHECK_EQ(t.nearestMonitor(-100, 100), 1);
+    // No monitors at all is still -1.
+    Topology empty;
+    CW_CHECK_EQ(empty.nearestMonitor(0, 0), -1);
+}
+
+CW_TEST(pointer_one_pixel_below_the_layout_does_not_disable_wrapping)
+{
+    // A stale topology (the watcher has not rebuilt yet) puts the real
+    // pointer below the reported desktop. The old code returned -1 and
+    // suppressed the move; now it attributes the sample to the primary.
+    WrapEngine e(userConfig(false));
+    e.rebuild(dualScreens());
+    const auto [x, y] = e.onMouseMove({ 2559, 1440, 1'000'000 }, false, false);
+    CW_CHECK(x != 2559 && x != 1440); // it wrapped, it did not fall through
+    CW_CHECK_EQ(e.stats().skipped[static_cast<int>(SkipReason::OffMonitor)], 0);
+}

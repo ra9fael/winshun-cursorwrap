@@ -144,6 +144,24 @@ CW_TEST(parser_tuner_commands)
     CW_CHECK(n.kind == CommandKind::SetOverlay && n.value == 1);
 }
 
+CW_TEST(parser_data_window)
+{
+    CW_CHECK(parseCommand("data").kind == CommandKind::MenuData);
+    CW_CHECK(parseCommand("数据").kind == CommandKind::MenuData);
+    CW_CHECK(parseCommand("window").kind == CommandKind::MenuData);
+    CW_CHECK(parseCommand("窗口").kind == CommandKind::MenuData);
+    const auto on = parseCommand("data on");
+    CW_CHECK(on.kind == CommandKind::SetData && on.value == 1);
+    const auto off = parseCommand("data off");
+    CW_CHECK(off.kind == CommandKind::SetData && off.value == 0);
+    const auto zhOn = parseCommand("数据 开");
+    CW_CHECK(zhOn.kind == CommandKind::SetData && zhOn.value == 1);
+    const auto zhOff = parseCommand("数据 关");
+    CW_CHECK(zhOff.kind == CommandKind::SetData && zhOff.value == 0);
+    // "database" glues onto "data": not a data command.
+    CW_CHECK(parseCommand("database").kind == CommandKind::Unknown);
+}
+
 CW_TEST(parser_reset)
 {
     CW_CHECK(parseCommand("reset").kind == CommandKind::ResetToDefaults);
