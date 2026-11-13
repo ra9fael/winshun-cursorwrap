@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>撞击穿越边缘光效 — 交互稿（问题 6a）</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 28px 40px;
+    font: 14px/1.6 "Segoe UI", system-ui, sans-serif;
+    background: #1b1b1f; color: #e6e6e9;
+  }
+  h1 { font-size: 19px; font-weight: 600; margin: 0 0 4px; }
+  .sub { color: #9a9aa2; margin: 0 0 20px; font-size: 13px; max-width: 96ch; }
+  .wrap { display: grid; grid-template-columns: 1fr 316px; gap: 20px; align-items: start; }
+  .stage { background: #242429; border: 1px solid #33333a; border-radius: 10px; padding: 16px; }
+  .screen {
+    position: relative; height: 330px; border-radius: 8px; overflow: hidden;
+    background: #141418; border: 1px solid #2c2c34;
+  }
+  .desk {
+    position: absolute; inset: 14px; border-radius: 5px;
+    background: repeating-linear-gradient(45deg,#1a1a20 0 12px,#17171d 12px 24px);
+    border: 1px solid #2a2a33;
+  }
+  .caption {
+    position: absolute; left: 24px; top: 22px; font-size: 11.5px;
+    color: #5f5f68; letter-spacing: .06em; text-transform: uppercase;
+  }
+  /* the flash bars, one per edge, all positioned inside .screen */
+  .bar {
+    position: absolute; opacity: 0; pointer-events: none;
+    will-change: opacity;
+  }
+  .bar.left   { left: 14px;  top: 14px; bottom: 14px; width: 4px; }
+  .bar.right  { right: 14px; top: 14px; bottom: 14px; width: 4px; }
+  .bar.top    { top: 14px;   left: 14px; right: 14px; height: 4px; }
+  .bar.bottom { bottom: 14px;left: 14px; right: 14px; height: 4px; }
+
+  .dot {
+    position: absolute; width: 9px; height: 9px; border-radius: 50%;
+    background: #4c8dff; box-shadow: 0 0 0 3px rgba(76,141,255,.22);
+    transform: translate(-50%,-50%); transition: left .12s linear, top .12s linear;
+  }
+
+  .panel { background: #242429; border: 1px solid #33333a; border-radius: 10px; padding: 14px; }
+  .panel h2 { font-size: 13px; margin: 0 0 10px; font-weight: 600; color: #b9b9c2; }
+  .side { display: flex; flex-direction: column; gap: 14px; }
+  .btns { display: flex; gap: 8px; flex-wrap: wrap; }
+  button {
+    font: inherit; font-size: 13px; padding: 7px 12px; border-radius: 7px;
+    border: 1px solid #3d3d46; background: #2a2a31; color: #e6e6e9; cursor: pointer;
+  }
+  button:hover { background: #33333c; }
+  button.primary { background: #2f3d55; border-color: #4c8dff; color: #cfe0ff; }
+  button.on { background: #2f3d55; border-color: #4c8dff; color: #cfe0ff; }
+  .kv { font-size: 12.5px; color: #b9b9c2; line-height: 2; }
+  .kv b { color: #e6e6e9; font-variant-numeric: tabular-nums; }
+  .note { margin-top: 18px; padding: 13px 15px; border-radius: 9px;
+          background: #22222a; border-left: 3px solid #4c8dff; font-size: 13px; }
+  code { background: #2c2c34; padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
+  .sw { display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:1px }
+  input[type=range] { width: 100%; }
+  label { font-size: 12.5px; color: #9a9aa2; display: block; margin: 10px 0 2px; }
+</style>
+</head>
+<body>
+
+<h1>问题 6a — 撞击穿越后的边缘光效</h1>
+<p class="sub">
+  只在<b>撞击模式开启</b>且<b>穿越成功</b>时触发。三维可调：颜色、时长、长度占比。
+  光效是装饰：任何情况下都不能拦截鼠标，出错要静默。
+</p>
+
+<div class="wrap">
+  <div class="stage">
+    <div class="screen" id="screen">
+      <div class="desk"></div>
+      <div class="caption" id="cap">显示器</div>
+      <div class="bar left"   id="bLeft"></div>
+      <div class="bar right"  id="bRight"></div>
+      <div class="bar top"    id="bTop"></div>
+      <div class="bar bottom" id="bBottom"></div>
+      <div class="dot" id="dot" style="left:50%;top:50%"></div>
+    </div>
+    <div class="btns" style="margin-top:14px">
+      <button id="hitL">压左边缘 → 穿越</button>
+      <button id="hitR">压右边缘 → 穿越</button>
+      <button id="hitT">压上边缘 → 穿越</button>
+      <button id="hitB">压下边缘 → 穿越</button>
+      <button id="reject" class="primary">被拒绝（无光效）</button>
+    </div>
+  </div>
+
+  <div class="side">
+    <div class="panel">
+      <h2>参数</h2>
+      <label>颜色</label>
+      <div class="btns">
+        <button class="col on" data-col="accent">跟随主题</button>
+        <button class="col" data-col="warm">暖色</button>
+        <button class="col" data-col="cool">冷色</button>
+      </div>
+      <label>时长 <b id="durV">180</b> ms</label>
+      <input type="range" id="dur" min="80" max="500" value="180" step="10">
+      <label>沿边长度 <b id="lenV">40</b>%（封顶 520 px）</label>
+      <input type="range" id="len" min="8" max="100" value="40" step="2">
+      <label>粗细</label>
+      <div class="btns">
+        <button class="wgt on" data-w="4">3 px</button>
+        <button class="wgt" data-w="7">6 px</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>行为</h2>
+      <div class="kv">
+        触发条件：<b>impactGate 开 且 穿越成功</b><br>
+        被拒绝时：<b>不画</b>（默认）<br>
+        默认开关：<b>关</b><br>
+        新设置：<code>impactFlash</code><br>
+        鼠标穿透：<b>必须</b>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="note">
+  <b>为什么不做整条边：</b>整条边发亮会像"警告/错误"。只画从落点展开的一段（默认 40%，封顶 520 px），
+  读起来是"你从这里穿过去了"，而不是"出事了"。<br>
+  <b>为什么 180 ms：</b>短到不拖手感，长到能被余光看见。缓出（<code>opacity 1→0</code>），不做缩放 —— 缩放会闪。<br>
+  <b>实现：</b>复用 <code>Overlay</code> 已有的分层窗口，新增一个 <code>impactFlash</code> 层；
+  <b>不新增窗口</b>，否则每块屏一个窗口。层必须带 <code>WS_EX_TRANSPARENT</code>。
+</div>
+
+<script>
+const screen = document.getElementById('screen');
+const dot = document.getElementById('dot');
+const bars = {
+  left: document.getElementById('bLeft'),
+  right: document.getElementById('bRight'),
+  top: document.getElementById('bTop'),
+  bottom: document.getElementById('bBottom')
+};
+
+const colors = {
+  accent: ['#4c8dff', 'rgba(76,141,255,0)'],
+  warm:   ['#f0a429', 'rgba(240,164,41,0)'],
+  cool:   ['#3fd6c0', 'rgba(63,214,192,0)']
+};
+let col = 'accent', dur = 180, pct = 40, wgt = 4;
+
+function styleBars() {
+  const [c0, c1] = colors[col];
+  for (const [k, el] of Object.entries(bars)) {
+    const horiz = (k === 'left' || k === 'right');
+    el.style.background = horiz
+      ? `linear-gradient(to bottom, ${c1}, ${c0} 18%, ${c0} 82%, ${c1})`
+      : `linear-gradient(to right, ${c1}, ${c0} 18%, ${c0} 82%, ${c1})`;
+    if (horiz) el.style.width = wgt + 'px';
+    else el.style.height = wgt + 'px';
+  }
+}
+
+function flash(edge, fromFrac) {
+  const el = bars[edge];
+  const horizontalEdge = (edge === 'left' || edge === 'right');
+  // length along the edge, from the landing point
+  const total = horizontalEdge ? screen.clientHeight - 28 : screen.clientWidth - 28;
+  const len = Math.min(total * pct / 100, 520);
+  el.style.opacity = '1';
+  el.style.transition = 'none';
+  if (horizontalEdge) {
+    el.style.height = len + 'px';
+    el.style.top = (14 + fromFrac * total) + 'px';
+    el.style.bottom = 'auto';
+  } else {
+    el.style.width = len + 'px';
+    el.style.left = (14 + fromFrac * total) + 'px';
+    el.style.right = 'auto';
+  }
+  // force reflow, then ease out
+  void el.offsetWidth;
+  el.style.transition = `opacity ${dur}ms cubic-bezier(.16,.84,.44,1)`;
+  el.style.opacity = '0';
+}
+
+function moveDot(xPct, yPct) {
+  dot.style.left = xPct + '%';
+  dot.style.top = yPct + '%';
+}
+
+const CX = 50, CY = 50;
+function go(edge) {
+  if (edge === 'left')  { moveDot(4, CY); flash('left',  .3); }
+  if (edge === 'right') { moveDot(96, CY); flash('right', .3); }
+  if (edge === 'top')   { moveDot(CX, 6); flash('top',   .3); }
+  if (edge === 'bottom'){ moveDot(CX, 94); flash('bottom', .3); }
+  document.getElementById('cap').textContent = '穿越：' + edge;
+}
+
+document.getElementById('hitL').onclick = () => go('left');
+document.getElementById('hitR').onclick = () => go('right');
+document.getElementById('hitT').onclick = () => go('top');
+document.getElementById('hitB').onclick = () => go('bottom');
+document.getElementById('reject').onclick = () => {
+  moveDot(CX, 96);
+  document.getElementById('cap').textContent = '被速度门槛拒绝 — 不画光效';
+};
+
+document.querySelectorAll('.col').forEach(b => b.onclick = () => {
+  document.querySelectorAll('.col').forEach(x => x.classList.remove('on'));
+  b.classList.add('on'); col = b.dataset.col; styleBars();
+});
+document.querySelectorAll('.wgt').forEach(b => b.onclick = () => {
+  document.querySelectorAll('.wgt').forEach(x => x.classList.remove('on'));
+  b.classList.add('on'); wgt = +b.dataset.w; styleBars();
+});
+document.getElementById('dur').oninput = e => {
+  dur = +e.target.value; document.getElementById('durV').textContent = dur;
+};
+document.getElementById('len').oninput = e => {
+  pct = +e.target.value; document.getElementById('lenV').textContent = pct;
+};
+
+styleBars();
+</script>
+</body>
+</html>

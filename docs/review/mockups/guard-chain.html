@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>守卫链条 — 真实轨迹回放（问题 3 / 4 / 6b）</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 28px 40px;
+    font: 14px/1.6 "Segoe UI", system-ui, sans-serif;
+    background: #1b1b1f; color: #e6e6e9;
+  }
+  h1 { font-size: 19px; font-weight: 600; margin: 0 0 4px; }
+  .sub { color: #9a9aa2; margin: 0 0 18px; font-size: 13px; max-width: 96ch; }
+  .wrap { display: grid; grid-template-columns: 1fr 340px; gap: 18px; align-items: start; }
+  .stage { background: #242429; border: 1px solid #33333a; border-radius: 10px; padding: 16px; }
+  canvas { display: block; width: 100%; height: 260px; border-radius: 7px; background: #141418; }
+  .side { display: flex; flex-direction: column; gap: 14px; }
+  .panel { background: #242429; border: 1px solid #33333a; border-radius: 10px; padding: 14px; }
+  .panel h2 { font-size: 13px; margin: 0 0 10px; font-weight: 600; color: #b9b9c2; }
+  button {
+    font: inherit; font-size: 13px; padding: 7px 11px; border-radius: 7px;
+    border: 1px solid #3d3d46; background: #2a2a31; color: #e6e6e9; cursor: pointer;
+  }
+  button:hover { background: #33333c; }
+  button.primary { background: #2f3d55; border-color: #4c8dff; color: #cfe0ff; }
+  .btns { display: flex; gap: 8px; flex-wrap: wrap; }
+  .kv { font-size: 12.5px; color: #b9b9c2; line-height: 2; }
+  .kv b { color: #e6e6e9; font-variant-numeric: tabular-nums; }
+  .log {
+    font: 12px/1.65 ui-monospace, "Cascadia Mono", Consolas, monospace;
+    background: #141418; border: 1px solid #2c2c34; border-radius: 7px;
+    padding: 9px 11px; height: 190px; overflow-y: auto; white-space: pre;
+  }
+  .log .w { color: #4ec97a; }
+  .log .b { color: #f0b429; }
+  .log .n { color: #8b8b94; }
+  .legend { font-size: 12.5px; color: #9a9aa2; line-height: 1.95; }
+  .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: 1px; }
+  .note { margin-top: 18px; padding: 13px 15px; border-radius: 9px;
+          background: #22222a; border-left: 3px solid #4c8dff; font-size: 13px; }
+  .note.bad { border-left-color: #e05c5c; }
+  code { background: #2c2c34; padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
+  .pill { display:inline-block; padding:1px 7px; border-radius:5px; font-size:11.5px; font-weight:600; }
+  .pw { background:#1d3a28; color:#4ec97a; border:1px solid #2f6a44; }
+  .pb { background:#3d3218; color:#f0b429; border:1px solid #6a552f; }
+  .pn { background:#26262e; color:#8b8b94; border:1px solid #33333c; }
+</style>
+</head>
+<body>
+
+<h1>问题 3 / 4 / 6b — 用真实轨迹回放</h1>
+<p class="sub">
+  下面四段数据是 <b>cw_devshell 实测输出</b>，不是编的物理模型。单屏 1920 宽，
+  <code>edgeThresholdPx=1</code>、<code>wrapGuardPx=50</code>、撞击模式关。
+</p>
+
+<div class="wrap">
+  <div class="stage">
+    <canvas id="cv"></canvas>
+    <div class="btns" style="margin-top:14px">
+      <button class="primary" data-t="a">A 压右边缘穿越后继续推</button>
+      <button data-t="b">B 压左边缘</button>
+      <button data-t="c">C 慢速 1 px/16 ms</button>
+      <button data-t="d">D 离开 2–3 px 再压</button>
+    </div>
+  </div>
+
+  <div class="side">
+    <div class="panel">
+      <h2>当前帧</h2>
+      <div class="kv">
+        手的位置：<b id="kHand">—</b><br>
+        指针落在：<b id="kPtr">—</b><br>
+        判定：<span id="kVerdict" class="pill pn">—</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>事件</h2>
+      <div class="log" id="log"></div>
+    </div>
+
+    <div class="panel">
+      <h2>图例</h2>
+      <div class="legend">
+        <span class="sw" style="background:#4c8dff"></span>指针位置<br>
+        <span class="sw" style="background:#4ec97a"></span>落点<br>
+        <span class="sw" style="background:#f0b429"></span>守卫覆盖（半径 50）<br>
+        <span class="sw" style="background:#8b8b94"></span>手的位置（虚线）
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="note bad" id="note"></div>
+
+<script>
+const W = 1920, GUARD = 50;
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const logEl = document.getElementById('log');
+const noteEl = document.getElementById('note');
+
+// Verbatim cw_devshell traces.
+const traces = {
+  a: {
+    frames: [
+      { hand: 1400, ptr: 1400, v: 'none' },
+      { hand: 1919, ptr: 1,    v: 'wrap' },
+      { hand: 1920, ptr: 1920, v: 'block' },
+      { hand: 1930, ptr: 1,    v: 'wrap' },
+      { hand: 1950, ptr: 1,    v: 'wrap' }
+    ],
+    note: '实测原样：<code>stroke 1400 -&gt; 1919</code> 穿越落到 1；<code>move 1920</code> 被守卫拦' +
+          '（<code>away=1 &le; 2</code>）；<code>move 1930</code> 离开 11 px 于是<b>又穿一次</b>；' +
+          '<code>move 1950</code> 再穿。每次都把指针拽回 x=1 —— 手还在往右推，视觉上就是"指针被甩飞/来回拉扯"。' +
+          '<br><br><b>为什么偏偏你会遇到：</b> 远程桌面（RDP）送来的是<b>绝对坐标</b>而不是相对位移。' +
+          '本地鼠标穿越后 Windows 从落点继续算增量，下一条事件是 x≈2；RDP 则把手的真实绝对位置直接送进来（x=1930），' +
+          '于是重复穿越。这条差异正好解释"你在 RDP 下看到、本地双屏却不明显"。'
+  },
+  b: {
+    frames: [
+      { hand: 400, ptr: 400,  v: 'none' },
+      { hand: 0,   ptr: 1918, v: 'wrap' },
+      { hand: 0,   ptr: 0,    v: 'block' },
+      { hand: 20,  ptr: 1918, v: 'wrap' }
+    ],
+    note: '左边缘基准 <code>m_wrapEdgeCoord = left = 0</code>，落点 1918。' +
+          '注意与右边缘的<b>错位方向相反</b>：右边缘基准 1919、到达点 1918（在内侧）；' +
+          '左边缘基准 0、到达点 0..1（在外侧）。<b>左右不对称来自坐标错位，不是速度。</b>'
+  },
+  c: {
+    frames: [
+      { hand: 400, ptr: 400,  v: 'none' },
+      { hand: 6,   ptr: 6,    v: 'none' },
+      { hand: 4,   ptr: 4,    v: 'none' },
+      { hand: 3,   ptr: 3,    v: 'none' },
+      { hand: 2,   ptr: 2,    v: 'none' },
+      { hand: 1,   ptr: 1,    v: 'none' },
+      { hand: 0,   ptr: 1918, v: 'wrap' }
+    ],
+    note: '实测：慢速<b>本身不会</b>导致失效 —— 只要真的到达 <code>x &le; left+edge</code>，穿越照常发生。' +
+          '<b>所以问题 3 不是"速度"，而是到达之后重新武装的条件。</b>' +
+          '<br>注意 <code>x=2</code> 不穿越是对的：阈值是 <code>x &le; 1</code>。' +
+          '你感觉"到边界不响应"，实际是手停在 2 而规则要 1。'
+  },
+  d: {
+    frames: [
+      { hand: 1919, ptr: 1,    v: 'wrap' },
+      { hand: 1917, ptr: 1917, v: 'block' },
+      { hand: 1919, ptr: 1919, v: 'block' },
+      { hand: 1921, ptr: 1,    v: 'wrap' }
+    ],
+    note: '这是"时灵时不灵"的突变点。回退 2 px 时 <code>away = 2 &le; slack(2)</code> → 仍被拦；' +
+          '再压回 1919 也拦。必须退到 <code>away &ge; 3</code>（即 x &le; 1916）才可能重新武装。' +
+          '<br><br><b>而 <code>slack = max(edgeThresholdPx, 2) = 2</code> 与真实驱动抖动 ±1 px 同量级</b> —— ' +
+          '同一套手势的成败取决于那一两个像素的抖动。这就是"大部分时间不行、偶尔可以"。'
+  }
+};
+
+let cur = 'a';
+let frame = 0;
+let timer = null;
+
+function show(key) {
+  cur = key;
+  frame = -1;
+  logEl.innerHTML = '';
+  noteEl.innerHTML = traces[key].note;
+  if (timer) { clearInterval(timer); timer = null; }
+  advance();
+  timer = setInterval(() => {
+    if (frame >= traces[cur].frames.length - 1) { clearInterval(timer); timer = null; return; }
+    advance();
+  }, 900);
+}
+
+function advance() {
+  frame++;
+  const f = traces[cur].frames[frame];
+  if (!f) return;
+  const cls = f.v === 'wrap' ? 'w' : f.v === 'block' ? 'b' : 'n';
+  const word = f.v === 'wrap' ? 'WRAP  -> 落点 ' + f.ptr
+             : f.v === 'block' ? '守卫拦截，指针留在 ' + f.ptr
+             : '无动作';
+  const d = document.createElement('div');
+  d.className = cls;
+  d.textContent = '手 ' + f.hand + '   ' + word;
+  logEl.appendChild(d);
+  logEl.scrollTop = logEl.scrollHeight;
+
+  document.getElementById('kHand').textContent = f.hand;
+  document.getElementById('kPtr').textContent = f.ptr;
+  const pv = document.getElementById('kVerdict');
+  pv.className = 'pill ' + (f.v === 'wrap' ? 'pw' : f.v === 'block' ? 'pb' : 'pn');
+  const prevWrap = frame > 0 && traces[cur].frames[frame - 1].v === 'wrap';
+  if (f.v === 'wrap') pv.textContent = 'wrap';
+  else if (f.v === 'block') pv.textContent = prevWrap
+    ? 'guard · blocked  + 上一轮的 wrap 仍在'
+    : 'guard · blocked';
+  else pv.textContent = '无动作';
+  draw();
+}
+
+function draw() {
+  const r = cv.getBoundingClientRect();
+  cv.width = Math.round(r.width * devicePixelRatio);
+  cv.height = Math.round(260 * devicePixelRatio);
+  ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  const w = r.width, h = 260, pad = 26;
+  const scale = (w - pad * 2) / W;
+  const f = traces[cur].frames[frame];
+  if (!f) return;
+  const lastWrap = traces[cur].frames.slice(0, frame + 1).filter(x => x.v === 'wrap').pop();
+
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = '#141418'; ctx.fillRect(0, 0, w, h);
+
+  const my = h / 2 - 46, mh = 92;
+  ctx.fillStyle = '#1c1c22'; ctx.fillRect(pad, my, W * scale, mh);
+  ctx.strokeStyle = '#3a3a44'; ctx.strokeRect(pad + .5, my + .5, W * scale - 1, mh - 1);
+
+  if (lastWrap) {
+    const lx = pad + lastWrap.ptr * scale;
+    ctx.fillStyle = 'rgba(240,180,41,.13)';
+    ctx.strokeStyle = 'rgba(240,180,41,.5)';
+    ctx.beginPath();
+    ctx.rect(lx - GUARD * scale, my, GUARD * 2 * scale, mh);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#4ec97a';
+    ctx.beginPath(); ctx.arc(lx, my + mh / 2, 5, 0, Math.PI * 2); ctx.fill();
+  }
+
+  ctx.fillStyle = 'rgba(76,141,255,.18)';
+  ctx.fillRect(pad, my, Math.max(2, 2 * scale), mh);
+  ctx.fillRect(pad + W * scale - Math.max(2, 2 * scale), my, Math.max(2, 2 * scale), mh);
+
+  const hx = pad + Math.max(0, Math.min(W - 1, f.hand)) * scale;
+  ctx.strokeStyle = '#8b8b94';
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath(); ctx.moveTo(hx, my - 12); ctx.lineTo(hx, my + mh + 12); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#8b8b94';
+  ctx.font = '11px "Segoe UI", sans-serif';
+  ctx.fillText('手 ' + f.hand, hx + 5, my - 16);
+
+  const px = pad + f.ptr * scale;
+  ctx.fillStyle = '#4c8dff';
+  ctx.beginPath();
+  ctx.moveTo(px, my + mh / 2 - 9);
+  ctx.lineTo(px + 8, my + mh / 2);
+  ctx.lineTo(px, my + mh / 2 + 9);
+  ctx.closePath(); ctx.fill();
+
+  ctx.fillStyle = '#6b6b74';
+  ctx.font = '11px "Segoe UI", sans-serif';
+  ctx.fillText('x = 0', pad, my + mh + 26);
+  ctx.textAlign = 'right';
+  ctx.fillText('x = ' + (W - 1), pad + W * scale, my + mh + 26);
+  ctx.textAlign = 'left';
+}
+
+document.querySelectorAll('button[data-t]').forEach(b => b.onclick = () => {
+  document.querySelectorAll('button[data-t]').forEach(x => x.classList.remove('primary'));
+  b.classList.add('primary');
+  show(b.dataset.t);
+});
+window.addEventListener('resize', draw);
+show('a');
+</script>
+</body>
+</html>

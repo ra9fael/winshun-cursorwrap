@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="470" viewBox="0 0 980 470"
+     font-family="Segoe UI, system-ui, sans-serif">
+  <defs>
+    <style>
+      .bg      { fill: #1b1b1f; }
+      .panel   { fill: #242429; stroke: #33333a; }
+      .win     { fill: #1e1e22; stroke: #4ec97a; stroke-width: 2; }
+      .win-bad { fill: #1e1e22; stroke: #e0a020; stroke-width: 2; }
+      .cap     { fill: #e6e6e9; font-size: 13px; }
+      .big     { font-size: 24px; font-weight: 600; }
+      .small   { font-size: 13px; }
+      .h       { fill: #e6e6e9; font-size: 15px; font-weight: 600; }
+      .muted   { fill: #9a9aa2; font-size: 12.5px; }
+      .bad     { fill: #e05c5c; font-size: 12px; }
+      .ok      { fill: #4ec97a; font-size: 12px; }
+      .warn    { fill: #f0b429; font-size: 12px; }
+      .mono    { font-family: Cascadia Mono, Consolas, monospace; font-size: 12px; fill: #cfe0ff; }
+      .rule    { stroke: #3a3a44; stroke-width: 1; }
+      .cut     { stroke: #e05c5c; stroke-width: 1.5; stroke-dasharray: 4 3; }
+    </style>
+  </defs>
+
+  <rect class="bg" width="980" height="470"/>
+
+  <text x="28" y="34" class="h">问题 5b — 浮层文字被底边框切掉</text>
+  <text x="28" y="55" class="muted">实测：kReadoutH = 60，加速度行基线 y=46，13 px 字体占 46..63，越过边框并出窗。</text>
+
+  <!-- ===== current ===== -->
+  <text x="28" y="90" class="h" font-size="13">现状</text>
+
+  <g transform="translate(28,102)">
+    <rect class="panel" x="-12" y="-12" width="252" height="120" rx="6"/>
+    <rect class="win-bad" x="0" y="0" width="196" height="60" rx="0"/>
+    <text x="10" y="20" class="cap">approach speed</text>
+    <text x="10" y="44" class="big" fill="#e0a020">0 / 3000</text>
+    <text x="118" y="44" class="small" fill="#e0a020">px/s</text>
+    <text x="10" y="59" class="small" fill="#e6e6e9">accel — / 1600 px/s²</text>
+
+    <!-- the overflow, drawn outside the 60px window -->
+    <line class="cut" x1="-16" y1="60" x2="216" y2="60"/>
+    <text x="0" y="76" class="bad">窗口高 60 到此为止 ↑</text>
+    <text x="0" y="92" class="bad">文字延伸到 y≈63，被下边框压住</text>
+  </g>
+
+  <g transform="translate(300,102)">
+    <text x="0" y="-6" class="warn">这行还藏了两个坑：</text>
+    <text x="0" y="14" class="muted">·「accel —」的破折号要靠猜才知道是"测不到"</text>
+    <text x="0" y="34" class="muted">·「/ 1600」是门槛，不是测量值，但排版像除法</text>
+    <text x="0" y="54" class="muted">· 于是用户读成"加速度一直是 1600"</text>
+  </g>
+
+  <line class="rule" x1="28" y1="240" x2="952" y2="240"/>
+
+  <!-- ===== proposed: two-row ===== -->
+  <text x="28" y="272" class="h" font-size="13">方案 A · 高度按行数算（推荐）</text>
+  <g transform="translate(28,286)">
+    <rect class="win" x="0" y="0" width="212" height="78"/>
+    <text x="10" y="19" class="cap">接近速度</text>
+    <text x="10" y="44" class="big" fill="#4ec97a">0 / 3000</text>
+    <text x="130" y="44" class="small" fill="#4ec97a">px/s</text>
+    <text x="10" y="64" class="small" fill="#e6e6e9">加速 测不到 · 门槛 1600</text>
+
+    <text x="0" y="98" class="mono">h = 13 + 24 + 13 + 3*7 = 71 → 取 78</text>
+    <text x="0" y="116" class="ok">内容底 64 + 内边距 ≥ 4 → 无溢出</text>
+  </g>
+
+  <!-- ===== proposed: inline ===== -->
+  <text x="300" y="272" class="h" font-size="13">方案 B · 加速度并入主行</text>
+  <g transform="translate(300,286)">
+    <rect class="win" x="0" y="0" width="248" height="60"/>
+    <text x="10" y="19" class="cap">接近速度</text>
+    <text x="10" y="44" class="big" fill="#4ec97a" font-size="21">0 / 3000 px/s</text>
+    <text x="10" y="56" class="small" fill="#f0b429" font-size="11">加速 测不到</text>
+
+    <text x="0" y="98" class="mono">h 仍是 60，字号缩到 21/11</text>
+    <text x="0" y="116" class="warn">小字仍在边缘，高 DPI 下更险</text>
+  </g>
+
+  <!-- ===== three states ===== -->
+  <text x="590" y="272" class="h" font-size="13">文案三态</text>
+  <g transform="translate(590,286)">
+    <rect class="win" x="0" y="0" width="212" height="78"/>
+    <text x="10" y="19" class="cap">接近速度</text>
+    <text x="10" y="44" class="big" fill="#4ec97a">4200 / 3000</text>
+    <text x="10" y="64" class="small" fill="#4ec97a">加速 +3479 ✓</text>
+
+    <rect class="win-bad" x="0" y="92" width="212" height="78"/>
+    <text x="10" y="111" class="cap">接近速度</text>
+    <text x="10" y="136" class="big" fill="#e0a020">4200 / 3000</text>
+    <text x="10" y="156" class="small" fill="#f0b429">加速 −6227 刹车 ✗</text>
+
+    <rect class="win-bad" x="238" y="92" width="212" height="78"/>
+    <text x="248" y="111" class="cap">接近速度</text>
+    <text x="248" y="136" class="big" fill="#e0a020">4200 / 3000</text>
+    <text x="248" y="156" class="small" fill="#9a9aa2">加速 测不到 ✗</text>
+  </g>
+
+  <text x="28" y="452" class="muted">
+    结论：走方案 A。高度由行数推导，并加一条单元测试：计算高度 ≥ 最后一行底 + 4 px。
+  </text>
+</svg>
