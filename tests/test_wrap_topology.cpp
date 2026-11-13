@@ -63,6 +63,31 @@ CW_TEST(topology_single_monitor_wraps_within_itself)
     CW_CHECK_EQ(y4, 1);
 }
 
+CW_TEST(topology_landing_respects_work_area)
+{
+    // The taskbar occupies the bottom 48 rows: the work area ends at 1032.
+    // A wrap must never DELIVER the pointer into the taskbar band, and the
+    // work area is per monitor — monitor 1's own must be respected.
+    MonitorBox a = box(0, 0, 1920, 1080, true);
+    a.workLeft = 0;
+    a.workTop = 0;
+    a.workRight = 1920;
+    a.workBottom = 1032;
+    a.hasWorkArea = true;
+    Topology t;
+    t.initialize({ a });
+    // Bottom -> top edge: 1. Top -> bottom edge: the last WORK row (1031),
+    // not the monitor's last row (1079), which is the taskbar.
+    const auto [x, y] = t.wrapDestination(0, 960, 1079, EdgeType::Bottom, WrapMode::Both);
+    CW_CHECK_EQ(y, 1);
+    const auto [x2, y2] = t.wrapDestination(0, 960, 0, EdgeType::Top, WrapMode::Both);
+    CW_CHECK_EQ(y2, 1031);
+    // Horizontal landings are unaffected by a bottom taskbar.
+    const auto [x3, y3] = t.wrapDestination(0, 0, 540, EdgeType::Left, WrapMode::Both);
+    CW_CHECK_EQ(x3, 1918);
+    CW_CHECK_EQ(y3, 540);
+}
+
 // -------------------------------------------------- grid scenarios (PowerToys)
 
 CW_TEST(grid_dual_horizontal)

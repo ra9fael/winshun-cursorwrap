@@ -1,0 +1,72 @@
+# The acceleration floor must mean the same thing at every report rate, and the
+# numbers must be tunable.
+#
+# The user's report was "the numbers are still wrong and it is not usable". The
+# cause was not the threshold, it was the MEASUREMENT: the acceleration window
+# was only widened until each half held 4 px of travel, which at 125 Hz is ~16 ms
+# — two samples at the same speed. Measured, the same physical flick read:
+#
+#     800 -> 4000 px/s at 125 Hz : accel = 0
+#     800 -> 4000 px/s at 500 Hz : accel = 0
+#     800 -> 4000 px/s at 1000 Hz: accel = 27833
+#
+# No threshold can serve those. The window is now a fixed 100 ms in time and each
+# half speed is a least-squares slope through every sample in it, so quantisation
+# averages out. The same flick now reads 3200-3600 px/s² at 125, 500 and 1000 Hz.
+#
+# Run: build/cw_devshell.exe run tests/scenarios/acceleration-across-rates.txt
+
+monitor 0,0,1920,1080
+set impactGate on
+set mode both
+set edge 1
+set guard 20
+set band 400
+set speed 700
+set accel 2500
+
+# --- a real ramp reads the same at every rate ----------------------------
+# 500 -> 8000 px/s over the approach: a genuine ~3750 px/s² kick. All three must
+# clear the 2500 floor, and none of them may read 0 (the old 125 Hz answer) or
+# tens of thousands (the old 1000 Hz answer).
+expect wrap
+hand 1200 500 8000 125 2000
+expect wrap
+hand 1200 500 8000 500 2000
+expect wrap
+hand 1200 500 8000 1000 2000
+
+# --- a constant-speed hand does NOT accelerate ---------------------------
+# Same speed floor, no ramp. Letting this wrap is the "it triggers on a quick
+# but steady move" complaint.
+set accel 2500
+expect no-wrap
+hand 1200 3000 3100 1000 2000
+expect no-wrap
+hand 1200 3000 3100 125 2000
+
+# --- braking into the edge is refused ------------------------------------
+# Fast far out, slowing on arrival: the sign must be negative, so the floor
+# rejects it whatever its magnitude.
+set accel 1500
+expect no-wrap
+hand 1200 6000 400 1000 2000
+
+# --- the speed floor is unaffected by measuring acceleration ------------
+# This is the regression that made the gate unusable with BOTH floors on: the
+# acceleration window used to overwrite the speed window, so a genuine 2300 px/s
+# flick reported the 100 ms average (1700 px/s) and failed a 2000 px/s floor.
+# With accel ON and a speed floor of 2000, a 2333 px/s flick must still wrap.
+set accel 0
+set speed 2000
+expect wrap
+hand 1200 500 8000 1000 2000
+
+# --- the reading never explodes -----------------------------------------
+# A 1 px step in 1 ms is 1000 px/s; the reported speed must stay inside the
+# documented 20000 px/s ceiling no matter what the driver reports.
+set speed 700
+set accel 0
+expect speed<20001
+hand 1700 9000 12000 1000 500
+dump

@@ -3,7 +3,7 @@
   "manifest": 1,
   "id": "ra9fael.cursorwrap",
   "name": {"zh": "光标回绕", "en": "Cursor wrap"},
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": {
     "zh": "光标到达屏幕外边时从对边进入（多显示器边缘拓扑，支持仅纵向/仅横向与按住 Ctrl/Shift 激活）；cursorwrap 关键字查看状态与开关",
     "en": "The cursor re-enters from the opposite edge when it reaches an outer edge (multi-monitor edge topology; vertical/horizontal-only modes and Ctrl/Shift activation); the cursorwrap keyword shows status and toggles it"
@@ -124,7 +124,7 @@
       "key": "impactAccelPps2",
       "type": "number",
       "title": {"zh": "撞击加速度门槛（像素/秒²）", "en": "Impact acceleration gate (px/s²)"},
-      "hint": {"zh": "0 = 关闭（只看速度）；开启后必须「加速冲进边缘」才回绕——匀速滑到边缘再快也不回绕，到边缘已经减速的也不回绕。建议 5000–20000", "en": "0 = off (speed only); when on, the hand must be SPEEDING UP into the edge — a constant-speed sweep never wraps however fast, and neither does a hand that has already slowed down at the edge. 5000–20000 is a sensible range"},
+      "hint": {"zh": "0 = 关闭（只看速度）；开启后必须「加速冲进边缘」才回绕——匀速滑到边缘再快也不回绕，到边缘已经减速的也不回绕。实测：匀速读数恒为 0，正常甩腕约 1600–3600，因此建议 500–2000（默认 500 已能区分，调高更严格）", "en": "0 = off (speed only); when on, the hand must be SPEEDING UP into the edge — a constant-speed sweep never wraps however fast, and neither does a hand that has already slowed at the edge. Measured: a steady hand reads 0 and a normal flick reads 1600–3600, so 500–2000 is the usable range (500 already separates them; higher is stricter)"},
       "default": 0
     },
     {

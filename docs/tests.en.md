@@ -152,10 +152,20 @@ build\cw_devshell.exe gui                     # real windows, keys 1/2/3, q quit
 | `gui-layout.txt` | Dual `[-2560,0..0,1440;0,0..2560,1440]`: outer edges wrap to the layout's opposite outer edge, the **seam (inner edge) never wraps**, `vertical` mode wraps only top/bottom; both windows open and close mid-run |
 | `windows.txt` | The windows are driven by **settings** (not a second switch), are independent of each other, leave nothing behind when closed, and the engine still wraps with no windows at all |
 | `visual-demo.txt` | Feeds the windows two clusters of arrival speeds for a human to inspect the histogram, readout and decision log (pair with `tools/devshell/capture.ps1`) |
+| `wrap-smoothness.txt` | Normal mode (gate off) "smoothness": exact landings on all four edges (Right→`left+1`, Left→`right-1`, Top→`bottom-1`, Bottom→`top+1`), zero vertical drift across a seam, one wrap per continuous `sweep`, every direction landing inside the **work area** (no row ≥1032 is ever a landing), and the taskbar itself still reachable |
+| `acceleration-across-rates.txt` | The acceleration reading does not follow the report rate: one 500→8000 px/s flick reads 3458/3200/3600 px/s² at 125/500/1000 Hz, a steady hand always reads 0, braking reads negative, and the acceleration window cannot pollute the speed window |
+| `gate-off-churn.txt` | With impact mode off, sweeping across an edge must not fire repeatedly: holding at the edge and sliding along it wrap once, and re-arm after leaving |
+| `acceleration.txt` | The acceleration condition: steady refused / real ramp wraps / braking refused / the floor is settable (500 passes and 3000 refuses the same mild flick) |
+| `regressions.txt` | Behavioural regressions of earlier fixes (single monitor, guard, mode filtering, landings) |
+| `teardown.txt` | Windows and worker threads shut down without leftovers |
 
-A scenario file holds one command per line (`#` comments): `monitor`, `set`,
-`move`, `stroke`, `brake`, `modifier`, `drag`, `wait`, `show`, `dump`,
-`expect wrap|no-wrap|speed>=N|speed<N`. A failed expectation is a non-zero exit.
+A scenario file holds one command per line (`#` comments): `monitor` (optionally
+with a work area — `l,t,r,b,workL,workT,workR,workB` — to declare a taskbar),
+`set`, `move`, `stroke`, `brake`, `hand` (linear speed ramp at a real report rate,
+integer pixel quantisation), `sweep` (feeds a wrap back into the next sample, the
+way a hand keeps moving), `modifier`, `drag`, `wait`, `show`, `dump`,
+`expect wrap|no-wrap|speed>=N|speed<N|accel>=N|accel<N|at <x> <y>`. A failed
+expectation is a non-zero exit.
 
 **What it can and cannot prove**: it proves the *behaviour* of the decision logic
 and the GUI — which edges are drawn, what a reading is, which gate refused, the
@@ -246,7 +256,7 @@ coordinates.
 - L1 green (currently 140 cases + 6 fixtures, all synthetic geometry;
   `live-single.json` is read by the probe only, not by L1)
 - L3 fully passing (currently 119/119)
-- L3.5 scenarios passing (currently 8, via `python tests/devshell_scenarios.py`)
+- L3.5 scenarios passing (currently 10, via `python tests/devshell_scenarios.py`)
 - L0 static validation passing
 - The single-display (including Remote Desktop) part of L4 has been measured and
   passed; **all multi-display boxes must be checked** before multi-display can be

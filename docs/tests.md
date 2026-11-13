@@ -148,9 +148,18 @@ build\cw_devshell.exe gui                     # 真窗口，键盘 1/2/3 驱动�
 | `gui-layout.txt` | 双屏 `[-2560,0..0,1440;0,0..2560,1440]`：外边缘回绕到对侧最外边缘、**接缝（内边）永不回绕**、`vertical` 模式只回绕上下；两个窗口可在运行中开关 |
 | `windows.txt` | 窗口由**设置**驱动（不是另一个开关）；两个窗口互相独立；关掉后不残留；无窗口时引擎照常回绕 |
 | `visual-demo.txt` | 给窗口喂两簇到达速度，供人肉眼检查直方图 / 读数 / 决策日志（配合 `tools/devshell/capture.ps1` 截图） |
+| `wrap-smoothness.txt` | 普通模式（关撞击）的「丝滑」：四条边落点精确值（右→`left+1`、左→`right-1`、上→`bottom-1`、下→`top+1`）、横跨接缝时纵坐标零漂移、连续 `sweep` 只回绕一次、四个方向都落在**工作区**内（≥1032 的行永不作为落点）、任务栏本身仍可移入/点击 |
+| `acceleration-across-rates.txt` | 加速度读数不随回报率变化：同一 500→8000 px/s 甩腕在 125/500/1000 Hz 读到 3458/3200/3600 px/s²；匀速恒为 0；减速为负；加速度窗口不再污染速度窗口 |
+| `gate-off-churn.txt` | 关闭撞击后连续跨越不得频繁触发：贴边保持、沿边滑动都只回绕一次，离开后可重新触发 |
+| `acceleration.txt` | 加速度条件：匀速拒绝 / 真加速回绕 / 减速拒绝 / 门槛可调（500 通过、3000 拒绝同一轻微甩腕） |
+| `regressions.txt` | 历次修复的行为回归（单屏、守卫、模式过滤、安置点） |
+| `teardown.txt` | 窗口与线程收尾无残留 |
 
-场景文件一行一条命令，`#` 起注释：`monitor`、`set`、`move`、`stroke`、`brake`、
-`modifier`、`drag`、`wait`、`show`、`dump`、`expect wrap|no-wrap|speed>=N|speed<N`。
+场景文件一行一条命令，`#` 起注释：`monitor`（可带工作区：
+`l,t,r,b,workL,workT,workR,workB`，用来声明任务栏）、`set`、`move`、`stroke`、
+`brake`、`hand`（按真实回报率线性加速并做整数像素量化）、`sweep`（把回绕结果反馈
+给下一次采样，像真手一样连续移动）、`modifier`、`drag`、`wait`、`show`、`dump`、
+`expect wrap|no-wrap|speed>=N|speed<N|accel>=N|accel<N|at <x> <y>`。
 期望没满足时退出码非 0。
 
 **它能证明什么 / 不能证明什么**：能证明判定逻辑与 GUI 的**行为**（画在哪些边、
@@ -232,7 +241,7 @@ build\cw_devshell.exe gui                     # 真窗口，键盘 1/2/3 驱动�
 - L1 全绿（当前 140 用例 + 6 布局 fixture，全部是合成几何；`live-single.json` 只被
   探针读取，不进 L1）
 - L3 全通过（当前 119/119）
-- L3.5 场景全通过（当前 8 个场景，`python tests/devshell_scenarios.py`）
+- L3.5 场景全通过（当前 10 个场景，`python tests/devshell_scenarios.py`）
 - L0 静态校验通过
 - L4 单屏与远程桌面单屏部分已实测通过；**多屏部分全部勾选后**才可宣布多屏可发布，
   当前属发布阻塞项

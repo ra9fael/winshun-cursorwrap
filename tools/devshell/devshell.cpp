@@ -31,13 +31,18 @@
 //   set <key> <value>                          a setting, through the real clamp
 //   move <x> <y> [dtMs]                        deliver one sample
 //   stroke <x0> <y0> <x1> <y1> <steps> <dtMs>  a straight stroke
+//   sweep <x> <y> <dx> <steps> <dtMs>          a stroke that feeds its own result
+//                                              back, so a wrap continues the motion
 //   brake <x0> <v0> <v1> <right|left> <dtMs>   decelerating approach
+//   hand <x> <v0> <v1> <rateHz> <maxMs>       a real mouse: linear speed ramp at
+//                                              a real report rate, integer pixels
 //   modifier ctrl|shift|none                   the activation key
 //   drag on|off                                the left button
 //   wait <ms>                                  let the windows repaint
 //   show overlay|data|both|none                toggle the windows live
 //   dump                                       print the engine state
 //   expect wrap|no-wrap|speed>=N|speed<N       assert about the last move
+//   expect at <x> <y>                          assert the exact pointer position
 //
 // The exit code is 0 when every expectation held.
 #include "data_window.h"
@@ -86,6 +91,9 @@ public:
             m_trail.erase(m_trail.begin());
         return { m_x, m_y };
     }
+
+    const std::vector<std::pair<int64_t, int64_t>>& trail() const { return m_trail; }
+    void clearTrail() { m_trail.clear(); }
 
     int64_t x() const { return m_x; }
     int64_t y() const { return m_y; }
@@ -160,6 +168,10 @@ bool parseDouble(const std::string& text, double& out)
     return true;
 }
 
+// A monitor is "left,top,right,bottom" and may carry a WORK AREA as four more
+// numbers: "left,top,right,bottom,workLeft,workTop,workRight,workBottom". The
+// work rect is what the taskbar leaves over, and a scenario needs it to prove
+// that a wrap never lands the cursor under the taskbar.
 std::vector<MonitorBox> parseMonitors(const std::string& text)
 {
     std::vector<MonitorBox> monitors;
@@ -168,17 +180,26 @@ std::vector<MonitorBox> parseMonitors(const std::string& text)
         if (rect.empty())
             continue;
         const auto parts = split(rect, ',');
-        if (parts.size() != 4)
+        if (parts.size() != 4 && parts.size() != 8)
             continue;
-        long long l = 0, t = 0, r = 0, b = 0;
-        if (!parseInt(parts[0], l) || !parseInt(parts[1], t) || !parseInt(parts[2], r)
-            || !parseInt(parts[3], b))
+        long long v[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+        bool ok = true;
+        for (size_t i = 0; i < parts.size(); ++i)
+            ok = ok && parseInt(parts[i], v[i]);
+        if (!ok)
             continue;
         MonitorBox box;
-        box.left = l;
-        box.top = t;
-        box.right = r;
-        box.bottom = b;
+        box.left = v[0];
+        box.top = v[1];
+        box.right = v[2];
+        box.bottom = v[3];
+        if (parts.size() == 8) {
+            box.hasWorkArea = true;
+            box.workLeft = v[4];
+            box.workTop = v[5];
+            box.workRight = v[6];
+            box.workBottom = v[7];
+        }
         box.dpi = 96;
         box.primary = !primarySet; // the first described is the primary
         primarySet = true;
@@ -203,6 +224,11 @@ std::vector<MonitorBox> realMonitors()
             box.top = mi.rcMonitor.top;
             box.right = mi.rcMonitor.right;
             box.bottom = mi.rcMonitor.bottom;
+            box.hasWorkArea = true;
+            box.workLeft = mi.rcWork.left;
+            box.workTop = mi.rcWork.top;
+            box.workRight = mi.rcWork.right;
+            box.workBottom = mi.rcWork.bottom;
             box.primary = (mi.dwFlags & MONITORINFOF_PRIMARY) != 0;
             box.dpi = 96;
             out->push_back(box);
@@ -221,6 +247,21 @@ std::vector<MonitorBox> realMonitors()
             monitors.push_back(box);
     }
     return monitors;
+}
+
+// The x of the nearest outer RIGHT edge, or -1 when the layout has none. `hand`
+// drives toward it so a scenario does not have to hard-code a pixel that moves
+// whenever the layout does.
+int64_t edgeTargetX(const WrapEngine& engine)
+{
+    int64_t target = -1;
+    for (const MonitorEdge& e : engine.outerEdgesSnapshot()) {
+        if (e.type != EdgeType::Right)
+            continue;
+        if (target < 0 || e.position > target)
+            target = e.position;
+    }
+    return target;
 }
 
 const char* edgeName(EdgeType edge)
@@ -299,8 +340,9 @@ bool applySetting(Settings& settings, const std::string& key, const std::string&
 // --- the scenario runner ----------------------------------------------------
 
 struct Expectation {
-    std::string kind; // wrap | no-wrap | speed>=
+    std::string kind; // wrap | no-wrap | speed>=N | accel>=N | at X Y | x< | y<
     long long value = 0;
+    long long value2 = 0;
 };
 
 class Scenario {
@@ -391,6 +433,12 @@ void Scenario::settle(const std::string& line)
             check(m_lastAccel < e.value, line + " -> expected accel < " +
                                              std::to_string(e.value) + ", measured " +
                                              std::to_string(m_lastAccel));
+        else if (e.kind == "at")
+            check(m_pointer->x() == e.value && m_pointer->y() == e.value2,
+                  line + " -> expected the pointer at " + std::to_string(e.value) + "," +
+                      std::to_string(e.value2) + ", it is at " +
+                      std::to_string(m_pointer->x()) + "," +
+                      std::to_string(m_pointer->y()));
     }
     m_expect.clear();
 }
@@ -441,6 +489,27 @@ DataSnapshot Scenario::snapshot()
     return snap;
 }
 
+// A wrap is supposed to look like the pointer carried on moving, so the trail
+// must not step BACKWARDS along the direction of travel, and one arrival must
+// not produce two wraps. This is the "smooth as Windows" requirement in its
+// most literal form: count the visible discontinuities.
+bool trailIsMonotonic(const std::vector<std::pair<int64_t, int64_t>>& trail,
+                      const std::string& axis)
+{
+    if (trail.size() < 2)
+        return true;
+    bool ok = true;
+    for (size_t i = 1; i < trail.size(); ++i) {
+        const long long prev = axis == "x" ? trail[i - 1].first : trail[i - 1].second;
+        const long long curr = axis == "x" ? trail[i].first : trail[i].second;
+        // A wrap teleports; a backwards step along the axis of travel is what
+        // the user sees as a glitch. Allow equality (a held pointer).
+        if (curr < prev)
+            ok = false;
+    }
+    return ok;
+}
+
 bool Scenario::run(const std::string& rawLine)
 {
     const std::string line = trim(rawLine);
@@ -476,6 +545,15 @@ bool Scenario::run(const std::string& rawLine)
         } else if (what.rfind("accel<", 0) == 0) {
             e.kind = "accel<";
             e.value = std::atoll(what.c_str() + 6);
+        } else if (what == "at") {
+            if (parts.size() < 4 || !parseInt(parts[2], e.value)
+                || !parseInt(parts[3], e.value2)) {
+                note("FAIL bad expectation: " + line);
+                ++m_failures;
+                ++m_checks;
+                return false;
+            }
+            e.kind = "at";
         } else {
             note("FAIL unknown expectation: " + what);
             ++m_failures;
@@ -625,6 +703,128 @@ bool Scenario::run(const std::string& rawLine)
              + (right ? "right" : "left") + " edge: speed=" + std::to_string(m_lastSpeed)
              + (m_lastWrapped ? " WRAP" : " no-wrap") + " landed="
              + std::to_string(lastX));
+        settle(line);
+        return true;
+    }
+    if (cmd == "sweep") {
+        // A continuous stroke that FEEDS ITS OWN RESULT BACK, the way a hand does:
+        // the pointer keeps moving from wherever the wrap put it. `stroke` cannot
+        // test this because it always samples points on the original straight
+        // line, so after a wrap it "jumps" to the far side by itself and hides
+        // exactly the discontinuity a user would see.
+        //
+        //   sweep <x> <y> <dx> <steps> <dtMs>    move by (dx,0) per step
+        long long x = 0, y = 0, dx = 0, steps = 16, dt = 8;
+        if (parts.size() < 6 || !parseInt(parts[1], x) || !parseInt(parts[2], y)
+            || !parseInt(parts[3], dx) || !parseInt(parts[4], steps)
+            || !parseInt(parts[5], dt)) {
+            note("FAIL bad sweep: " + line);
+            ++m_failures;
+            ++m_checks;
+            return false;
+        }
+        m_pointer->clearTrail();
+        long long wraps = 0;
+        long long lastX = x, lastY = y;
+        long long curX = x, curY = y;
+        for (long long i = 0; i < steps; ++i) {
+            const long long nextX = curX + dx;
+            const auto [nx, ny] = m_pointer->deliver({ nextX, curY, m_clockUs, m_clockUs / 1000 });
+            m_clockUs += dt * 1000;
+            if (nx != nextX || ny != curY)
+                ++wraps;
+            curX = nx;
+            curY = ny;
+            lastX = nx;
+            lastY = ny;
+        }
+        // Continuity: only x should ever change here, and after the wrap the
+        // pointer must stay on the axis it was travelling on.
+        bool yMoved = false;
+        bool sawWrap = false;
+        for (const auto& p : m_pointer->trail()) {
+            if (p.second != y)
+                yMoved = true;
+            if (p.first != x && !sawWrap)
+                sawWrap = true;
+        }
+        check(!yMoved, "sweep " + line + " -> the vertical coordinate drifted; a horizontal "
+                       "sweep must never move the pointer vertically");
+        check(wraps <= 1, "sweep " + line + " -> the pointer wrapped " + std::to_string(wraps) +
+                          " times in one continuous sweep; it must wrap at most once");
+        check(sawWrap, "sweep " + line + " -> never wrapped, so the sweep proved nothing");
+        m_lastWrapped = wraps > 0;
+        m_lastSpeed = m_engine->lastVerdict().measuredPps;
+        m_lastAccel = m_engine->lastVerdict().measuredAccelPps2;
+        note("sweep from " + std::to_string(x) + "," + std::to_string(y) + " step x" +
+             std::to_string(dx) + " for " + std::to_string(steps) + ": ended " +
+             std::to_string(lastX) + "," + std::to_string(lastY) + " wraps=" +
+             std::to_string(wraps));
+        settle(line);
+        return true;
+    }
+    if (cmd == "hand") {
+        // A physically realistic mouse: speed ramps LINEARLY from v0 to v1 while
+        // the pointer travels toward the edge, sampled at `rateHz` with integer
+        // pixel quantisation — the thing a real driver delivers. `stroke`
+        // cannot model acceleration (equal steps = constant speed) and a hand
+        // written as explicit `move` lines cannot model quantisation at 1000 Hz.
+        //
+        //   hand <x> <v0> <v1> <rateHz> <maxMs>
+        long long x = 0, rateHz = 125, maxMs = 2000;
+        double v0 = 0, v1 = 0;
+        if (parts.size() < 6 || !parseInt(parts[1], x) || !parseDouble(parts[2], v0)
+            || !parseDouble(parts[3], v1) || !parseInt(parts[4], rateHz)
+            || !parseInt(parts[5], maxMs)) {
+            note("FAIL bad hand: " + line);
+            ++m_failures;
+            ++m_checks;
+            return false;
+        }
+        if (rateHz < 1)
+            rateHz = 1;
+        const int64_t target = edgeTargetX(*m_engine);
+        if (target < 0) {
+            note("FAIL hand without a monitor");
+            ++m_failures;
+            ++m_checks;
+            return false;
+        }
+        const long long dtUs = 1'000'000 / rateHz;
+        const long long samples = std::max<long long>(1, maxMs * rateHz / 1000);
+        double exact = static_cast<double>(x);
+        long long emitted = 0;
+        bool wrapped = false;
+        long long landedX = 0;
+        long long landedY = 0;
+        for (long long n = 1; n <= samples; ++n) {
+            const double frac = static_cast<double>(n) / static_cast<double>(samples);
+            const double v = v0 + (v1 - v0) * frac;
+            exact += v * static_cast<double>(dtUs) / 1'000'000.0;
+            long long px = static_cast<long long>(exact);
+            if (px > target)
+                px = target;
+            const auto [nx, ny] = m_pointer->deliver({ px, 540, m_clockUs, m_clockUs / 1000 });
+            m_clockUs += dtUs;
+            ++emitted;
+            landedX = nx;
+            landedY = ny;
+            if (nx != px || ny != 540) {
+                wrapped = true;
+                break;
+            }
+            if (px >= target)
+                break;
+        }
+        m_lastSpeed = m_engine->lastVerdict().measuredPps;
+        m_lastAccel = m_engine->lastVerdict().measuredAccelPps2;
+        m_lastWrapped = wrapped;
+        note("hand v=" + std::to_string(static_cast<long long>(v0)) + "->" +
+             std::to_string(static_cast<long long>(v1)) + " px/s at " +
+             std::to_string(rateHz) + "Hz, " + std::to_string(emitted) +
+             " samples: speed=" + std::to_string(m_lastSpeed) + " accel=" +
+             std::to_string(m_lastAccel) + (wrapped ? " WRAP" : " no-wrap") + " landed=" +
+             std::to_string(landedX) + "," + std::to_string(landedY));
         settle(line);
         return true;
     }

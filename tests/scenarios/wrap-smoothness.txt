@@ -1,0 +1,115 @@
+# Normal mode (impact gate OFF): the wrap must feel like Windows' own
+# cross-monitor transition.
+#
+# Three things make a wrap feel broken, and each one is pinned to an exact
+# pixel here:
+#
+#   1. The landing must be ON the target monitor, one pixel inside the edge the
+#      hand comes out of. A landing one pixel OUTSIDE it is not a wrap: Windows
+#      clamps the pointer straight back, which reads as "it sticks". (This was a
+#      real defect: pressing Top landed on `bottom` + 1, i.e. one pixel BELOW
+#      the monitor, and Windows then clamped it back to the last row — which is
+#      the taskbar.)
+#   2. The coordinate ALONG the edge must be preserved exactly when the two
+#      monitors share that span, so a straight stroke stays a straight line.
+#   3. The landing must be inside the target monitor's WORK area. The taskbar
+#      is not part of the desktop a wrap may deliver a pointer to.
+#
+# Note: on a two-monitor desktop the seam BETWEEN the monitors is an INNER edge
+# — Windows moves the cursor across it by itself, and wrapping there would fight
+# it. Wrapping happens on OUTER edges only, which is also what PowerToys does.
+# So the horizontal tests below push on monitor 0's left edge and come out on
+# monitor 1's right edge: the ring around the whole desktop.
+#
+# Run: build/cw_devshell.exe run tests/scenarios/wrap-smoothness.txt
+
+# --- a two-monitor desktop with the taskbar on the bottom ----------------
+# 1920x1080 + 1920x1080 side by side, each with a 48 px bottom taskbar, so each
+# work area is 0..1032 (i.e. the last usable row is 1031).
+monitor 0,0,1920,1080,0,0,1920,1032;1920,0,3840,1080,1920,0,3840,1032
+set impactGate off
+set mode both
+set edge 1
+set guard 50
+
+# --- 1. horizontal: the ring is symmetric and exact -----------------------
+# Leaving monitor 0's LEFT edge lands one pixel inside monitor 1's RIGHT edge:
+# 1920 + 1920 - 1 - 1 = 3838. Not 3839 (the edge pixel itself, which Windows
+# treats as still pressed) and not 3840 (outside the monitor).
+expect wrap
+expect at 3838 400
+stroke 400 400 0 400 10 8
+dump
+
+# The same crossing as a CONTINUOUS motion: the pointer keeps going after the
+# wrap, the way a hand does. 3339 + 5*100 lands exactly on monitor 1's right
+# edge (3839); the 6th step then continues from wherever the wrap put it. The
+# wrap must be transparent — exactly one wrap, no vertical drift, and the
+# pointer ends 100 px into monitor 0 instead of stuck at the seam.
+expect wrap
+sweep 3339 500 100 6 8
+
+# The reverse direction must be the mirror image: 3839 -> 1.
+expect wrap
+expect at 1 400
+stroke 3500 400 3839 400 10 8
+
+# --- 2. the coordinate along the edge is preserved exactly ---------------
+# Both monitors span y = 0..1080, so a horizontal wrap must not move the
+# pointer vertically at all. A y that drifts by even one pixel turns one
+# straight stroke into two visible segments — the "not smooth" complaint.
+expect wrap
+expect at 3838 137
+stroke 400 137 0 137 10 8
+
+# And once more at a y that is not a round number, to catch an off-by-one that
+# only shows up away from the middle of the screen.
+expect wrap
+expect at 3838 1031
+stroke 400 1031 0 1031 10 8
+
+# --- 3. vertical: land ON the monitor, never on the taskbar --------------
+# Vertical-only mode keeps this independent of the horizontal ring above.
+set mode vertical
+
+# Leaving the TOP edge (y=0) wraps downwards. The landing must be the last row
+# of the WORK area, 1031 — not 1079, which is the taskbar.
+expect wrap
+expect at 900 1031
+stroke 900 300 900 0 10 8
+
+# Leaving the BOTTOM edge wraps upwards to the first row of the monitor.
+expect wrap
+expect at 900 1
+stroke 900 700 900 1079 10 8
+
+# --- 4. the same rule holds on the second monitor ------------------------
+# A taskbar per monitor: the landing on monitor 1 must respect ITS work area,
+# not monitor 0's. Push on x = 2500 so the pointer is on monitor 1.
+expect wrap
+expect at 2500 1031
+stroke 2500 300 2500 0 10 8
+
+# --- 5. the taskbar stays clickable, and is never a landing ------------
+# The fix must NOT make the taskbar unreachable: the pointer still has to be
+# able to travel over it to click it. So moving down through the taskbar band
+# does not wrap. What must never happen is a wrap DELIVERING the pointer there.
+set mode vertical
+expect no-wrap
+stroke 700 600 700 1031 10 8
+expect no-wrap
+move 700 1050 8
+expect no-wrap
+move 700 1070 8
+
+# Reaching the real bottom edge still wraps, and the landing is the first row.
+expect wrap
+expect at 700 1
+move 700 1079 8
+
+# --- 6. a sweep that stops short of the edge does not wrap --------------
+# Nobody wraps from the middle of the screen: the edge must be reached.
+set mode both
+expect no-wrap
+stroke 700 600 700 900 10 8
+dump

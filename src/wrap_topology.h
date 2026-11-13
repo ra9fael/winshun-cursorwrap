@@ -27,6 +27,15 @@ struct MonitorBox {
     bool primary = false;
     int64_t dpi = 96;
     std::string device;
+    // The work area: the monitor rect minus the taskbar (and any other appbar).
+    // Defaults to the full rect so a caller that does not know them behaves
+    // exactly as before. Wrapping must land INSIDE this area — the user does
+    // not want the cursor to reappear on the taskbar.
+    int64_t workLeft = 0;
+    int64_t workTop = 0;
+    int64_t workRight = 0;
+    int64_t workBottom = 0;
+    bool hasWorkArea = false;
 
     int64_t width() const { return right - left; }
     int64_t height() const { return bottom - top; }
@@ -34,6 +43,12 @@ struct MonitorBox {
     {
         return x >= left && x < right && y >= top && y < bottom;
     }
+
+    // The work-area rectangle, falling back to the full rect.
+    int64_t areaLeft() const { return hasWorkArea ? workLeft : left; }
+    int64_t areaTop() const { return hasWorkArea ? workTop : top; }
+    int64_t areaRight() const { return hasWorkArea ? workRight : right; }
+    int64_t areaBottom() const { return hasWorkArea ? workBottom : bottom; }
 };
 
 enum class EdgeType : int { Left = 0, Right = 1, Top = 2, Bottom = 3 };
@@ -110,6 +125,9 @@ public:
     // Returns the destination point; equals the input when no wrap applies.
     std::pair<int64_t, int64_t> wrapDestination(int index, int64_t x, int64_t y,
                                                 EdgeType edge, WrapMode mode) const;
+    // Pull a point into the monitor's work area (the rect minus the taskbar).
+    // A no-op when the caller never supplied a work area.
+    std::pair<int64_t, int64_t> clampToWorkArea(int index, int64_t x, int64_t y) const;
 
     // Diagnostics: pairs of monitors whose rects should touch but do not
     // (layout gaps break wrapping in unintuitive ways).

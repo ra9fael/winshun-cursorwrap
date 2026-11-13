@@ -339,6 +339,22 @@ OppositeEdge Topology::findOpposite(EdgeType fromEdge, int64_t coordinate,
     return result;
 }
 
+std::pair<int64_t, int64_t> Topology::clampToWorkArea(int index, int64_t x, int64_t y) const
+{
+    MonitorBox box;
+    if (!monitorRect(index, box))
+        return {x, y};
+    const int64_t loX = box.areaLeft();
+    const int64_t hiX = box.areaRight() - 1;
+    const int64_t loY = box.areaTop();
+    const int64_t hiY = box.areaBottom() - 1;
+    // A degenerate or missing work area (a caller that does not know it) must
+    // behave exactly as before: the full monitor rect.
+    if (hiX < loX || hiY < loY)
+        return {x, y};
+    return { imax(loX, imin(x, hiX)), imax(loY, imin(y, hiY)) };
+}
+
 std::pair<int64_t, int64_t> Topology::wrapDestination(int index, int64_t x, int64_t y,
                                                       EdgeType edge, WrapMode mode) const
 {
@@ -352,20 +368,41 @@ std::pair<int64_t, int64_t> Topology::wrapDestination(int index, int64_t x, int6
     const int64_t coord = horizontal(edge) ? y : x;
     OppositeEdge opposite = findOpposite(edge, coord, *src);
     if (!opposite.found) {
-        // Same-monitor wrap: cross to the opposite edge of this monitor.
+        // Same-monitor wrap: cross to the opposite edge of this monitor, one
+        // pixel inside it, and never onto the taskbar.
         switch (edge) {
-        case EdgeType::Left: return {box.right - 2, y};
-        case EdgeType::Right: return {box.left + 1, y};
-        case EdgeType::Top: return {x, box.bottom - 2};
-        case EdgeType::Bottom: return {x, box.top + 1};
+        case EdgeType::Left: return clampToWorkArea(index, box.right - 2, y);
+        case EdgeType::Right: return clampToWorkArea(index, box.left + 1, y);
+        case EdgeType::Top: return clampToWorkArea(index, x, box.bottom - 2);
+        case EdgeType::Bottom: return clampToWorkArea(index, x, box.top + 1);
         }
         return {x, y};
     }
-    if (horizontal(edge))
-        return {opposite.edge.position + (edge == EdgeType::Left ? -1 : 1),
-                opposite.projection ? opposite.projectedCoordinate : y};
-    return {opposite.projection ? opposite.projectedCoordinate : x,
-            opposite.edge.position + (edge == EdgeType::Top ? -1 : 1)};
+    // Land one pixel inside the OTHER monitor, measured from the edge we are
+    // landing on. Deriving the inset from the TARGET edge is what makes the
+    // four directions symmetric and keeps the landing on the target monitor:
+    // the old code offset the pressed edge instead, so pressing Top landed on
+    // `bottom` — one pixel BELOW the target monitor, i.e. not on it at all —
+    // and pressing Bottom landed one pixel above it. Windows then clamped the
+    // pointer back, which is the "wrap feels like it sticks" the user reported.
+    const MonitorEdge& target = opposite.edge;
+    int64_t nx = x;
+    int64_t ny = y;
+    switch (target.type) {
+    case EdgeType::Left: nx = target.position + 1; break;
+    case EdgeType::Right: nx = target.position - 1; break;
+    case EdgeType::Top: ny = target.position + 1; break;
+    case EdgeType::Bottom: ny = target.position - 1; break;
+    }
+    if (opposite.projection) {
+        if (horizontal(edge))
+            ny = opposite.projectedCoordinate;
+        else
+            nx = opposite.projectedCoordinate;
+    }
+    // The landing must stay inside the target monitor's WORK area: a cursor that
+    // reappears under the taskbar is a click on the taskbar, not a wrap.
+    return clampToWorkArea(target.monitorIndex, nx, ny);
 }
 
 std::vector<Topology::Gap> Topology::detectGaps(int64_t gapThreshold) const

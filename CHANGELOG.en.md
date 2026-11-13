@@ -9,6 +9,66 @@ single source of truth; release tags are `v<version>`.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-13
+
+### Fixed
+
+- **The landing point was off by one in the wrong direction — the root cause of
+  normal mode not feeling smooth.** The ±1 inset was applied relative to the edge
+  that was PRESSED, so pushing up off the top edge landed on `bottom + 1`, i.e.
+  one pixel OUTSIDE the target monitor, and Windows clamped the cursor back to
+  the last row. Pushing down off the bottom landed on `top - 1`, also outside.
+  The inset is now derived from the TARGET edge — Left→`position + 1`,
+  Right→`position - 1`, Top→`position + 1`, Bottom→`position - 1` — so all four
+  directions are symmetric and the landing is always inside the target monitor.
+  This is PowerToys' `GetWrapDestination` shape (it uses `edge.position`; this
+  plugin keeps a one-pixel inset so the cursor is not on the edge line).
+- **A wrap no longer lands on the taskbar.** `MonitorBox` now carries the work
+  area (`rcWork` from `GetMonitorInfo`, with an `SPI_GETWORKAREA` fallback when
+  the RDP enumeration is empty), and every landing goes through
+  `clampToWorkArea()`. Before, a landing at row 1079 on a display with a 48 px
+  taskbar handed the cursor to the taskbar. The taskbar remains reachable by
+  moving the pointer into it — it is just never a wrap destination.
+- **The acceleration reading no longer depends on the report rate.** The window
+  used to widen only until each half held 4 px of travel, which at 125 Hz is
+  ~16 ms — two samples at the same speed. Measured, one 800→4000 px/s flick read
+  `0` at 125 Hz, `0` at 500 Hz and `27833 px/s²` at 1000 Hz: no threshold can
+  serve that. The window is now a fixed **100 ms** and each half speed is a
+  **least-squares slope** through every sample in it, so quantisation averages
+  out (√n). The same flick now reads **3458 / 3200 / 3600** at 125/500/1000 Hz,
+  a steady hand reads exactly **0**, and a normal flick falls at **1600–3600**.
+- **Enabling the acceleration floor no longer drags the speed reading down.**
+  The acceleration window used to overwrite the speed window's start, so with
+  both floors on, a real 2333 px/s flick reported the 100 ms average (1700 px/s)
+  and was refused by a 2000 px/s speed floor. Speed and acceleration now share
+  the arrival sample and keep separate starts.
+- **"Readings in the tens of thousands" confirmed and bounded.** The reported
+  speed is clamped at `kImpactSpeedMaxPps = 20000`, but several hundred to a few
+  thousand below that is genuine (600 px in 8 samples really is 9375 px/s).
+
+### Changed
+
+- **The usable acceleration range moved from `5000–20000` to `500–2000`.** A
+  steady hand measures 0 and a normal flick 1600–3600, so 500 already separates
+  them; the `plugin.json` hint now says so.
+
+### Added
+
+- **`cw_devshell` models the work area and asserts exact pixels.** A `monitor`
+  line may carry `l,t,r,b,workL,workT,workR,workB`; `expect at <x> <y>` asserts
+  the exact landing; `sweep` feeds a wrap back into the next sample (a hand keeps
+  moving); `hand` ramps speed linearly at a real report rate with integer pixel
+  quantisation.
+- **`tests/scenarios/wrap-smoothness.txt` (24 assertions).** Exact landings on
+  all four edges, zero vertical drift across a seam, at most one wrap per
+  continuous sweep, every direction landing inside the work area, and the
+  taskbar still reachable but never a landing.
+- **`tests/scenarios/acceleration-across-rates.txt` (8 assertions).** One gesture
+  reads the same at 125/500/1000 Hz, a steady hand never wraps, braking into the
+  edge never wraps, and the acceleration window cannot pollute the speed window.
+- **`topology_landing_respects_work_area` unit test.** The work-area clamp is
+  enforced in the topology layer.
+
 ## [0.4.0] - 2026-11-13
 
 ### Added

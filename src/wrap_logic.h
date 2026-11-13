@@ -50,6 +50,9 @@ struct Settings {
     bool impactGate = false;
     int impactSpeedPps = 2000;      // 500..20000 px/s
     int impactBandPx = 150;         // 50..500 px: the approach band speed is measured in
+    // Measured: a constant-speed hand reads 0 px/s² at 125/500/1000 Hz, a firm
+    // flick reads 1600-3600. 500 sits in the gap, so it is a usable default
+    // rather than a value no real gesture reaches. 0 disables the condition.
     int impactAccelPps2 = 0;        // 0 = off; 200..200000 px/s²
     // The two runtime windows. They live in Settings (not only in the command
     // layer) so the host card, the search bar and the persisted overrides all
@@ -304,6 +307,15 @@ public:
     static constexpr long long kImpactAccelMinWindowUs = 12 * 1000; // 12 ms
     static constexpr long long kImpactAccelMinHalfUs = 4 * 1000;    // 4 ms per half
     static constexpr long long kImpactAccelMinHalfTravelPx = 4;     // 4 px per half
+    // The acceleration window is a DURATION, not "the shortest window whose
+    // halves happen to be measurable". A hand speeds up over tens of
+    // milliseconds, so the slope must be measured over that scale: picking the
+    // shortest measurable window made the reading depend on the report rate —
+    // the SAME 800→4000 px/s flick read 0 px/s² at 125 Hz, 0 at 500 Hz and
+    // 27833 at 1000 Hz, which is why the user could not tune the threshold.
+    // 40 ms is two 20 ms halves: long enough to see a ramp from 125 Hz up,
+    // short enough to stay inside a single gesture.
+    static constexpr long long kImpactAccelWindowUs = 100 * 1000; // 100 ms
     // A hand cannot exceed this; a larger slope means quantisation, not motion.
     static constexpr long long kImpactAccelMaxPps2 = 2'000'000;
     // 1000 Hz gaming mice: 32 samples were only 32 ms; 128 covers the

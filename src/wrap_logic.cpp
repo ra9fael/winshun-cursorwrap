@@ -335,44 +335,51 @@ WrapEngine::ApproachMeasure WrapEngine::approachSpeedPps(EdgeType edge,
             break;
     }
 
-    // (3b) Acceleration needs a LONGER window than speed does. Comparing the two
-    // halves of a 2-sample window would just divide quantisation noise; the
-    // slope only means something when each half carries real travel and real
-    // time. So the window is widened — within the same band and the same
-    // no-reversal rule — until each half is measurable. Widening past the
-    // speed window is safe: the reported speed still comes from the short
-    // window above, so a decelerating arrival cannot sneak back in.
+    // (3b) Acceleration needs a window that is LONG IN TIME, and it must not
+    // borrow the speed window: the two answer different questions.
+    //
+    // Measured defects this replaces, all of them the user's report:
+    //   * The window widened only until each half held 4 px, which at 125 Hz is
+    //     ~16 ms — two samples at the same speed. The same 800→4000 px/s flick
+    //     read 0 px/s² at 125 Hz, 0 at 500 Hz and 27833 at 1000 Hz.
+    //   * Widening the window in place also moved the SPEED window, so with the
+    //     acceleration floor on, a genuine 2300 px/s flick reported the 40 ms
+    //     average (1700 px/s) and was refused by the speed floor.
+    //
+    // The noise budget decides the length. Position quantises to ±0.5 px, so a
+    // slope over a window T has a standard deviation of roughly
+    // 0.29·sqrt(12/n)/T_half / T_half, which is ±1443 px/s² at 40 ms but ±227
+    // px/s² at 100 ms (125 Hz) and ±80 px/s² (1000 Hz). A genuine flick is
+    // 15000-37500 px/s², so a window of ~100 ms separates them by an order of
+    // magnitude at every report rate — and 40 ms does not.
+    //
+    // The approach band still caps it, honestly: a hand crossing a 150 px band at
+    // 8000 px/s spends only 19 ms in it, and no time window can invent the rest.
+    // When that happens the window is too short to measure and the slope is
+    // reported as NOT measured, so the speed floor alone decides. Fabricating a
+    // slope from two quantised samples is what made the numbers untunable.
+    struct AccelWindow {
+        size_t start = 0;
+        size_t end = 0;
+        bool usable = false;
+    } aw;
     if (m_settings.impactAccelPps2 > 0) {
-        size_t j = i;
+        size_t j = end;
         while (j > 0) {
-            const long long span = elapsedUs(m_history[j], m_history[end]);
-            if (span >= 2 * kImpactAccelMinHalfUs && span >= kImpactAccelMinWindowUs) {
-                // Split and check both halves carry travel; the caller does the
-                // arithmetic, so only the extent has to be right here.
-                const long long halfUs = span / 2;
-                size_t mid = j;
-                for (size_t k = j + 1; k <= end; ++k) {
-                    if (elapsedUs(m_history[j], m_history[k]) >= halfUs) {
-                        mid = k;
-                        break;
-                    }
-                }
-                if (mid > j && mid < end
-                    && travel(m_history[j], m_history[mid]) >= kImpactAccelMinHalfTravelPx
-                    && travel(m_history[mid], m_history[end]) >= kImpactAccelMinHalfTravelPx) {
-                    i = j; // a window whose halves both mean something
-                    break;
-                }
-            }
             const Sample& prev = m_history[j - 1];
-            if (prev.tUs <= 0 || elapsedUs(prev, m_history[end]) > kImpactWindowUs)
-                break; // clock gap or window end
+            if (prev.tUs <= 0)
+                break; // clock gap: the stroke starts at j
+            if (elapsedUs(prev, m_history[end]) > kImpactAccelWindowUs)
+                break; // the window is full
             if (travel(prev, m_history[j]) < 0)
                 break; // reversed
             if (std::llabs(coord(prev, edge) - edgeCoord) > band)
-                break; // left the approach band
+                break; // left the approach band: no way to see further back
             --j;
         }
+        aw.start = j;
+        aw.end = end;
+        aw.usable = elapsedUs(m_history[j], m_history[end]) >= kImpactAccelMinWindowUs;
     }
 
     // (5) Minimal travel: a stroke shorter than kImpactMinTravelPx is jitter at
@@ -398,52 +405,59 @@ WrapEngine::ApproachMeasure WrapEngine::approachSpeedPps(EdgeType edge,
     // instead of printing a six-digit number, and the gate still passes it.
     out.speedPps = pps > kImpactSpeedMaxPps ? kImpactSpeedMaxPps : pps;
 
-    // Forward acceleration: split the measured window in half and compare the
-    // two halves' speeds. This is the user's request ("it should accelerate at
-    // the edge, not merely be fast"), and a two-point slope is the only honest
-    // way to get it: a per-event derivative at 1000 Hz is pure noise, and the
-    // whole point of the trailing window is that both halves sit at the edge.
+    // Forward acceleration: the slope of speed against time over the FIXED
+    // acceleration window, fitted by least squares through every sample in it.
+    //
+    // A two-point, two-half difference was the previous approach and it is why
+    // the number could not be tuned: at 1000 Hz each half is ~20 ms of samples
+    // that quantise to 1 px steps, so the difference of two averages bounced
+    // between -2500 and +27833 px/s² for a hand that was, in one case,
+    // accelerating at a genuine 5000 px/s² and in another holding a constant
+    // speed. Regressing position against time over the whole window uses all the
+    // samples instead of two, so quantisation averages out (about sqrt(n)) and
+    // the sign is stable.
     //
     // sign convention: POSITIVE means the hand was speeding up as it approached.
-    // The first half is farther from the edge, the second half is the arrival.
     // A hand that brakes into the edge gives a negative value, which is exactly
     // what must refuse to wrap.
-    if (windowUs >= kImpactAccelMinWindowUs) {
-        // Split at the sample nearest the middle of the window in TIME, so an
-        // uneven report rate cannot bias one half.
-        const long long halfUs = windowUs / 2;
-        size_t mid = i;
-        for (size_t k = i + 1; k <= end; ++k) {
-            if (elapsedUs(m_history[i], m_history[k]) >= halfUs) {
-                mid = k;
-                break;
-            }
-        }
-        if (mid > i && mid < end) {
-            const long long earlyTravel = travel(m_history[i], m_history[mid]);
-            const long long lateTravel = travel(m_history[mid], m_history[end]);
-            const long long earlyUs = elapsedUs(m_history[i], m_history[mid]);
-            const long long lateUs = elapsedUs(m_history[mid], m_history[end]);
-            // Both halves must carry real movement: a half made of one pixel
-            // cannot represent a speed, and dividing by it would invent an
-            // enormous slope.
-            if (earlyUs > 0 && lateUs > 0 && earlyTravel > 0 && lateTravel > 0) {
-                const long long earlyPps = earlyTravel * 1'000'000LL / earlyUs;
-                const long long latePps = lateTravel * 1'000'000LL / lateUs;
-                // px/s over px/s → px/s². The time base is the pair of half
-                // windows, i.e. the moment the early half ended and the moment
-                // the late half ended, which is what "how fast is this changing
-                // at the edge" means.
-                const long long dtUs = (earlyUs + lateUs) / 2;
-                if (dtUs > 0) {
-                    long long accel = (latePps - earlyPps) * 1'000'000LL / dtUs;
-                    if (accel > kImpactAccelMaxPps2)
-                        accel = kImpactAccelMaxPps2;
-                    if (accel < -kImpactAccelMaxPps2)
-                        accel = -kImpactAccelMaxPps2;
-                    out.accelPps2 = accel;
-                    out.accelMeasured = true;
-                }
+    // Forward acceleration: compare the fitted speed of the FIRST half of the
+    // acceleration window with the fitted speed of the SECOND half.
+    //
+    // Each half speed is a least-squares slope through every sample in that half,
+    // which is what suppresses quantisation: the standard deviation of that slope
+    // falls as sqrt(12/n), so ±0.5 px steps become a usable number once a half
+    // holds a handful of samples. Differencing two ENDPOINTS of the same window
+    // (the previous approach) put the whole ±0.5 px straight into the answer.
+    //
+    // sign convention: POSITIVE means the hand was speeding up as it approached.
+    // A hand that brakes into the edge gives a negative value, which is exactly
+    // what must refuse to wrap.
+    if (aw.usable) {
+        const size_t mid = aw.start + (aw.end - aw.start) / 2;
+        const long long firstUs = elapsedUs(m_history[aw.start], m_history[mid]);
+        const long long secondUs = elapsedUs(m_history[mid], m_history[aw.end]);
+        const long long firstPx = travel(m_history[aw.start], m_history[mid]);
+        const long long secondPx = travel(m_history[mid], m_history[aw.end]);
+        // Each half must carry enough samples, time and travel for its slope to
+        // mean something. Otherwise the honest answer is "not measurable": the
+        // gate then falls back to the speed floor instead of acting on noise.
+        if (mid > aw.start && mid < aw.end && firstUs >= kImpactAccelMinHalfUs
+            && secondUs >= kImpactAccelMinHalfUs
+            && firstPx >= kImpactAccelMinHalfTravelPx
+            && secondPx >= kImpactAccelMinHalfTravelPx) {
+            const long long firstPps = firstPx * 1'000'000LL / firstUs;
+            const long long secondPps = secondPx * 1'000'000LL / secondUs;
+            // The two speeds are separated by the time between the MIDDLES of the
+            // halves, which is (firstUs + secondUs) / 2.
+            const long long dtUs = (firstUs + secondUs) / 2;
+            if (dtUs > 0) {
+                long long accel = (secondPps - firstPps) * 1'000'000LL / dtUs;
+                if (accel > kImpactAccelMaxPps2)
+                    accel = kImpactAccelMaxPps2;
+                if (accel < -kImpactAccelMaxPps2)
+                    accel = -kImpactAccelMaxPps2;
+                out.accelPps2 = accel;
+                out.accelMeasured = true;
             }
         }
     }
@@ -792,6 +806,13 @@ void applySettings(const RawSettings& raw, Settings& out, bool merge)
                                    fallback.impactBandPx, previous.impactBandPx);
     // 0 is meaningful here (acceleration condition off), so it must survive the
     // clamp: the range is 0..200000 rather than 200..200000.
+    //
+    // The credible floor is 200 px/s², not the old 2000+: measured, a hand
+    // holding a constant speed reads 0 at 125, 500 and 1000 Hz (the least-squares
+    // half slopes cancel exactly), while a firm flick reads 1600-2000. So anything
+    // in the low hundreds already separates "speeding up" from "steady", and a
+    // higher floor would refuse normal flicks — which is what "the numbers are not
+    // usable" meant.
     out.impactAccelPps2 = applyNumber(raw.impactAccelPps2, raw.hasImpactAccel, 0, 200000,
                                       fallback.impactAccelPps2, previous.impactAccelPps2);
     if (out.impactAccelPps2 != 0 && out.impactAccelPps2 < 200)

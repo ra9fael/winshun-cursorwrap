@@ -141,6 +141,14 @@ std::vector<cw::MonitorBox> enumerateMonitors()
             box.top = mi.rcMonitor.top;
             box.right = mi.rcMonitor.right;
             box.bottom = mi.rcMonitor.bottom;
+            // rcWork is rcMonitor minus the taskbar. Wrapping must land inside
+            // it: a cursor that reappears under the taskbar turns the next click
+            // into a taskbar click.
+            box.hasWorkArea = true;
+            box.workLeft = mi.rcWork.left;
+            box.workTop = mi.rcWork.top;
+            box.workRight = mi.rcWork.right;
+            box.workBottom = mi.rcWork.bottom;
             box.primary = (mi.dwFlags & MONITORINFOF_PRIMARY) != 0;
             box.dpi = 96;
             out->push_back(box);
@@ -160,6 +168,16 @@ std::vector<cw::MonitorBox> enumerateMonitors()
         box.bottom = box.top + GetSystemMetrics(SM_CYVIRTUALSCREEN);
         box.primary = true;
         box.dpi = 96;
+        // SPI_GETWORKAREA is the only work-area source that survives an empty
+        // enumeration, and it is exactly the primary work rect.
+        RECT work {};
+        if (SystemParametersInfo(SPI_GETWORKAREA, 0, &work, 0)) {
+            box.hasWorkArea = true;
+            box.workLeft = work.left;
+            box.workTop = work.top;
+            box.workRight = work.right;
+            box.workBottom = work.bottom;
+        }
         if (box.width() > 0 && box.height() > 0)
             monitors.push_back(box);
     }
