@@ -9,6 +9,56 @@ single source of truth; release tags are `v<version>`.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-14
+
+### Fixed
+
+- **Search-bar settings were lost across a restart.** The writer walked all 13
+  keys but the reader hand-listed only 9, so `impactBandPx` and
+  `impactAccelPps2` were silently dropped: after a restart the menu read
+  "off (speed only)" while `settings.json` plainly held 2000. Both sides now
+  share the single `cw::settingsFields()` table, so a new setting is registered
+  once.
+- **The same bug also swallowed `disableDuringDrag` and
+  `disableOnSingleMonitor`.** Those two keys were never written at all and only
+  survived on the reader's defaults, so "no wrap while dragging" lapsed on the
+  next start.
+- **The impact acceleration floor was inverted: setting 1600 made wrapping
+  MORE likely.** The old rule was `enabled && measured && accel < floor`, i.e.
+  "unmeasurable means the floor does not apply". Unmeasurable happens exactly
+  when the hand is fastest — too quick to cover the window in the minimum
+  fitting time — so enabling the floor rewarded the fastest gestures. The gate
+  is now fail-closed: an unmeasurable acceleration does not open it.
+- **The acceleration window no longer shares the impact band.** It used to be
+  capped by `impactBandPx`, so a 50 px band could not fit two samples and the
+  slope was never measurable, dropping straight back into the hole above. It now
+  takes its own 2000 px window, decoupled from the band.
+- **A failed `SetCursorPos` left the wrap recorded, which killed every retry on
+  the same edge.** This is the "works only now and then, and again after a
+  pause" mechanism: the wrap was counted at a landing point the pointer never
+  reached, the guard then armed there and blocked every retry until the pointer
+  wandered `wrapGuardPx` away. A failure now calls `onWrapFailed()` to roll back
+  the landing, the guard and the counters.
+
+### Changed
+
+- `impactBandPx` default 150 -> 400 px. 150 is tight for a fast flick on a
+  high-DPI display and misses the gesture.
+- The acceleration floor is fail-closed (see above). It is still off by default.
+
+### Tests
+
+- New `tests/test_settings_roundtrip.cpp`: every one of the 13 fields round
+  trips, so a setting that is added but not registered fails.
+- New `tests/test_hook_latency.cpp`: quantifies read-lock latency across 40 000
+  moves (p99.9 = 2 us, max = 34 us), which rules out the "lock contention
+  removes the hook" theory.
+- New scenario `tests/scenarios/accel-fail-closed.txt`: steady 12000/16000 px/s
+  must be refused, a braking move must be refused, a genuine flick must wrap.
+  Development scenarios 11 -> 12.
+- `tests/protocol_roundtrip.py` gained restart-persistence and
+  settings-card-override checks.
+
 ## [0.5.0] - 2026-11-13
 
 ### Fixed

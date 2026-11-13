@@ -9,6 +9,43 @@ single source of truth; release tags are `v<version>`.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-14
+
+### Fixed
+
+- **搜索栏里改的回绕参数重启后丢失。** 写入端遍历 13 个键，读回端却手写了 9 个，
+  `impactBandPx` 与 `impactAccelPps2` 被静默丢弃 —— 重启后菜单显示"关闭（只看速度）"，
+  而 `settings.json` 里明明存着 2000。现在两端共用 `cw::settingsFields()` 一张表，
+  新增设置只需登记一次。
+- **同一 bug 还吞掉了 `disableDuringDrag` 与 `disableOnSingleMonitor`。** 这两个键
+  从来没被写入过，只靠读回端的默认值兜着，所以"拖拽时不回绕"在重启后失效。
+- **撞击加速度门槛反向生效：设 1600 反而更容易穿越。** 旧规则是
+  `已启用 && 已测到 && 加速度 < 门槛`，即"测不到就当作不限"；而测不到恰恰发生在手
+  最快的时候（一个采样窗口都撑不满）。于是打开门槛反而奖励了最快的动作。现在改为
+  失败即拒绝（fail-closed）：加速度不可测量时不放行。
+- **加速度取窗不再受撞击带宽限制。** 之前与 `impactBandPx` 共用同一个可达范围，
+  带窄到 50 px 时窗口内凑不出两帧，斜率永远测不到，又落回上面那条漏洞。现在加速度
+  有自己 2000 px 的取窗，与带宽解耦。
+- **`SetCursorPos` 失败后引擎已记账，导致同一条边再也穿不过去。** 这正是
+  "时灵时不灵、鼠标停一会儿再试又可以"的成因：包装在落点被记为已穿，守卫在光标
+  从未到达的位置上生效，之后每次重试都被自己挡住，直到光标漂出 `wrapGuardPx`。
+  现在失败会调用 `onWrapFailed()` 回滚落点、守卫与统计。
+
+### Changed
+
+- `impactBandPx` 默认 150 → 400 px。150 对高 DPI 下的快速甩动偏窄，容易漏判。
+- 撞击加速度门槛语义改为 fail-closed（见上）。默认仍为关闭。
+
+### Tests
+
+- 新增 `tests/test_settings_roundtrip.cpp`：13 个字段逐项往返，任何新增设置漏登记
+  都会失败。
+- 新增 `tests/test_hook_latency.cpp`：在 40 000 次移动下量化读锁延迟
+  （p99.9 = 2 µs，max = 34 µs），用于排除"锁竞争导致钩子被摘"的猜测。
+- 新增场景 `tests/scenarios/accel-fail-closed.txt`：稳态 12000/16000 px/s 必须拒绝、
+  刹车动作必须拒绝、真实甩动必须穿越。开发场景总数 11 → 12。
+- `tests/protocol_roundtrip.py` 增加重启持久化与设置卡覆盖两项检查。
+
 ## [0.5.0] - 2026-11-13
 
 ### Fixed

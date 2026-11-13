@@ -204,7 +204,10 @@ CW_TEST(impact_settings_defaults)
     const Settings s;
     CW_CHECK_EQ(s.impactGate, false);
     CW_CHECK_EQ(s.impactSpeedPps, 2000);
-    CW_CHECK_EQ(s.impactBandPx, 150);
+    // Default band: 400 px. A narrow band used to shorten the acceleration
+    // window until the slope was unmeasurable, which then made the floor silently
+    // inapplicable; the default is wide enough for a normal flick to be measured.
+    CW_CHECK_EQ(s.impactBandPx, 400);
     RawSettings raw;
     raw.impactGate = true;
     raw.hasImpactGate = true;
@@ -212,7 +215,7 @@ CW_TEST(impact_settings_defaults)
     applySettings(raw, merged, true);
     CW_CHECK_EQ(merged.impactGate, true); // partial update applies
     CW_CHECK_EQ(merged.impactSpeedPps, 2000); // untouched field keeps default
-    CW_CHECK_EQ(merged.impactBandPx, 150);
+    CW_CHECK_EQ(merged.impactBandPx, 400);
 }
 
 // --- approach band + stroke splitting + minimal travel ---
@@ -393,12 +396,12 @@ CW_TEST(impact_band_boundary_value_settings)
     raw.impactBandPx = 500;
     applySettings(raw, s, true);
     CW_CHECK_EQ(s.impactBandPx, 500);
-    raw.impactBandPx = 49; // out of range -> default
+    raw.impactBandPx = 49; // out of range -> default, never a usable value
     applySettings(raw, s, true);
-    CW_CHECK_EQ(s.impactBandPx, 150);
+    CW_CHECK_EQ(s.impactBandPx, Settings{}.impactBandPx);
     raw.impactBandPx = 501;
     applySettings(raw, s, true);
-    CW_CHECK_EQ(s.impactBandPx, 150);
+    CW_CHECK_EQ(s.impactBandPx, Settings{}.impactBandPx);
 }
 
 // --- regression: the clamped tail at an edge -------------------------------
@@ -1308,3 +1311,79 @@ CW_TEST(acceleration_setting_clamps_and_zero_is_off)
     applySettings(raw, fresh, false);
     CW_CHECK_EQ(fresh.impactAccelPps2, Settings{}.impactAccelPps2);
 }
+
+// ---------------------------------------------------------------- fail closed
+//
+// The user reported "with acceleration set to 1600 it wraps MORE easily". It was
+// literally true, and this is the mechanism: when the slope cannot be measured
+// the old rule treated the floor as "not applicable" and let the move through.
+// A hand that is too fast to measure a slope in the band is exactly the hand
+// that reaches the edge fastest, so enabling the floor rewarded the gesture it
+// was meant to refuse.
+//
+// Measured on the devshell: a STEADY 12000 px/s move and a BRAKING 16000->9000
+// move both wrapped with impactAccelPps2 = 1600.
+
+CW_TEST(acceleration_unmeasurable_fails_closed)
+{
+    // A steady, very fast approach: within one 100 ms window it crosses far more
+    // than the band, so the window cannot hold enough time to fit a slope.
+    // Unmeasurable must mean REFUSED, not "floor not applicable".
+    //
+    // NOTE the acceleration window now reaches back 2000 px independently of
+    // impactBandPx, so "unmeasurable" needs a gesture that crosses that reach
+    // inside 100 ms: above 20000 px/s. kImpactSpeedMaxPps clamps the REPORTED
+    // speed to 20000, so a 24000 px/s stroke still reads as fast enough and the
+    // only thing that can refuse it is the acceleration rule.
+    Settings s = gateOn(2000, 150);
+    s.impactAccelPps2 = 1600;
+    WrapEngine e(s);
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+
+    long long t = 1'000'000;
+    // 48 px every 2 ms = 24000 px/s, constant, straight into the edge.
+    int64_t x = 1650;
+    while (x < 1919) {
+        x += 48;
+        if (x > 1919)
+            x = 1919;
+        e.onMouseMove({ x, 540, t }, false, false);
+        t += 2000;
+    }
+    const EdgeVerdict v = e.lastVerdict();
+    CW_CHECK_EQ(e.stats().wraps, 0);
+    // The reason must be the impact gate, and the verdict must say the slope was
+    // never measured, so the diagnostic can explain the refusal.
+    CW_CHECK(e.stats().skipped[static_cast<int>(SkipReason::ImpactGate)] > 0);
+    CW_CHECK(!v.accelMeasured);
+}
+
+CW_TEST(acceleration_narrow_band_does_not_make_the_gate_permissive)
+{
+    // The user's exact report: "with acceleration set to 1600 it wraps more
+    // easily". A narrow band used to shorten the window until the slope was
+    // unmeasurable, and unmeasurable used to mean "let it through" — so making
+    // the band smaller made the gate weaker. The narrow band must NOT change the
+    // decision for a steady hand.
+    for (const int bandPx : { 50, 100, 150, 400 }) {
+        Settings s = gateOn(2000, bandPx);
+        s.impactAccelPps2 = 1600;
+        WrapEngine e(s);
+        e.rebuild({ box(0, 0, 1920, 1080, true) });
+        long long t = 1'000'000;
+        int64_t x = 1770; // 149 px of run-up, then the edge
+        while (x < 1919) {
+            x += 16; // 8000 px/s, constant: no acceleration at any band
+            if (x > 1919)
+                x = 1919;
+            e.onMouseMove({ x, 540, t }, false, false);
+            t += 2000;
+        }
+        if (e.stats().wraps != 0) {
+            ++cwtest::failures();
+            std::printf("  band %d px let a steady 8000 px/s move through\n", bandPx);
+        }
+    }
+}
+
+

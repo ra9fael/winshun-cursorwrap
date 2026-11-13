@@ -3,7 +3,7 @@
   "manifest": 1,
   "id": "ra9fael.cursorwrap",
   "name": {"zh": "光标回绕", "en": "Cursor wrap"},
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": {
     "zh": "光标到达屏幕外边时从对边进入（多显示器边缘拓扑，支持仅纵向/仅横向与按住 Ctrl/Shift 激活）；cursorwrap 关键字查看状态与开关",
     "en": "The cursor re-enters from the opposite edge when it reaches an outer edge (multi-monitor edge topology; vertical/horizontal-only modes and Ctrl/Shift activation); the cursorwrap keyword shows status and toggles it"
@@ -117,8 +117,8 @@
       "key": "impactBandPx",
       "type": "number",
       "title": {"zh": "撞击测速区间（像素）", "en": "Impact measuring band (px)"},
-      "hint": {"zh": "50–500，默认 150；只在距边缘该范围内测速——远处冲刺不算，贴边抖动因位移过小也不算", "en": "50–500, default 150; speed is measured only within this distance of the edge — distant sprints and edge jitter (too little travel) both fail"},
-      "default": 150
+      "hint": {"zh": "50–500，默认 400；只在距边缘该范围内测速——远处冲刺不算，贴边抖动因位移过小也不算。加速度门槛有自己的 2000 px 回溯范围，不受此值限制", "en": "50–500, default 400; speed is measured only within this distance of the edge — distant sprints and edge jitter (too little travel) both fail. The acceleration floor reaches back 2000 px on its own and is not limited by this value"},
+      "default": 400
     },
     {
       "key": "impactAccelPps2",

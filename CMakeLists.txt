@@ -86,6 +86,8 @@ add_executable(cw_tests
     tests/test_tuner.cpp
     tests/test_query_parser.cpp
     tests/test_settings_store.cpp
+    tests/test_settings_roundtrip.cpp
+    tests/test_hook_latency.cpp
     src/wrap_topology.cpp
     src/wrap_logic.cpp
     src/query_parser.cpp

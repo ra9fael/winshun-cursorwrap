@@ -77,6 +77,58 @@ std::string intText(long long v)
     return buf;
 }
 
+// Put one field of a loaded override file into a RawSettings, so
+// loadOverridesFromDisk does not need its own per-field list. The switch is
+// unavoidable (RawSettings mirrors Settings member by member), but it is driven
+// by cw::settingsFields(): a key the table names but this switch forgot simply
+// never becomes an override, and the exhaustive round-trip test reports it by
+// name.
+void markOverride(cw::RawSettings& raw, const cw::SettingsField& field,
+                  const cw::Settings& s)
+{
+    const std::string key = field.key;
+    if (key == "wrapMode") {
+        raw.wrapMode = cw::modeText(s.wrapMode);
+        raw.hasWrapMode = true;
+    } else if (key == "activationMode") {
+        raw.activationMode = cw::activationText(s.activation);
+        raw.hasActivation = true;
+    } else if (key == "disableDuringDrag") {
+        raw.disableDuringDrag = s.disableDuringDrag;
+        raw.hasDrag = true;
+    } else if (key == "disableOnSingleMonitor") {
+        raw.disableOnSingleMonitor = s.disableOnSingleMonitor;
+        raw.hasSingle = true;
+    } else if (key == "edgeThresholdPx") {
+        raw.edgeThresholdPx = s.edgeThresholdPx;
+        raw.hasEdgeThreshold = true;
+    } else if (key == "wrapGuardPx") {
+        raw.wrapGuardPx = s.wrapGuardPx;
+        raw.hasWrapGuard = true;
+    } else if (key == "adjacencyTolerancePx") {
+        raw.adjacencyTolerancePx = s.adjacencyTolerancePx;
+        raw.hasAdjacency = true;
+    } else if (key == "impactGate") {
+        raw.impactGate = s.impactGate;
+        raw.hasImpactGate = true;
+    } else if (key == "impactSpeedPps") {
+        raw.impactSpeedPps = s.impactSpeedPps;
+        raw.hasImpactSpeed = true;
+    } else if (key == "impactBandPx") {
+        raw.impactBandPx = s.impactBandPx;
+        raw.hasImpactBand = true;
+    } else if (key == "impactAccelPps2") {
+        raw.impactAccelPps2 = s.impactAccelPps2;
+        raw.hasImpactAccel = true;
+    } else if (key == "tuningOverlay") {
+        raw.tuningOverlay = s.tuningOverlay;
+        raw.hasTuningOverlay = true;
+    } else if (key == "dataWindow") {
+        raw.dataWindow = s.dataWindow;
+        raw.hasDataWindow = true;
+    }
+}
+
 cw::RawSettings rawFromJson(const Json& s)
 {
     cw::RawSettings raw;
@@ -692,31 +744,29 @@ private:
             m_overrides = false;
             return;
         }
-        // Merge: only the keys the file carries were clamped into `overrides`;
+        // Merge: only the keys the file carries were clamped into overrides;
         // the rest keep the host's values.
+        //
+        // This used to be a hand-written list of every field, and the list fell
+        // behind the dumper: 13 keys were written and 9 were read, so
+        // "accel 2000" survived in settings.json and was silently dropped on the
+        // next start. cw::settingsFields() is now the single source of truth and
+        // this loop derives everything from it, so a setting cannot be persisted
+        // by one side and forgotten by the other.
         cw::RawSettings raw;
-        raw.wrapMode = modeText(overrides.wrapMode);
-        raw.hasWrapMode = cw::overridesWrapMode(overrides);
-        raw.activationMode = activationText(overrides.activation);
-        raw.hasActivation = cw::overridesActivation(overrides);
-        raw.impactGate = overrides.impactGate;
-        raw.hasImpactGate = cw::overridesImpact(overrides);
-        raw.impactSpeedPps = overrides.impactSpeedPps;
-        raw.hasImpactSpeed = cw::overridesImpact(overrides);
-        raw.wrapGuardPx = overrides.wrapGuardPx;
-        raw.hasWrapGuard = overrides.wrapGuardPx != cw::Settings{}.wrapGuardPx;
-        raw.edgeThresholdPx = overrides.edgeThresholdPx;
-        raw.hasEdgeThreshold = overrides.edgeThresholdPx != cw::Settings{}.edgeThresholdPx;
-        raw.adjacencyTolerancePx = overrides.adjacencyTolerancePx;
-        raw.hasAdjacency = overrides.adjacencyTolerancePx != cw::Settings{}.adjacencyTolerancePx;
-        raw.tuningOverlay = overrides.tuningOverlay;
-        raw.hasTuningOverlay = overrides.tuningOverlay != cw::Settings{}.tuningOverlay;
-        raw.dataWindow = overrides.dataWindow;
-        raw.hasDataWindow = overrides.dataWindow != cw::Settings{}.dataWindow;
+        for (const cw::SettingsField& field : cw::settingsFields()) {
+            // Only the keys the FILE carries become overrides. Without this guard
+            // every field is marked, so one saved key would pin all thirteen and
+            // the host card could never change anything again.
+            if (!field.isSet(overrides))
+                continue;
+            markOverride(raw, field, overrides);
+        }
         applySettings(raw, m_settings, true);
         m_overrides = raw.hasWrapMode || raw.hasActivation || raw.hasImpactGate
-            || raw.hasImpactSpeed || raw.hasWrapGuard || raw.hasEdgeThreshold
-            || raw.hasAdjacency || raw.hasTuningOverlay || raw.hasDataWindow;
+            || raw.hasImpactSpeed || raw.hasImpactBand || raw.hasImpactAccel
+            || raw.hasWrapGuard || raw.hasEdgeThreshold || raw.hasAdjacency || raw.hasDrag
+            || raw.hasSingle || raw.hasTuningOverlay || raw.hasDataWindow;
     }
 
     void persistOverrides()

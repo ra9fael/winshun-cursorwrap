@@ -285,8 +285,12 @@ LRESULT MouseHook::hookProc(int code, WPARAM wp, LPARAM lp)
         return 1; // swallow the original move; the cursor already moved
     }
     ++m_setCursorFailures;
-    // SetCursorPos failed: let the original event through rather than eating
-    // a move without moving.
+    // The engine already recorded this wrap. Undo it: the pointer never moved, so
+    // a guard armed at the landing point would suppress every further attempt from
+    // here — the "works only now and then" the user reported. Recorded outside any
+    // other work so the callback stays short.
+    m_engine->onWrapFailed();
+    // Let the original event through rather than eating a move without moving.
     return CallNextHookEx(nullptr, code, wp, lp);
 }
 

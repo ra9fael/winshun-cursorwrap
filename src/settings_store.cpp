@@ -34,17 +34,177 @@ std::string activationText(ActivationMode a)
     return "always";
 }
 
+// The single table. Every entry must be a real member of Settings, and every
+// member of Settings must be here — tests/test_settings_roundtrip.cpp walks all
+// of them and names the field that failed, so the suite keeps this honest.
+const std::vector<SettingsField>& settingsFields()
+{
+    static const std::vector<SettingsField> table = {
+        { "wrapMode", FieldKind::Text,
+          [](const Settings& s) { return s.wrapMode != Settings{}.wrapMode; },
+          [](const Settings&) { return 0LL; }, [](const Settings&) { return false; },
+          [](const Settings& s) { return modeText(s.wrapMode); } },
+
+        { "activationMode", FieldKind::Text,
+          [](const Settings& s) { return s.activation != Settings{}.activation; },
+          [](const Settings&) { return 0LL; }, [](const Settings&) { return false; },
+          [](const Settings& s) { return activationText(s.activation); } },
+
+        // The two drag/single-monitor gates. The host card applied them but
+        // dumpOverrides had no entry for them, so a change made from the search
+        // bar vanished on the next start. The exhaustive round-trip test found
+        // them; before this table existed they were simply missing.
+        { "disableDuringDrag", FieldKind::Bool,
+          [](const Settings& s) { return s.disableDuringDrag != Settings{}.disableDuringDrag; },
+          [](const Settings&) { return 0LL; },
+          [](const Settings& s) { return s.disableDuringDrag; },
+          [](const Settings&) { return std::string(); } },
+
+        { "disableOnSingleMonitor", FieldKind::Bool,
+          [](const Settings& s) {
+              return s.disableOnSingleMonitor != Settings{}.disableOnSingleMonitor;
+          },
+          [](const Settings&) { return 0LL; },
+          [](const Settings& s) { return s.disableOnSingleMonitor; },
+          [](const Settings&) { return std::string(); } },
+
+        { "edgeThresholdPx", FieldKind::Number,
+          [](const Settings& s) { return s.edgeThresholdPx != Settings{}.edgeThresholdPx; },
+          [](const Settings& s) { return static_cast<long long>(s.edgeThresholdPx); },
+          [](const Settings&) { return false; },
+          [](const Settings&) { return std::string(); } },
+
+        { "wrapGuardPx", FieldKind::Number,
+          [](const Settings& s) { return s.wrapGuardPx != Settings{}.wrapGuardPx; },
+          [](const Settings& s) { return static_cast<long long>(s.wrapGuardPx); },
+          [](const Settings&) { return false; },
+          [](const Settings&) { return std::string(); } },
+
+        { "adjacencyTolerancePx", FieldKind::Number,
+          [](const Settings& s) {
+              return s.adjacencyTolerancePx != Settings{}.adjacencyTolerancePx;
+          },
+          [](const Settings& s) { return static_cast<long long>(s.adjacencyTolerancePx); },
+          [](const Settings&) { return false; },
+          [](const Settings&) { return std::string(); } },
+
+        { "impactGate", FieldKind::Bool,
+          [](const Settings& s) { return s.impactGate != Settings{}.impactGate; },
+          [](const Settings&) { return 0LL; },
+          [](const Settings& s) { return s.impactGate; },
+          [](const Settings&) { return std::string(); } },
+
+        { "impactSpeedPps", FieldKind::Number,
+          [](const Settings& s) { return s.impactSpeedPps != Settings{}.impactSpeedPps; },
+          [](const Settings& s) { return static_cast<long long>(s.impactSpeedPps); },
+          [](const Settings&) { return false; },
+          [](const Settings&) { return std::string(); } },
+
+        // The two fields the hand-written reader forgot, which is why
+        // "accel 2000" was silently dropped on the next start.
+        { "impactBandPx", FieldKind::Number,
+          [](const Settings& s) { return s.impactBandPx != Settings{}.impactBandPx; },
+          [](const Settings& s) { return static_cast<long long>(s.impactBandPx); },
+          [](const Settings&) { return false; },
+          [](const Settings&) { return std::string(); } },
+
+        { "impactAccelPps2", FieldKind::Number,
+          [](const Settings& s) { return s.impactAccelPps2 != Settings{}.impactAccelPps2; },
+          [](const Settings& s) { return static_cast<long long>(s.impactAccelPps2); },
+          [](const Settings&) { return false; },
+          [](const Settings&) { return std::string(); } },
+
+        { "tuningOverlay", FieldKind::Bool,
+          [](const Settings& s) { return s.tuningOverlay != Settings{}.tuningOverlay; },
+          [](const Settings&) { return 0LL; },
+          [](const Settings& s) { return s.tuningOverlay; },
+          [](const Settings&) { return std::string(); } },
+
+        { "dataWindow", FieldKind::Bool,
+          [](const Settings& s) { return s.dataWindow != Settings{}.dataWindow; },
+          [](const Settings&) { return 0LL; },
+          [](const Settings& s) { return s.dataWindow; },
+          [](const Settings&) { return std::string(); } },
+    };
+    return table;
+}
+
+namespace {
+
 // One key: parse it out of `s` and apply it onto `out` through the same
 // clamping path the host settings use.
-void applyKey(const winshun::Json& s, const char* key, Settings& out,
-              void (*fill)(RawSettings&, const winshun::Json&))
+//
+// RawSettings mirrors Settings field by field, so one switch over the key is
+// unavoidable; the TABLE is what guarantees every key has an entry here,
+// because the loop below only visits keys the table names. A key added to
+// Settings but forgotten in this switch is caught by the round-trip test, which
+// fails with that key's name.
+void applyKey(const winshun::Json& s, const SettingsField& field, Settings& out)
 {
-    if (!s.has(key))
+    if (!s.has(field.key))
         return;
+    const winshun::Json& v = s[field.key];
+    switch (field.kind) {
+    case FieldKind::Text:
+        if (!v.isString())
+            return;
+        break;
+    case FieldKind::Bool:
+        if (!v.isBool())
+            return;
+        break;
+    case FieldKind::Number:
+        if (!v.isNumber())
+            return;
+        break;
+    }
+
     RawSettings raw;
-    fill(raw, s[key]);
+    const std::string key = field.key;
+    if (key == "wrapMode") {
+        raw.wrapMode = v.toString();
+        raw.hasWrapMode = true;
+    } else if (key == "activationMode") {
+        raw.activationMode = v.toString();
+        raw.hasActivation = true;
+    } else if (key == "disableDuringDrag") {
+        raw.disableDuringDrag = v.toBool();
+        raw.hasDrag = true;
+    } else if (key == "disableOnSingleMonitor") {
+        raw.disableOnSingleMonitor = v.toBool();
+        raw.hasSingle = true;
+    } else if (key == "edgeThresholdPx") {
+        raw.edgeThresholdPx = v.toNumber();
+        raw.hasEdgeThreshold = true;
+    } else if (key == "wrapGuardPx") {
+        raw.wrapGuardPx = v.toNumber();
+        raw.hasWrapGuard = true;
+    } else if (key == "adjacencyTolerancePx") {
+        raw.adjacencyTolerancePx = v.toNumber();
+        raw.hasAdjacency = true;
+    } else if (key == "impactGate") {
+        raw.impactGate = v.toBool();
+        raw.hasImpactGate = true;
+    } else if (key == "impactSpeedPps") {
+        raw.impactSpeedPps = v.toNumber();
+        raw.hasImpactSpeed = true;
+    } else if (key == "impactBandPx") {
+        raw.impactBandPx = v.toNumber();
+        raw.hasImpactBand = true;
+    } else if (key == "impactAccelPps2") {
+        raw.impactAccelPps2 = v.toNumber();
+        raw.hasImpactAccel = true;
+    } else if (key == "tuningOverlay") {
+        raw.tuningOverlay = v.toBool();
+        raw.hasTuningOverlay = true;
+    } else if (key == "dataWindow") {
+        raw.dataWindow = v.toBool();
+        raw.hasDataWindow = true;
+    }
     applySettings(raw, out, true);
 }
+
+} // namespace
 
 Settings loadOverrides(const std::string& jsonText, bool& valid, std::string& problem)
 {
@@ -72,104 +232,33 @@ Settings loadOverrides(const std::string& jsonText, bool& valid, std::string& pr
     valid = true;
     problem.clear();
 
-    // Only the keys present in the file become overrides; absent keys stay
-    // in whatever the host card says. The clamps run through the same
+    // Only the keys present in the file become overrides; absent keys stay in
+    // whatever the host card says. The clamps run through the same
     // applySettings path, so a hand-edited file cannot exceed the ranges.
-    applyKey(s, "wrapMode", out, [](RawSettings& raw, const winshun::Json& v) {
-        if (v.isString()) {
-            raw.wrapMode = v.toString();
-            raw.hasWrapMode = true;
-        }
-    });
-    applyKey(s, "activationMode", out, [](RawSettings& raw, const winshun::Json& v) {
-        if (v.isString()) {
-            raw.activationMode = v.toString();
-            raw.hasActivation = true;
-        }
-    });
-    applyKey(s, "impactGate", out, [](RawSettings& raw, const winshun::Json& v) {
-        if (v.isBool()) {
-            raw.impactGate = v.toBool();
-            raw.hasImpactGate = true;
-        }
-    });
-    applyKey(s, "impactSpeedPps", out, [](RawSettings& raw, const winshun::Json& v) {
-        if (v.isNumber()) {
-            raw.impactSpeedPps = v.toNumber();
-            raw.hasImpactSpeed = true;
-        }
-    });
-    applyKey(s, "impactBandPx", out, [](RawSettings& raw, const winshun::Json& v) {
-        if (v.isNumber()) {
-            raw.impactBandPx = v.toNumber();
-            raw.hasImpactBand = true;
-        }
-    });
-    applyKey(s, "impactAccelPps2", out, [](RawSettings& raw, const winshun::Json& v) {
-        if (v.isNumber()) {
-            raw.impactAccelPps2 = v.toNumber();
-            raw.hasImpactAccel = true;
-        }
-    });
-    applyKey(s, "wrapGuardPx", out, [](RawSettings& raw, const winshun::Json& v) {
-        if (v.isNumber()) {
-            raw.wrapGuardPx = v.toNumber();
-            raw.hasWrapGuard = true;
-        }
-    });
-    applyKey(s, "edgeThresholdPx", out, [](RawSettings& raw, const winshun::Json& v) {
-        if (v.isNumber()) {
-            raw.edgeThresholdPx = v.toNumber();
-            raw.hasEdgeThreshold = true;
-        }
-    });
-    applyKey(s, "adjacencyTolerancePx", out, [](RawSettings& raw, const winshun::Json& v) {
-        if (v.isNumber()) {
-            raw.adjacencyTolerancePx = v.toNumber();
-            raw.hasAdjacency = true;
-        }
-    });
-    applyKey(s, "tuningOverlay", out, [](RawSettings& raw, const winshun::Json& v) {
-        if (v.isBool()) {
-            raw.tuningOverlay = v.toBool();
-            raw.hasTuningOverlay = true;
-        }
-    });
-    applyKey(s, "dataWindow", out, [](RawSettings& raw, const winshun::Json& v) {
-        if (v.isBool()) {
-            raw.dataWindow = v.toBool();
-            raw.hasDataWindow = true;
-        }
-    });
+    // Unknown keys are ignored, so a file from a newer build still loads.
+    for (const SettingsField& field : settingsFields())
+        applyKey(s, field, out);
     return out;
 }
 
 std::string dumpOverrides(const Settings& settings)
 {
-    const Settings defaults;
     winshun::Json::Object inner;
-    if (settings.wrapMode != defaults.wrapMode)
-        inner["wrapMode"] = modeText(settings.wrapMode);
-    if (settings.activation != defaults.activation)
-        inner["activationMode"] = activationText(settings.activation);
-    if (settings.impactGate != defaults.impactGate)
-        inner["impactGate"] = settings.impactGate;
-    if (settings.impactSpeedPps != defaults.impactSpeedPps)
-        inner["impactSpeedPps"] = static_cast<long long>(settings.impactSpeedPps);
-    if (settings.impactBandPx != defaults.impactBandPx)
-        inner["impactBandPx"] = static_cast<long long>(settings.impactBandPx);
-    if (settings.impactAccelPps2 != defaults.impactAccelPps2)
-        inner["impactAccelPps2"] = static_cast<long long>(settings.impactAccelPps2);
-    if (settings.wrapGuardPx != defaults.wrapGuardPx)
-        inner["wrapGuardPx"] = static_cast<long long>(settings.wrapGuardPx);
-    if (settings.edgeThresholdPx != defaults.edgeThresholdPx)
-        inner["edgeThresholdPx"] = static_cast<long long>(settings.edgeThresholdPx);
-    if (settings.adjacencyTolerancePx != defaults.adjacencyTolerancePx)
-        inner["adjacencyTolerancePx"] = static_cast<long long>(settings.adjacencyTolerancePx);
-    if (settings.tuningOverlay != defaults.tuningOverlay)
-        inner["tuningOverlay"] = settings.tuningOverlay;
-    if (settings.dataWindow != defaults.dataWindow)
-        inner["dataWindow"] = settings.dataWindow;
+    for (const SettingsField& field : settingsFields()) {
+        if (!field.isSet(settings))
+            continue;
+        switch (field.kind) {
+        case FieldKind::Text:
+            inner[field.key] = field.text(settings);
+            break;
+        case FieldKind::Bool:
+            inner[field.key] = field.boolean(settings);
+            break;
+        case FieldKind::Number:
+            inner[field.key] = field.number(settings);
+            break;
+        }
+    }
 
     winshun::Json::Object root;
     root["version"] = static_cast<long long>(kVersion);

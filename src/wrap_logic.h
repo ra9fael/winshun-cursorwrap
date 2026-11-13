@@ -49,7 +49,7 @@ struct Settings {
     // speed gate applies here too).
     bool impactGate = false;
     int impactSpeedPps = 2000;      // 500..20000 px/s
-    int impactBandPx = 150;         // 50..500 px: the approach band speed is measured in
+    int impactBandPx = 400;         // 50..500 px: the approach band speed is measured in
     // Measured: a constant-speed hand reads 0 px/s² at 125/500/1000 Hz, a firm
     // flick reads 1600-3600. 500 sits in the gap, so it is a usable default
     // rather than a value no real gesture reaches. 0 disables the condition.
@@ -75,7 +75,7 @@ struct RawSettings {
     double adjacencyTolerancePx = 50;
     bool impactGate = false;
     double impactSpeedPps = 2000;
-    double impactBandPx = 150;
+    double impactBandPx = 400;
     double impactAccelPps2 = 0;
     bool tuningOverlay = false;
     bool dataWindow = false;
@@ -251,6 +251,20 @@ public:
     std::pair<int64_t, int64_t> onMouseMove(const Sample& sample, bool modifierHeld,
                                             bool leftButtonHeld);
 
+    // The OS refused the landing (SetCursorPos returned FALSE). onMouseMove has
+    // already recorded the wrap — it has to, because the decision and the guard
+    // live there — so this undoes that record, otherwise the guard would suppress
+    // every further attempt from the SAME spot while the pointer never moved.
+    //
+    // That is the user's "it is on but wrapping only works now and then, and
+    // sometimes works after the mouse sits still". A failed SetCursorPos (a
+    // session that refuses programmatic moves, a secure desktop, a full-screen
+    // exclusive app taking the foreground) leaves the hand at the edge, the guard
+    // armed at a landing point the pointer never reached, so nothing wraps until
+    // the pointer happens to travel far enough from that phantom point — which is
+    // exactly what pauses and small moves do.
+    void onWrapFailed();
+
     Stats stats() const;
     Diagnostics diagnostics(bool hookOk) const;
 
@@ -316,6 +330,12 @@ public:
     // 40 ms is two 20 ms halves: long enough to see a ramp from 125 Hz up,
     // short enough to stay inside a single gesture.
     static constexpr long long kImpactAccelWindowUs = 100 * 1000; // 100 ms
+    // The acceleration window gets its OWN maximum reach, independent of the
+    // speed band. The band caps how far back the SPEED may be measured, but using
+    // it for the slope too meant "narrow band -> no measurable window -> (before
+    // this fix) the floor silently did not apply". The slope may look further
+    // back than the speed; only the reported speed has to be at the edge.
+    static constexpr long long kImpactAccelMaxBandPx = 2000;
     // A hand cannot exceed this; a larger slope means quantisation, not motion.
     static constexpr long long kImpactAccelMaxPps2 = 2'000'000;
     // 1000 Hz gaming mice: 32 samples were only 32 ms; 128 covers the

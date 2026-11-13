@@ -364,6 +364,15 @@ WrapEngine::ApproachMeasure WrapEngine::approachSpeedPps(EdgeType edge,
         bool usable = false;
     } aw;
     if (m_settings.impactAccelPps2 > 0) {
+        // The acceleration window may reach FURTHER BACK than the speed band.
+        // Sharing the band capped the window at the same distance, so a narrow
+        // band meant a window too short to fit a slope — and before this was
+        // fixed, "unmeasurable" meant "the floor does not apply", so a narrow
+        // band made the gate MORE permissive. The slope only needs the hand to
+        // have been travelling toward the edge; how close it was when measured is
+        // the speed window's business.
+        const long long accelBand =
+            std::max<int64_t>(band, kImpactAccelMaxBandPx);
         size_t j = end;
         while (j > 0) {
             const Sample& prev = m_history[j - 1];
@@ -373,8 +382,8 @@ WrapEngine::ApproachMeasure WrapEngine::approachSpeedPps(EdgeType edge,
                 break; // the window is full
             if (travel(prev, m_history[j]) < 0)
                 break; // reversed
-            if (std::llabs(coord(prev, edge) - edgeCoord) > band)
-                break; // left the approach band: no way to see further back
+            if (std::llabs(coord(prev, edge) - edgeCoord) > accelBand)
+                break; // too far back to be the same gesture
             --j;
         }
         aw.start = j;
@@ -550,17 +559,30 @@ std::pair<int64_t, int64_t> WrapEngine::onMouseMove(const Sample& sample, bool m
         m_verdict.accelBlocked = false;
 
         const bool tooSlow = pps < m_settings.impactSpeedPps;
-        // Acceleration only applies when the user enabled it. When the stroke is
-        // too short in time to measure a slope at all, the speed condition alone
-        // decides — refusing there would make the gate unusable at a coarse
-        // report rate, which is a real configuration. A MEASURED 0 (constant
-        // speed) is different: it fails an acceleration floor, which is exactly
-        // what the user asked for ("not merely fast, but speeding up").
+        // Acceleration only applies when the user enabled it.
+        //
+        // MEASURABLE OR REFUSED — never "not applicable". The old rule was
+        // `accelEnabled && accelMeasured && accel < floor`, so when the slope
+        // could not be measured the floor simply did not apply and the move went
+        // through. That inverted the setting: the slope is unmeasurable exactly
+        // when the hand crosses the whole band inside the 100 ms window, i.e.
+        // when it is FASTEST. Measured on the devshell with impactAccelPps2=1600:
+        // a steady 12000 px/s move, a steady 18000 px/s move and even a BRAKING
+        // 16000->9000 move all wrapped. That is the user's report, "with
+        // acceleration set to 1600 it wraps MORE easily", and it was literally
+        // true.
+        //
+        // So an enabled floor that cannot be checked FAILS CLOSED. The refusal is
+        // honest: we cannot show the hand was speeding up, so we do not act on
+        // it. The verdict carries accelMeasured = false, which the overlay and
+        // the data window show as "unmeasurable" so this is diagnosable rather
+        // than mysterious.
         const bool accelEnabled = m_settings.impactAccelPps2 > 0;
+        const bool accelUnmeasurable = accelEnabled && !measure.accelMeasured;
         const bool accelTooLow = accelEnabled && measure.accelMeasured
             && measure.accelPps2 < m_settings.impactAccelPps2;
-        gatedOut = tooSlow || accelTooLow;
-        m_verdict.accelBlocked = !tooSlow && accelTooLow;
+        gatedOut = tooSlow || accelUnmeasurable || accelTooLow;
+        m_verdict.accelBlocked = !tooSlow && (accelUnmeasurable || accelTooLow);
         if (!gatedOut)
             m_verdict.wrapped = true;
     } else {
@@ -642,9 +664,30 @@ std::pair<int64_t, int64_t> WrapEngine::onMouseMove(const Sample& sample, bool m
     return { sample.x, sample.y };
 }
 
-Stats WrapEngine::stats() const
+void WrapEngine::onWrapFailed()
 {
     std::lock_guard lock(m_mutex);
+    // Undo the record onMouseMove just made. The pointer is still at the edge the
+    // hand was pushing on, so the guard must not be armed at the landing point it
+    // never reached: leave it unarmed and let the next sample decide again.
+    m_hasLastWrap = false;
+    m_hasWrapEdge = false;
+    m_hasArrivalEdge = false;
+    if (m_stats.wraps > 0)
+        --m_stats.wraps;
+    // A failed wrap is not an arrival for the tuner's histogram: it must not
+    // teach suggestGate that this speed wraps.
+    if (!m_arrivals.empty())
+        m_arrivals.pop_back();
+    if (m_arrivalSeq > 0)
+        --m_arrivalSeq;
+    // The hand is still moving toward the edge, so keep the samples: the next
+    // event is a fresh arrival at the same place and must be able to wrap.
+    m_lastReason = SkipReason::None;
+}
+
+Stats WrapEngine::stats() const
+{
     return m_stats;
 }
 

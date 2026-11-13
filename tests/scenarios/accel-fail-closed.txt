@@ -1,0 +1,67 @@
+# The user reported: "with acceleration set to 1600 it wraps MORE easily".
+#
+# It was literally true. The old rule was
+#
+#     accelEnabled && accelMeasured && accel < floor
+#
+# so when the slope could not be measured the floor simply did not apply and the
+# move went through. The slope is unmeasurable exactly when the hand covers the
+# window's reach in less than the minimum fitting time — i.e. when it is FASTEST.
+# Enabling the floor therefore rewarded the gesture it was meant to refuse, and
+# narrowing impactBandPx made it worse because the band used to cap the window.
+#
+# Two fixes, both asserted here:
+#   1. an enabled floor that cannot be measured FAILS CLOSED;
+#   2. the acceleration window reaches back 2000 px on its own, so narrowing the
+#      speed band can no longer shorten it.
+#
+# Run: build/cw_devshell.exe run tests/scenarios/accel-fail-closed.txt
+
+monitor 0,0,1920,1080
+set impactGate on
+set mode both
+set edge 1
+set guard 20
+set speed 2000
+set accel 1600
+
+# --- steady hands at speed are refused at every band --------------------
+# All three are constant speed, so acceleration is genuinely 0 and the floor must
+# say no. The old build wrapped all of them.
+set band 150
+expect no-wrap
+hand 1200 12000 12000 1000 2000
+expect no-wrap
+hand 1200 16000 16000 1000 2000
+
+# The same gesture with a deliberately narrow band: the answer must not change.
+# Before the fix, band 50 made the slope unmeasurable and the move was let through.
+set band 50
+expect no-wrap
+hand 1200 12000 12000 1000 2000
+expect no-wrap
+hand 1200 8000 8000 500 2000
+
+# --- a BRAKING hand is refused too -------------------------------------
+# Negative acceleration, and it used to be unmeasurable at this speed, so it
+# slipped through with the same "floor not applicable" hole.
+set band 150
+expect no-wrap
+hand 1200 16000 9000 1000 2000
+
+# --- a genuine accelerating flick still wraps --------------------------
+# The floor must still be capable of allowing the gesture it exists for, otherwise
+# "fail closed" would just mean "never wraps".
+set band 150
+expect wrap
+hand 1200 500 9000 500 2000
+
+# --- and the acceleration setting is persisted across a restart --------
+# The user's setting silently reverted to 0 on the next start because the reader
+# forgot impactAccelPps2 entirely. That is covered by
+# tests/test_settings_roundtrip.cpp, which walks every field; this scenario keeps
+# the behavioural side honest.
+set accel 0
+expect wrap
+hand 1200 8000 8000 1000 2000
+dump

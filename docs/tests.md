@@ -17,7 +17,7 @@
 | 打包物含 `plugin.json` / `cursorwrap.exe` / `README.md` / `LICENSE`，无 `build/`、`dist/`、`.git` | §8 | `tools/package.py` + `tools/ci_release.py` |
 | 双语文档锚点互链（`docs/spec*.md`、`docs/tests*.md`、README、CHANGELOG） | — | 通过 |
 
-## L1 — 纯逻辑单测（`cw_tests`，ctest 目标，140 用例 + 6 布局 fixture）
+## L1 — 纯逻辑单测（`cw_tests`，ctest 目标，155 用例 + 6 布局 fixture）
 
 不引 OS 头文件，任何平台可跑。运行：
 
@@ -95,7 +95,7 @@ fixture 是**合成几何**，不是真机采集，因此可安全提交（不�
 python tests/protocol_roundtrip.py
 ```
 
-2026-11-12 实跑：**118 项检查全部通过**，进程退出码 0。
+2026-11-14 实跑：**123 项检查全部通过**，进程退出码 0。
 
 | 检查 | 对应 |
 |---|---|
@@ -155,6 +155,7 @@ build\cw_devshell.exe gui                     # 真窗口，键盘 1/2/3 驱动�
 | `regressions.txt` | 历次修复的行为回归（单屏、守卫、模式过滤、安置点） |
 | `dual-1440p.txt` | 用户的真实桌面（2 × 2560×1440，主屏带任务栏）：含负坐标的精确落点，纵向环两端都避开任务栏 |
 | `teardown.txt` | 窗口与线程收尾无残留 |
+| `accel-fail-closed.txt` | 加速度门槛为 fail-closed：稳态 12000/16000 px/s、窄带（50/100/150/400）与刹车动作即使不可测量也一律拒绝，而真实 500->9000 px/s 甩动仍然穿越，`accel=0` 时门槛关闭 |
 
 场景文件一行一条命令，`#` 起注释：`monitor`（可带工作区：
 `l,t,r,b,workL,workT,workR,workB`，用来声明任务栏）、`set`、`move`、`stroke`、
@@ -239,10 +240,10 @@ build\cw_devshell.exe gui                     # 真窗口，键盘 1/2/3 驱动�
 
 ## 验收标准
 
-- L1 全绿（当前 140 用例 + 6 布局 fixture，全部是合成几何；`live-single.json` 只被
+- L1 全绿（当前 155 用例 + 6 布局 fixture，全部是合成几何；`live-single.json` 只被
   探针读取，不进 L1）
 - L3 全通过（当前 119/119）
-- L3.5 场景全通过（当前 11 个场景，`python tests/devshell_scenarios.py`）
+- L3.5 场景全通过（当前 12 个场景，`python tests/devshell_scenarios.py`）
 - L0 静态校验通过
 - L4 单屏与远程桌面单屏部分已实测通过；**多屏部分全部勾选后**才可宣布多屏可发布，
   当前属发布阻塞项

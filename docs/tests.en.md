@@ -16,7 +16,7 @@ original: [tests.md](tests.md).
 | Package contains `plugin.json` / `cursorwrap.exe` / `README.md` / `LICENSE`, no `build/`, `dist/`, `.git` | §8 | `tools/package.py` + `tools/ci_release.py` |
 | Bilingual anchors cross-link (`docs/spec*.md`, `docs/tests*.md`, README, CHANGELOG) | — | pass |
 
-## L1 — Pure logic unit tests (`cw_tests`, ctest target, 140 cases + 6 layout fixtures)
+## L1 — Pure logic unit tests (`cw_tests`, ctest target, 155 cases + 6 layout fixtures)
 
 No OS headers: runs anywhere. Commands:
 
@@ -95,7 +95,7 @@ The hook callback and settings delivery can be tested without a real hook:
 python tests/protocol_roundtrip.py
 ```
 
-Run on 2026-11-12: **118 checks passed**, process exit code 0.
+Run on 2026-11-14: **123 checks passed**, process exit code 0.
 
 | Check | Spec |
 |---|---|
@@ -159,6 +159,7 @@ build\cw_devshell.exe gui                     # real windows, keys 1/2/3, q quit
 | `regressions.txt` | Behavioural regressions of earlier fixes (single monitor, guard, mode filtering, landings) |
 | `dual-1440p.txt` | The user's real desktop (2 x 2560x1440, taskbar on the primary): exact landings including negative coordinates, and the taskbar avoided at both ends of the vertical ring |
 | `teardown.txt` | Windows and worker threads shut down without leftovers |
+| `accel-fail-closed.txt` | The acceleration floor is fail-closed: steady 12000/16000 px/s, narrow bands (50/100/150/400) and a braking move are all refused even when unmeasurable, while a genuine 500->9000 px/s flick still wraps and `accel=0` keeps the gate off |
 
 A scenario file holds one command per line (`#` comments): `monitor` (optionally
 with a work area — `l,t,r,b,workL,workT,workR,workB` — to declare a taskbar),
@@ -254,10 +255,10 @@ coordinates.
 
 ## Acceptance criteria
 
-- L1 green (currently 140 cases + 6 fixtures, all synthetic geometry;
+- L1 green (currently 155 cases + 6 fixtures, all synthetic geometry;
   `live-single.json` is read by the probe only, not by L1)
-- L3 fully passing (currently 119/119)
-- L3.5 scenarios passing (currently 11, via `python tests/devshell_scenarios.py`)
+- L3 fully passing (currently 123/123)
+- L3.5 scenarios passing (currently 12, via `python tests/devshell_scenarios.py`)
 - L0 static validation passing
 - The single-display (including Remote Desktop) part of L4 has been measured and
   passed; **all multi-display boxes must be checked** before multi-display can be

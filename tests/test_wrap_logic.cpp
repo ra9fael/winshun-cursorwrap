@@ -147,3 +147,61 @@ CW_TEST(diagnostics_counts_and_gaps)
     CW_CHECK_EQ(d.gaps.size(), size_t(1));
     CW_CHECK_EQ(d.stats.moves, 1);
 }
+
+// ------------------------------------------------- SetCursorPos refused a wrap
+//
+// The user: "it is on but wrapping works only now and then, and sometimes works
+// after the mouse sits still for a while". When SetCursorPos fails the plugin
+// swallowed the move and kept the wrap it had recorded, so the guard sat at a
+// landing point the pointer never reached and suppressed every further attempt
+// from the same edge until the pointer wandered far enough away. These tests pin
+// the rollback.
+
+CW_TEST(engine_failed_wrap_does_not_arm_the_guard)
+{
+    WrapEngine e;
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    const auto [x1, y1] = e.onMouseMove({ 1919, 540, 1000 }, false, false);
+    CW_CHECK_EQ(x1, 1); // the decision was a wrap
+    CW_CHECK_EQ(e.stats().wraps, 1);
+
+    // The OS refused it. The pointer is still at 1919 and the hand keeps pushing.
+    e.onWrapFailed();
+    CW_CHECK_EQ(e.stats().wraps, 0); // the wrap never happened
+
+    // The very next push from the same place must be free to wrap again. Before
+    // onWrapFailed this returned 1919 (suppressed by the guard) for as long as the
+    // hand stayed at the edge.
+    const auto [x2, y2] = e.onMouseMove({ 1919, 540, 2000 }, false, false);
+    CW_CHECK_EQ(x2, 1);
+    CW_CHECK_EQ(y2, 540);
+}
+
+CW_TEST(engine_failed_wrap_is_not_recorded_as_an_arrival)
+{
+    // A refused wrap must not teach the tuner that this speed wraps, or
+    // suggestGate would recommend a threshold calibrated on nothing.
+    WrapEngine e;
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    e.onMouseMove({ 1919, 540, 1000 }, false, false);
+    const size_t before = e.arrivals().size();
+    e.onWrapFailed();
+    CW_CHECK(e.arrivals().size() < before);
+}
+
+CW_TEST(engine_wrap_failure_then_success_wraps_exactly_once)
+{
+    // Failure, then success, then the guard must behave normally (no double wrap).
+    WrapEngine e;
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    e.onMouseMove({ 1919, 540, 1000 }, false, false);
+    e.onWrapFailed();
+
+    const auto [x, y] = e.onMouseMove({ 1919, 540, 2000 }, false, false);
+    CW_CHECK_EQ(x, 1);
+    CW_CHECK_EQ(e.stats().wraps, 1);
+    // Now the landing is real, so the guard applies as usual.
+    const auto [x2, y2] = e.onMouseMove({ 1919, 540, 3000 }, false, false);
+    CW_CHECK_EQ(x2, 1919);
+    CW_CHECK_EQ(y2, 540);
+}

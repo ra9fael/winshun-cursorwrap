@@ -510,6 +510,45 @@ def run(exe: Path) -> int:
         check(bool(copies) and "impact gate: off" in copies[0],
               "the gate can be turned off again", str(copies)[:200])
 
+        print("search-bar settings survive a restart (the user's report)")
+        # The reader used to skip impactBandPx and impactAccelPps2, so
+        # "accel 2000" survived in settings.json and the menu showed
+        # "off (speed only)" after the next start.
+        drv.query("accel 2000")
+        drv.query("band 250")
+        saved = (data_dir / "settings.json").read_text(encoding="utf-8")
+        check("impactAccelPps2" in saved, "the accel setting reaches settings.json", saved[:200])
+        check("impactBandPx" in saved, "the band setting reaches settings.json", saved[:200])
+        drv.close()
+
+        def current_accel(driver) -> list[str]:
+            # Only the current row carries a subtitle, and it is localised
+            # ("current" in English, "\u5f53\u524d" in Chinese), so presence is the
+            # language-neutral signal.
+            return [i.get("title") for i in items_of(driver.query("accel"))
+                    if i.get("id") == "cursorwrap.accel" and i.get("subtitle")]
+
+        restarted = Driver(exe, data_dir)
+        restarted.initialize()
+        check(current_accel(restarted) == ["2000 px/s\u00b2"],
+              "the accel setting is still 2000 after a restart",
+              str(current_accel(restarted)))
+
+        # A settings-card change must not undo it either: the card is authoritative
+        # for keys the search bar never touched, and this one WAS touched.
+        restarted.settings_changed(default_settings(wrapMode="vertical", impactAccelPps2=0))
+        time.sleep(0.4)
+        check(current_accel(restarted) == ["2000 px/s\u00b2"],
+              "a card change to another key keeps the search-bar accel",
+              str(current_accel(restarted)))
+        restarted.close()
+
+        # The remaining checks assume defaults, so start from a clean data dir.
+        data_dir2 = Path(tmp) / "cursorwrap2.data"
+        data_dir2.mkdir()
+        drv = Driver(exe, data_dir2)
+        drv.initialize()
+
         print("cancel tolerance")
         drv.cancel(12345)  # a queryId that was never issued must be harmless
         q5 = drv.query("")
