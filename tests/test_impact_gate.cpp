@@ -1290,9 +1290,122 @@ CW_TEST(acceleration_floor_refuses_braking_into_the_edge)
     CW_CHECK(e.lastVerdict().measuredAccelPps2 <= 0);
 }
 
-CW_TEST(acceleration_setting_clamps_and_zero_is_off)
+// The same stroke, but the mouse JITTERS: a real driver reports ±1 px against
+// the direction of travel while the hand pushes. `jitterEvery` = a backward
+// step of 1 px every N samples (0 = none). Deterministic, no RNG: a flaky test
+// would teach the wrong lesson about which tolerance is enough.
+void driveAccelJitter(WrapEngine& e, int64_t x0, int steps, int64_t step0, int64_t growth,
+                      long long dtUs, long long& t, int jitterEvery)
 {
-    RawSettings raw;
+    int64_t x = x0;
+    int64_t step = step0;
+    for (int i = 0; i < steps; ++i) {
+        x += step;
+        if (jitterEvery > 0 && i % jitterEvery == jitterEvery - 1)
+            x -= 1; // hand jitter: one pixel against the travel
+        if (x > 1919)
+            x = 1919;
+        e.onMouseMove({ x, 540, t }, false, false);
+        t += dtUs;
+        step += growth;
+        if (step < 1)
+            step = 1;
+        if (x >= 1919)
+            break;
+    }
+}
+
+CW_TEST(acceleration_measured_through_hand_jitter_at_1000hz)
+{
+    // The user's report "加速度仍然测不到": v0.7.0 broke the acceleration
+    // window at the FIRST backward sample, so with a jittering 1000 Hz mouse
+    // the window collapsed below its 12 ms minimum and the slope read n/a on
+    // real hardware — while every straight-line test here measured it. The
+    // window now tolerates ±kImpactAccelJitterPx of net backward drift.
+    Settings s;
+    s.impactGate = true;
+    s.impactSpeedPps = 700;
+    s.impactBandPx = 400;
+    s.impactAccelPps2 = 1000;
+    WrapEngine e(s);
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    long long t = 1'000'000;
+    // 1000 Hz: 4 px steps (~4000 px/s) growing every other sample, one backward
+    // pixel every 8th sample. The stroke needs ~100 samples to cross 400 px.
+    driveAccelJitter(e, 1500, 160, 4, 1, 1'000, t, 8);
+    const EdgeVerdict v = e.lastVerdict();
+    CW_CHECK_EQ(e.stats().wraps, 1);
+    CW_CHECK(v.accelMeasured); // "n/a" here is exactly the defect
+    CW_CHECK(v.measuredAccelPps2 >= 1000);
+    if (v.accelMeasured)
+        CW_CHECK_EQ(v.accelIssue, AccelIssue::Ok);
+}
+
+CW_TEST(acceleration_jitter_does_not_fabricate_a_slope)
+{
+    // The mirror side: a constant-speed hand with jitter must still read ~0,
+    // not a slope invented from quantisation noise, or the floor would refuse
+    // every steady sweep (fail closed stays, but it must fail for the RIGHT
+    // reason).
+    Settings s;
+    s.impactGate = true;
+    s.impactSpeedPps = 500;
+    s.impactBandPx = 400;
+    s.impactAccelPps2 = 1000;
+    WrapEngine e(s);
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    long long t = 1'000'000;
+    driveAccelJitter(e, 1500, 200, 4, 0, 1'000, t, 8);
+    const EdgeVerdict v = e.lastVerdict();
+    CW_CHECK_EQ(e.stats().wraps, 0);
+    CW_CHECK(v.accelMeasured);
+    if (v.accelMeasured)
+        CW_CHECK(std::llabs(v.measuredAccelPps2) < 1000);
+    CW_CHECK(v.accelBlocked);
+}
+
+CW_TEST(acceleration_issue_reason_is_recorded_when_unmeasurable)
+{
+    // "n/a" alone made the user read the threshold into the empty slot. The
+    // arrival now carries WHY the slope could not be measured.
+    Settings s;
+    s.impactGate = true;
+    s.impactSpeedPps = 500;
+    s.impactBandPx = 400;
+    s.impactAccelPps2 = 1000;
+    WrapEngine e(s);
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    long long t = 1'000'000;
+    // A HARD reversal inside the stroke: the hand overshot and came back.
+    // Net travel goes backwards past the tolerance, so the window is cut and
+    // the honest answer names the reversal instead of a bare n/a.
+    int64_t x = 1600;
+    for (int i = 0; i < 6; ++i) {
+        x += 30;
+        e.onMouseMove({ x, 540, t }, false, false);
+        t += 2'000;
+    }
+    for (int i = 0; i < 6; ++i) {
+        x -= 10;
+        e.onMouseMove({ x, 540, t }, false, false);
+        t += 2'000;
+    }
+    for (int i = 0; i < 10; ++i) {
+        x += 25;
+        if (x > 1919)
+            x = 1919;
+        e.onMouseMove({ x, 540, t }, false, false);
+        t += 2'000;
+        if (x >= 1919)
+            break;
+    }
+    const EdgeVerdict v = e.lastVerdict();
+    if (e.stats().wraps == 0 && !v.accelMeasured)
+        CW_CHECK_EQ(v.accelIssue, AccelIssue::Reversal);
+}
+
+CW_TEST(acceleration_setting_clamps_and_zero_is_off)
+{    RawSettings raw;
     raw.impactAccelPps2 = 0;
     raw.hasImpactAccel = true;
     Settings s;

@@ -40,6 +40,9 @@ inline bool showsAccelLine(const EdgeVerdict& v)
     return v.thresholdAccelPps2 > 0 && !v.gateOff;
 }
 
+// The one-word reason an unmeasurable slope is unmeasurable (caption-sized).
+const char* accelIssueShort(AccelIssue issue);
+
 // The window height this verdict needs. The bottom of the last row, plus the
 // border, plus the bottom padding.
 inline int readoutHeight(const EdgeVerdict& v)

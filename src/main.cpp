@@ -1496,10 +1496,12 @@ private:
     {
         const std::vector<cw::Arrival> trace = m_engine ? m_engine->arrivals()
                                                         : std::vector<cw::Arrival> {};
-        const long long suggested = cw::suggestGate(trace);
-        if (suggested <= 0)
+        const cw::GateAdvice advice = cw::adviseGate(trace, m_settings.impactSpeedPps);
+        if (advice.fits)
+            return chinese ? "当前门槛合适" : "the current gate fits";
+        if (advice.pps <= 0)
             return chinese ? "数据不足" : "not enough data";
-        return intText(suggested) + " px/s";
+        return intText(advice.pps) + " px/s";
     }
 
     std::string traceCsv() const
@@ -1520,14 +1522,29 @@ private:
     }
 
     // The `cursorwrap best` submenu: the gate the trace suggests. When the
-    // trace has no clear gap it says so instead of inventing a number.
+    // trace has no clear gap it says so instead of inventing a number, and
+    // when the current gate already separates the clusters it says "keep it".
     Items bestMenu()
     {
         const bool chinese = winshun::Plugin::chinese();
         Items rows;
         rows.push_back(backRow());
         const std::vector<cw::Arrival> trace = m_engine ? m_engine->arrivals() : std::vector<cw::Arrival> {};
-        const long long suggested = cw::suggestGate(trace);        if (suggested <= 0) {
+        const cw::GateAdvice advice = cw::adviseGate(trace, m_settings.impactSpeedPps);
+        if (advice.fits) {
+            Item row("cursorwrap.best.fits",
+                     chinese ? "当前门槛合适" : "The current gate fits",
+                     chinese ? "它已经落在两组到达速度的空档里：慢挪被挡住、快甩放行，不用改"
+                             : "it already sits in the gap: slow drifts are refused, flicks go through");
+            row.invalid();
+            rows.push_back(std::move(row));
+            rows.push_back(drillRow("cursorwrap.best.trace",
+                                    chinese ? "查看数据" : "See the data",
+                                    chinese ? "Enter 复制 CSV 离线分析" : "Enter to copy the CSV",
+                                    "cursorwrap trace "));
+            return rows;
+        }
+        if (advice.pps <= 0) {
             Item row("cursorwrap.best.none",
                      chinese ? "还没有足够数据" : "Not enough data yet",
                      chinese ? "先甩几次边缘、再慢慢挪几次，然后回来看"
@@ -1538,14 +1555,17 @@ private:
         }
         Item head("cursorwrap.best.value",
                   std::string(chinese ? "建议门槛：" : "Suggested gate: ")
-                      + intText(suggested) + " px/s",
-                  std::string(chinese ? "当前 " : "current ") + intText(m_settings.impactSpeedPps)
-                      + std::string(chinese ? " px/s · 取自到达速度分布里的空档" : " px/s · the gap in the arrival-speed distribution"));
+                      + intText(advice.pps) + " px/s",
+                  std::string(chinese ? "当前 " : "current ")
+                      + intText(m_settings.impactSpeedPps)
+                      + std::string(chinese
+                              ? " px/s · 取自当前门槛下到达速度分布里的空档（改门槛会重新记录）"
+                              : " px/s · the gap in the arrivals of this gate (the trace resets on a change)"));
         rows.push_back(std::move(head));
-        if (suggested != m_settings.impactSpeedPps) {
+        if (advice.pps != m_settings.impactSpeedPps) {
             Item apply("cursorwrap.best.apply", chinese ? "采用这个门槛" : "Use this gate",
                        chinese ? "Enter 写入并立即生效" : "Enter to apply immediately");
-            apply.withActions({ { "set:speed:" + intText(suggested),
+            apply.withActions({ { "set:speed:" + intText(advice.pps),
                                   chinese ? "采用" : "Apply", "Enter" } });
             rows.push_back(std::move(apply));
         }

@@ -1,13 +1,10 @@
 // data_window.h — the live data window: what the engine just decided, why,
 // and how the arrival speeds are distributed.
 //
-// The tuning overlay draws on the edges themselves and disappears with the
-// desktop; this is the window the user can leave open beside it while tuning:
-//   * state header: enabled / hook / monitors / outer edges / install count
-//   * the pointer the engine last saw, and the last skip reason
-//   * the arrival histogram (same buckets as the overlay's panel)
-//   * the last N decisions, newest first: time, edge, measured speed, verdict
-//   * per-reason skip counters, so "it never wraps" narrows to one gate
+// The one diagnostics surface. It absorbed the overlay's "edge arrivals"
+// panel (which duplicated the histogram with a second, differently-scaled
+// implementation): the engine clears the trace when the impact settings
+// change, so everything here always describes the CURRENT gate.
 //
 // Design notes:
 //   * One persistent window that repaints itself, not a layer per frame: a
@@ -28,6 +25,8 @@
 #include <thread>
 #include <vector>
 #include <windows.h>
+
+#include "arrival_hist.h"
 
 namespace cw {
 
@@ -77,14 +76,14 @@ public:
     };
     void setColors(const Colors& colors);
 
-    static constexpr int kWidth = 460;
-    static constexpr int kHeight = 520;
+    static constexpr int kWidth = 480;
+    static constexpr int kHeight = 620;
 
 private:
     void run();
     void paint();
-    void paintHistogram(HDC dc, int x, int y, int w, int h, const DataSnapshot& snap);
-    static int bucketize(const std::vector<Arrival>& arrivals, int bucketCount, int* buckets);
+    void paintHistogram(HDC dc, int x, int y, int w, int h, const DataSnapshot& snap,
+                        const Colors& colors);
 
     static LRESULT CALLBACK wndProcStatic(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
     LRESULT wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);

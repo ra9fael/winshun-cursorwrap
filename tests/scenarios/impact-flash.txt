@@ -31,6 +31,24 @@ wait 70
 expect flash on
 wait 70
 
+# (3b) A REAL hand keeps pushing after the wrap: the next samples are
+# guard-blocked and the per-sample verdict is overwritten within a millisecond.
+# The glow used to be triggered from that verdict, so on a real machine it
+# never lit; the engine now latches the wrap and the poll cannot miss it.
+move 960 540
+hand 1600 2000 9000 500 400
+expect wrap
+wait 30
+move 5 540 8
+move 6 540 8
+wait 40
+expect flash on
+wait 40
+expect flash off
+wait 200
+expect flash off
+wait 70
+
 # (4) it fades on its own clock, without needing another wrap
 wait 300
 expect flash off

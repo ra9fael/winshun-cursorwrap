@@ -160,7 +160,8 @@ CW_TEST(suggest_gate_needs_enough_arrivals)
         a.measuredPps = 1000 + i * 1000;
         few.push_back(a);
     }
-    CW_CHECK_EQ(suggestGate(few), 0);
+    CW_CHECK_EQ(adviseGate(few, 0).pps, 0);
+    CW_CHECK_EQ(adviseGate(few, 0).considered, 5);
 }
 
 CW_TEST(suggest_gate_finds_the_gap_between_clusters)
@@ -177,9 +178,35 @@ CW_TEST(suggest_gate_finds_the_gap_between_clusters)
         a.measuredPps = 4800 + (i % 9) * 40; // 4800..5120
         trace.push_back(a);
     }
-    const long long suggested = suggestGate(trace);
-    CW_CHECK(suggested > 740);
-    CW_CHECK(suggested < 4800);
+    const GateAdvice advice = adviseGate(trace, 0);
+    CW_CHECK(advice.pps > 740);
+    CW_CHECK(advice.pps < 4800);
+}
+
+CW_TEST(suggest_gate_says_fits_when_the_gate_already_separates)
+{
+    // The user asked why a good gate kept getting a different suggestion: the
+    // answer "keep it" must win over a second number.
+    std::vector<Arrival> trace;
+    for (int i = 0; i < 20; ++i) {
+        Arrival a;
+        a.measuredPps = 620 + (i % 7) * 20; // drifts 620..740
+        trace.push_back(a);
+    }
+    for (int i = 0; i < 20; ++i) {
+        Arrival a;
+        a.measuredPps = 4800 + (i % 9) * 40; // pushes 4800..5120
+        trace.push_back(a);
+    }
+    // 2900 sits in the 740..4800 gap; sqrt(740*4800) ≈ 1884 would otherwise be
+    // printed next to a gate that already works.
+    const GateAdvice advice = adviseGate(trace, 2900);
+    CW_CHECK(advice.fits);
+    CW_CHECK_EQ(advice.pps, 0);
+    // A gate above the fast cluster refuses real flicks, so it gets a number.
+    const GateAdvice other = adviseGate(trace, 6000);
+    CW_CHECK(!other.fits);
+    CW_CHECK(other.pps > 0);
 }
 
 CW_TEST(suggest_gate_is_silent_for_one_cluster)
@@ -191,7 +218,26 @@ CW_TEST(suggest_gate_is_silent_for_one_cluster)
         a.measuredPps = 3000 + (i % 25) * 8;
         trace.push_back(a);
     }
-    CW_CHECK_EQ(suggestGate(trace), 0);
+    const GateAdvice advice = adviseGate(trace, 3000);
+    CW_CHECK_EQ(advice.pps, 0);
+    CW_CHECK(!advice.fits);
+}
+
+CW_TEST(suggest_gate_needs_a_multiplicative_gap)
+{
+    // The regression behind "gate 3000, best 908": a 25%-of-value bump between
+    // neighbouring speeds in ONE cluster was treated as two populations, and
+    // the per-mille metric favoured exactly the low end. A gap must be a real
+    // separation (≥ 1.5×) now.
+    std::vector<Arrival> trace;
+    for (int i = 0; i < 40; ++i) {
+        Arrival a;
+        // 800, 1015, 1230, ... a smooth spread with no 1.5× step anywhere.
+        a.measuredPps = 800 + i * 215;
+        trace.push_back(a);
+    }
+    const GateAdvice advice = adviseGate(trace, 0);
+    CW_CHECK_EQ(advice.pps, 0);
 }
 
 CW_TEST(suggest_gate_ignores_unmeasurable_arrivals)
@@ -203,7 +249,8 @@ CW_TEST(suggest_gate_ignores_unmeasurable_arrivals)
         a.gateOff = true;
         trace.push_back(a);
     }
-    CW_CHECK_EQ(suggestGate(trace), 0);
+    CW_CHECK_EQ(adviseGate(trace, 0).pps, 0);
+    CW_CHECK_EQ(adviseGate(trace, 0).considered, 0);
 }
 
 CW_TEST(suggest_gate_stays_inside_the_setting_range)
@@ -219,8 +266,8 @@ CW_TEST(suggest_gate_stays_inside_the_setting_range)
         a.measuredPps = 40000 + i; // absurdly fast
         trace.push_back(a);
     }
-    const long long s = suggestGate(trace);
-    CW_CHECK(s == 0 || (s >= 500 && s <= 20000));
+    const GateAdvice advice = adviseGate(trace, 0);
+    CW_CHECK(advice.pps == 0 || (advice.pps >= 500 && advice.pps <= 20000));
 }
 
 CW_TEST(engine_trace_records_blocked_arrivals_too)
@@ -258,4 +305,93 @@ CW_TEST(engine_trace_counts_one_arrival_per_edge_run)
         t += 1000;
     }
     CW_CHECK(e.arrivals().size() <= 2);
+}
+
+// --- the trace's lifetime ---------------------------------------------------
+//
+// A row measured under an old gate says nothing about the new one. Mixing eras
+// is what once put "best 908" next to a gate of 3000: the slow rows were real,
+// but they belonged to a gate that no longer existed.
+
+CW_TEST(engine_trace_resets_when_the_impact_settings_change)
+{
+    WrapEngine e(gateOn(2000, 300));
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    long long t = 1'000'000;
+    for (int64_t x = 1500; x < 1919; x += 30) {
+        e.onMouseMove({ x, 540, t }, false, false);
+        t += 8'000;
+    }
+    e.onMouseMove({ 1919, 540, t }, false, false);
+    CW_CHECK(!e.arrivals().empty());
+
+    // A gate change wipes the trace...
+    e.setSettings(gateOn(4000, 300));
+    CW_CHECK(e.arrivals().empty());
+    // ...and re-arms the arrival dedup, so the next push is a fresh row.
+    e.onMouseMove({ 1919, 540, t += 8'000 }, false, false);
+    e.onMouseMove({ 1919, 541, t += 8'000 }, false, false);
+    CW_CHECK(e.arrivals().size() <= 1);
+
+    // Pushing the SAME values again must not wipe it: a settings push is a
+    // full snapshot, not a change.
+    const size_t before = e.arrivals().size();
+    e.setSettings(gateOn(4000, 300));
+    CW_CHECK_EQ(e.arrivals().size(), before);
+    // The band and the acceleration floor count as changes too.
+    e.setSettings(gateOn(4000, 350));
+    CW_CHECK(e.arrivals().empty());
+}
+
+// --- the wrap latch ---------------------------------------------------------
+//
+// The impact glow used to be triggered from the per-sample verdict, which lives
+// for one sample: a 60 ms repaint poll missed it essentially every time on a
+// real machine (the shell never saw this — its scripted hand stops after the
+// wrap). The engine now latches the wrap.
+
+CW_TEST(wrap_event_latches_and_survives_guard_samples)
+{
+    WrapEngine e(gateOn(2000, 150));
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    long long t = 1'000'000;
+    e.onMouseMove({ 1800, 540, t }, false, false);
+    t += 2000;
+    const auto [x, y] = e.onMouseMove({ 1919, 540, t }, false, false);
+    CW_CHECK_EQ(x, 1); // wrapped
+    (void)y;
+    const WrapEvent ev = e.lastWrapEvent();
+    CW_CHECK_EQ(ev.seq, 1);
+    CW_CHECK(ev.edge == EdgeType::Right);
+    CW_CHECK_EQ(ev.edgeCoord, 1919);
+    CW_CHECK_EQ(ev.along, 540);
+
+    // The samples that follow are guard-blocked — a real hand keeps pushing —
+    // and must NOT cancel the latch (this is the sequence the old poll lost).
+    e.onMouseMove({ 1919, 541, t += 4'000 }, false, false);
+    CW_CHECK(e.lastVerdict().guardBlocked);
+    CW_CHECK_EQ(e.lastWrapEvent().seq, 1);
+    // The latched arrival verdict still describes the wrap, so the readout can
+    // show the measured numbers instead of flickering away.
+    CW_CHECK(e.lastArrivalVerdict().wrapped);
+    CW_CHECK(e.lastArrivalVerdict().measuredPps >= 2000);
+    // A second wrap bumps the sequence: the consumer sees a NEW event.
+    e.onMouseMove({ 1919, 540, t += 4'000 }, false, false); // still the same edge
+    CW_CHECK_EQ(e.stats().wraps, 1); // the guard holds: one push, one wrap
+}
+
+CW_TEST(wrap_event_drops_when_the_landing_fails)
+{
+    WrapEngine e(gateOn(2000, 150));
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    long long t = 1'000'000;
+    e.onMouseMove({ 1800, 540, t }, false, false);
+    t += 2000;
+    e.onMouseMove({ 1919, 540, t }, false, false);
+    CW_CHECK_EQ(e.lastWrapEvent().seq, 1);
+    // The OS refused the landing: the wrap never happened, so the glow must
+    // not light an edge for it.
+    e.onWrapFailed();
+    CW_CHECK_EQ(e.lastWrapEvent().seq, 0);
+    CW_CHECK(e.arrivals().empty()); // the phantom row is gone from the trace too
 }

@@ -60,18 +60,6 @@ constexpr uint8_t kPanelAlpha = 240;
 // The readout fades out this long after the last edge arrival.
 constexpr long long kReadoutTtlUs = 2'000'000;
 
-// The trace panel answers "which gate is optimal?" — a histogram of the
-// recorded arrival speeds with the current gate and the suggested gate drawn
-// in. Bottom-right of the primary monitor, so it never sits where the cursor
-// works. A separate small window keeps it out of the edge strips.
-constexpr int kTraceW = 372;
-constexpr int kTraceH = 176;
-constexpr int kTraceBuckets = 26;
-// Speeds under this are bucketed linearly; above it, logarithmically — the
-// interesting range is 500…12000 px/s and a linear axis would waste the width
-// on the tail.
-constexpr long long kTraceLogFloor = 500;
-
 std::atomic<Overlay*> g_overlay = nullptr;
 
 COLORREF dim(COLORREF c, int percent)
@@ -153,10 +141,15 @@ void Overlay::run()
     const Settings settings = m_engine ? m_engine->settings() : Settings {};
     rebuildStrips(settings, colors);
 
-    // One timer drives the readout; the strips are static once painted.
-    HWND anchor = m_strips.empty() ? nullptr : m_strips.front().layer.hwnd;
-    if (anchor)
-        SetTimer(anchor, kTimerId, kRepaintMs, nullptr);
+    // The repaint timer lives on its own offscreen anchor window. It used to
+    // sit on the first strip's window, which meant: no strips (a fresh start
+    // before the engine had a layout, or every monitor inner) → no timer → the
+    // glow and the readout never painted, no matter what the settings said.
+    m_anchor.hwnd = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, kClassName,
+                                    L"cursorwrap timer", WS_POPUP, -32000, -32000, 1, 1,
+                                    nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    if (m_anchor.hwnd)
+        SetTimer(m_anchor.hwnd, kTimerId, kRepaintMs, nullptr);
 
     MSG msg;
     while (m_running.load() && GetMessageW(&msg, nullptr, 0, 0) > 0) {
@@ -165,13 +158,16 @@ void Overlay::run()
     }
 
     for (Strip& strip : m_strips) {
-        if (strip.layer.hwnd) {
-            KillTimer(strip.layer.hwnd, kTimerId);
+        if (strip.layer.hwnd)
             DestroyWindow(strip.layer.hwnd);
-        }
         destroyLayer(strip.layer);
     }
     m_strips.clear();
+    if (m_anchor.hwnd) {
+        KillTimer(m_anchor.hwnd, kTimerId);
+        DestroyWindow(m_anchor.hwnd);
+    }
+    m_anchor = {};
     if (m_readout.hwnd) {
         DestroyWindow(m_readout.hwnd);
         destroyLayer(m_readout);
@@ -184,13 +180,7 @@ void Overlay::run()
     }
     m_flash = {};
     m_flashState.cancel();
-    m_drawnFlashUs = -1;
-    if (m_trace.hwnd) {
-        DestroyWindow(m_trace.hwnd);
-        destroyLayer(m_trace);
-    }
-    m_trace = {};
-    m_drawnArrivals = 0;
+    m_drawnFlashSeq = 0;
     g_overlay.store(nullptr);
 }
 
@@ -470,11 +460,17 @@ void Overlay::buildReadout(const EdgeVerdict& verdict, const Settings& settings,
 
     SelectObject(layer.dc, small);
     SetTextColor(layer.dc, colors.text);
-    const wchar_t* caption = verdict.gateOff ? L"edge · impact off"
-        : verdict.guardBlocked                 ? L"guard · blocked"
-                                               : L"approach speed";
-    TextOutW(layer.dc, cw::ReadoutMetrics::padX, cw::ReadoutMetrics::padTop, caption,
-             static_cast<int>(wcslen(caption)));
+    // The caption comes from readout_layout so the tested wording and the drawn
+    // wording cannot drift apart (the drawn copy used to say "approach speed"
+    // while the tested one said "not accelerating" for the same verdict).
+    const std::string captionUtf8 = cw::readoutCaption(verdict);
+    const int captionNeed = MultiByteToWideChar(CP_UTF8, 0, captionUtf8.c_str(), -1,
+                                                nullptr, 0);
+    std::wstring captionW(static_cast<size_t>(captionNeed > 0 ? captionNeed - 1 : 0), L'\0');
+    if (captionNeed > 1)
+        MultiByteToWideChar(CP_UTF8, 0, captionUtf8.c_str(), -1, captionW.data(), captionNeed);
+    TextOutW(layer.dc, cw::ReadoutMetrics::padX, cw::ReadoutMetrics::padTop, captionW.c_str(),
+             static_cast<int>(captionW.size()));
 
     const int bigY = cw::readoutBigY();
     SelectObject(layer.dc, big);
@@ -523,198 +519,6 @@ void Overlay::hideReadout()
     m_readoutShown = false;
 }
 
-void Overlay::hideTrace()
-{
-    if (m_trace.hwnd && m_trace.shown) {
-        ShowWindow(m_trace.hwnd, SW_HIDE);
-        m_trace.shown = false;
-    }
-    m_drawnArrivals = 0;
-    m_drawnSuggest = -1;
-}
-
-// Bucket the arrival speeds into `bucketCount` bins spanning
-// [kTraceLogFloor, 20000] with a log scale above the floor, and return the
-// peak so the caller can scale the bars. Unmeasurable arrivals are skipped:
-// they carry no information about where the gate belongs.
-int Overlay::bucketize(const std::vector<Arrival>& arrivals, int bucketCount, int* buckets)
-{
-    for (int i = 0; i < bucketCount; ++i)
-        buckets[i] = 0;
-    const double lo = std::log(static_cast<double>(kTraceLogFloor));
-    const double hi = std::log(20000.0);
-    int peak = 0;
-    for (const Arrival& a : arrivals) {
-        if (a.gateOff || a.measuredPps <= 0)
-            continue;
-        const double v = static_cast<double>(std::max<long long>(a.measuredPps, kTraceLogFloor));
-        int index = static_cast<int>((std::log(v) - lo) / (hi - lo) * bucketCount);
-        index = std::max(0, std::min(bucketCount - 1, index));
-        ++buckets[index];
-        peak = std::max(peak, buckets[index]);
-    }
-    return peak;
-}
-
-// Map a speed onto the histogram's x axis, matching bucketize's scale.
-static int traceX(long long pps, int left, int width)
-{
-    const double lo = std::log(static_cast<double>(kTraceLogFloor));
-    const double hi = std::log(20000.0);
-    const double v = static_cast<double>(std::max<long long>(pps, kTraceLogFloor));
-    double t = (std::log(v) - lo) / (hi - lo);
-    t = t < 0 ? 0 : (t > 1 ? 1 : t);
-    return left + static_cast<int>(t * width);
-}
-
-void Overlay::buildTrace(const std::vector<Arrival>& arrivals, const Settings& settings,
-                         const Colors& colors)
-{
-    if (m_monitors.empty())
-        return;
-    // Anchor to the primary monitor's bottom-right corner of its WORK AREA, so
-    // the taskbar never cuts the panel in half.
-    const MonitorBox* primary = &m_monitors.front();
-    for (const MonitorBox& m : m_monitors)
-        if (m.primary)
-            primary = &m;
-    RECT work { static_cast<LONG>(primary->left), static_cast<LONG>(primary->top),
-                static_cast<LONG>(primary->right), static_cast<LONG>(primary->bottom) };
-    POINT probe { static_cast<LONG>(primary->left + 4), static_cast<LONG>(primary->top + 4) };
-    MONITORINFO mi {};
-    mi.cbSize = sizeof mi;
-    if (HMONITOR hm = MonitorFromPoint(probe, MONITOR_DEFAULTTONEAREST);
-        hm && GetMonitorInfoW(hm, &mi))
-        work = mi.rcWork;
-    const int x = static_cast<int>(work.right) - kTraceW - 16;
-    const int y = static_cast<int>(work.bottom) - kTraceH - 16;
-    if (!createLayer(m_trace, x, y, kTraceW, kTraceH))
-        return;
-    Layer& layer = m_trace;
-    SetWindowPos(layer.hwnd, HWND_TOPMOST, x, y, kTraceW, kTraceH, SWP_NOACTIVATE);
-
-    const COLORREF panel = dim(colors.background, 92);
-    HBRUSH bg = CreateSolidBrush(panel);
-    RECT all { 0, 0, kTraceW, kTraceH };
-    FillRect(layer.dc, &all, bg);
-    DeleteObject(bg);
-    HBRUSH border = CreateSolidBrush(dim(colors.accent, 80));
-    RECT rects[4] = { { 0, 0, kTraceW, 1 }, { 0, kTraceH - 1, kTraceW, kTraceH },
-        { 0, 0, 1, kTraceH }, { kTraceW - 1, 0, kTraceW, kTraceH } };
-    for (const RECT& r : rects)
-        FillRect(layer.dc, &r, border);
-    DeleteObject(border);
-
-    HFONT small = CreateFontW(-13, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
-                              OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY,
-                              DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-    HFONT bold = CreateFontW(-15, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
-                             OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY,
-                             DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-    SetBkMode(layer.dc, TRANSPARENT);
-
-    int buckets[kTraceBuckets] = {};
-    const int peak = bucketize(arrivals, kTraceBuckets, buckets);
-    // The arrival count, and how many the gate would have accepted.
-    int measured = 0;
-    int accepted = 0;
-    for (const Arrival& a : arrivals) {
-        if (a.gateOff || a.measuredPps <= 0)
-            continue;
-        ++measured;
-        if (a.measuredPps >= settings.impactSpeedPps)
-            ++accepted;
-    }
-    const long long suggestion = suggestGate(arrivals);
-
-    // Title line.
-    SelectObject(layer.dc, bold);
-    SetTextColor(layer.dc, colors.text);
-    TextOutW(layer.dc, 10, 7, L"edge arrivals", 13);
-    SelectObject(layer.dc, small);
-    SetTextColor(layer.dc, colors.text);
-    wchar_t head[96];
-    swprintf(head, 96, L"%d hits · %d wrap", measured, accepted);
-    TextOutW(layer.dc, kTraceW - 10 - 120, 9, head, static_cast<int>(wcslen(head)));
-
-    // Histogram area.
-    const int plotL = 10, plotR = kTraceW - 10, plotW = plotR - plotL;
-    const int plotT = 30, plotB = kTraceH - 40, plotH = plotB - plotT;
-    if (peak > 0) {
-        HBRUSH bar = CreateSolidBrush(dim(colors.accent, 85));
-        for (int i = 0; i < kTraceBuckets; ++i) {
-            if (!buckets[i])
-                continue;
-            const int bx0 = plotL + plotW * i / kTraceBuckets;
-            const int bx1 = plotL + plotW * (i + 1) / kTraceBuckets - 1;
-            const int bh = std::max(1, buckets[i] * plotH / peak);
-            RECT r { bx0, plotB - bh, bx1, plotB };
-            FillRect(layer.dc, &r, bar);
-        }
-        DeleteObject(bar);
-    } else {
-        SetTextColor(layer.dc, dim(colors.text, 70));
-        const wchar_t* empty = L"push to an edge a few times";
-        TextOutW(layer.dc, plotL + 4, plotT + plotH / 2 - 8, empty,
-                 static_cast<int>(wcslen(empty)));
-    }
-
-    // Baseline.
-    HBRUSH axis = CreateSolidBrush(dim(colors.text, 35));
-    RECT base { plotL, plotB, plotR, plotB + 1 };
-    FillRect(layer.dc, &base, axis);
-    DeleteObject(axis);
-
-    // The current gate, as a vertical accent line + label.
-    const int gateX = traceX(settings.impactSpeedPps, plotL, plotW);
-    HBRUSH gateBrush = CreateSolidBrush(colors.accent);
-    RECT gate { gateX, plotT - 2, gateX + 2, plotB };
-    FillRect(layer.dc, &gate, gateBrush);
-    DeleteObject(gateBrush);
-    SetTextColor(layer.dc, colors.text);
-    wchar_t gbuf[64];
-    swprintf(gbuf, 64, L"gate %lld", settings.impactSpeedPps);
-    int gx = gateX + 4;
-    if (gx + 78 > plotR)
-        gx = gateX - 82;
-    TextOutW(layer.dc, gx, plotT - 4, gbuf, static_cast<int>(wcslen(gbuf)));
-
-    // The suggestion, drawn only when the trace actually separates.
-    if (suggestion > 0) {
-        const int sx = traceX(suggestion, plotL, plotW);
-        HBRUSH sugg = CreateSolidBrush(RGB(0x30, 0xc0, 0x60));
-        RECT s { sx, plotT - 2, sx + 2, plotB };
-        FillRect(layer.dc, &s, sugg);
-        DeleteObject(sugg);
-        SetTextColor(layer.dc, RGB(0x30, 0xc0, 0x60));
-        wchar_t sbuf[64];
-        swprintf(sbuf, 64, L"best %lld", suggestion);
-        int tx = sx + 4;
-        if (tx + 76 > plotR)
-            tx = sx - 80;
-        TextOutW(layer.dc, tx, plotT + plotH - 18, sbuf, static_cast<int>(wcslen(sbuf)));
-    }
-
-    // Axis labels: the bucket edges, sparse enough to stay readable.
-    SetTextColor(layer.dc, dim(colors.text, 65));
-    const long long marks[] = { 500, 1000, 2000, 4000, 8000, 16000 };
-    for (const long long mark : marks) {
-        const int mx = traceX(mark, plotL, plotW);
-        wchar_t mbuf[32];
-        swprintf(mbuf, 32, L"%lld", mark);
-        TextOutW(layer.dc, mx - 10, plotB + 3, mbuf, static_cast<int>(wcslen(mbuf)));
-    }
-
-    DeleteObject(small);
-    DeleteObject(bold);
-
-    setAlpha(layer, 0, 0, kTraceW, kTraceH, kPanelAlpha);
-    present(layer);
-    m_drawnArrivals = arrivals.size();
-    m_drawnSuggest = suggestion;
-    m_drawnGate = settings.impactSpeedPps;
-}
-
 void Overlay::repaint(const Settings& settings, const Colors& colors)
 {
     if (!m_engine)
@@ -738,68 +542,62 @@ void Overlay::repaint(const Settings& settings, const Colors& colors)
     }
     if (stale) {
         rebuildStrips(settings, colors);
-        // rebuildStrips destroys the windows that owned the repaint timer:
-        // re-arm it on the new first strip, or the panel freezes forever.
-        if (!m_strips.empty())
-            SetTimer(m_strips.front().layer.hwnd, kTimerId, kRepaintMs, nullptr);
-    }
-
-    // The trace panel changes when the arrivals change, or when a moving part
-    // it draws (the gate line) changes.
-    const std::vector<Arrival> arrivals = m_engine->arrivals();
-    const long long suggestion = settings.tuningOverlay ? suggestGate(arrivals) : -1;
-    if (!settings.tuningOverlay) {
-        hideTrace();
-        hideReadout();
-    } else {
-        const bool traceStale = !arrivals.empty()
-            && (arrivals.size() != m_drawnArrivals || suggestion != m_drawnSuggest
-                || settings.impactSpeedPps != m_drawnGate);
-        if (traceStale)
-            buildTrace(arrivals, settings, colors);
-        else if (arrivals.empty())
-            hideTrace();
+        // The timer used to be re-armed here on the new first strip; it now
+        // lives on the anchor window and survives a rebuild untouched.
     }
 
     const EdgeVerdict verdict = m_engine->lastVerdict();
 
-    // The impact glow. Triggered exactly once per NEW wrapped verdict, and only
-    // when the user asked for it: impactFlash on, the impact gate on, and the
-    // gate actually let the move through. A refused arrival cancels it, so a
-    // glow can never be read as "that one wrapped too".
-    if (verdict.tUs > 0 && verdict.tUs != m_drawnFlashUs) {
-        m_drawnFlashUs = verdict.tUs;
-        // The clock the glow fades on is nowUs(), not verdict.tUs: on a real
+    // The impact glow. Triggered from the engine's LATCHED wrap event: a
+    // successful wrap lives for one sample in the per-sample verdict, so the
+    // 60 ms poll below missed it essentially every time (the shell never saw
+    // this because its scripted hand stops after the wrap). The latch survives
+    // the guard-blocked samples that follow, and `onWrapFailed` drops it when
+    // the OS refused the landing, so a glow can never mean "that one wrapped".
+    const WrapEvent wrapEvent = m_engine->lastWrapEvent();
+    if (wrapEvent.seq > 0 && wrapEvent.seq != m_drawnFlashSeq) {
+        m_drawnFlashSeq = wrapEvent.seq;
+        // The clock the glow fades on is nowUs(), not wrapEvent.tUs: on a real
         // machine they are the same counter, but a caller that drives the engine
         // with its own timestamps must not end up with a glow that is already
         // "expired" the moment it is created.
         const long long startedUs = nowUs();
         const bool wants = settings.impactFlash && settings.impactGate;
-        if (!wants || !verdict.wrapped || verdict.guardBlocked || verdict.gateOff)
+        if (!wants)
             m_flashState.cancel();
-        else if (verdict.monitorIndex >= 0
-                 && static_cast<size_t>(verdict.monitorIndex) < m_monitors.size()) {
-            const MonitorBox& source = m_monitors[static_cast<size_t>(verdict.monitorIndex)];
-            const int64_t along = edgeIsVertical(verdict.edge)
-                ? verdict.y - source.top : verdict.x - source.left;
-            m_flashState.trigger(verdict.edge, verdict.edgeCoord, along,
-                                 edgeLengthOf(verdict.monitorIndex, verdict.edge), startedUs);
-        }
+        else
+            m_flashState.trigger(wrapEvent.edge, wrapEvent.edgeCoord, wrapEvent.along,
+                                 edgeLengthOf(wrapEvent.monitorIndex, wrapEvent.edge),
+                                 startedUs);
     }
-    paintImpactFlash(verdict, settings, colors);
+    paintImpactFlash(settings, colors, wrapEvent.monitorIndex);
 
-    const bool fresh = verdict.tUs > 0 && nowUs() - verdict.tUs < kReadoutTtlUs;
+    // The readout is fed from the LATCHED arrival verdict (it stays until the
+    // next arrival), with the live verdict only overriding for a guard block —
+    // "guard · blocked" is a statement about THIS moment, the measured numbers
+    // are a statement about the arrival.
+    EdgeVerdict shown = m_engine->lastArrivalVerdict();
+    if (verdict.guardBlocked) {
+        shown = verdict;
+    } else if (shown.tUs > 0) {
+        // The live gate-off path (impact mode off) sets wrapped/gateOff per
+        // sample; the latched verdict already describes the arrival it came
+        // from. Nothing to merge — keep the latch.
+    }
+
+    const bool fresh = shown.tUs > 0 && nowUs() - shown.tUs < kReadoutTtlUs;
     if (!settings.tuningOverlay || !fresh) {
         if (m_readoutShown)
             hideReadout();
         return;
     }
-    if (verdict.tUs == m_drawnVerdictUs && verdict.measuredPps == m_drawnPps
-        && m_readoutShown)
+    if (shown.tUs == m_drawnVerdictUs && shown.measuredPps == m_drawnPps
+        && shown.measuredAccelPps2 == m_drawnAccel && m_readoutShown)
         return;
-    m_drawnVerdictUs = verdict.tUs;
-    m_drawnPps = verdict.measuredPps;
-    buildReadout(verdict, settings, colors);
+    m_drawnVerdictUs = shown.tUs;
+    m_drawnPps = shown.measuredPps;
+    m_drawnAccel = shown.measuredAccelPps2;
+    buildReadout(shown, settings, colors);
 }
 
 bool Overlay::impactFlashVisible() const
@@ -826,8 +624,8 @@ int Overlay::edgeLengthOf(int monitorIndex, EdgeType edge) const
                                              : box.right - box.left);
 }
 
-void Overlay::paintImpactFlash(const EdgeVerdict& verdict, const Settings& settings,
-                               const Colors& colors)
+void Overlay::paintImpactFlash(const Settings& settings, const Colors& colors,
+                               int monitorIndex)
 {
     // Deliberately unconditional about the clock: ImpactFlash owns the timing,
     // and a stale or backwards timestamp makes it report 0 so the glow goes away
@@ -860,14 +658,13 @@ void Overlay::paintImpactFlash(const EdgeVerdict& verdict, const Settings& setti
         w = thickness;
         h = length;
         // `start` is measured along the edge from the monitor's top.
-        y = verdict.monitorIndex >= 0
-                && static_cast<size_t>(verdict.monitorIndex) < m_monitors.size()
-            ? static_cast<int>(m_monitors[static_cast<size_t>(verdict.monitorIndex)].top) + start
-            : start;
+        y = monitorIndex >= 0 && static_cast<size_t>(monitorIndex) < m_monitors.size()
+                ? static_cast<int>(m_monitors[static_cast<size_t>(monitorIndex)].top) + start
+                : start;
     } else {
-        const int monitorLeft = verdict.monitorIndex >= 0
-                && static_cast<size_t>(verdict.monitorIndex) < m_monitors.size()
-            ? static_cast<int>(m_monitors[static_cast<size_t>(verdict.monitorIndex)].left)
+        const int monitorLeft = monitorIndex >= 0
+                && static_cast<size_t>(monitorIndex) < m_monitors.size()
+            ? static_cast<int>(m_monitors[static_cast<size_t>(monitorIndex)].left)
             : 0;
         x = monitorLeft + start;
         y = static_cast<int>(edge == EdgeType::Top ? coord : coord - thickness + 1);
@@ -883,7 +680,7 @@ void Overlay::paintImpactFlash(const EdgeVerdict& verdict, const Settings& setti
 
     // A soft bar: brightest in the middle, transparent at both ends, so it reads
     // as light rather than as a rectangle.
-    const uint8_t peak = static_cast<uint8_t>(std::min(255.0, alpha * 220.0));
+    const uint8_t peak = static_cast<uint8_t>(std::min(255.0, alpha * 245.0));
     HBRUSH brush = CreateSolidBrush(dim(colors.accent, 40));
     RECT all { 0, 0, w, h };
     FillRect(layer.dc, &all, brush);

@@ -9,6 +9,81 @@ single source of truth; release tags are `v<version>`.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-15
+
+### Fixed
+
+- **The impact glow never lit on a real machine.** It was triggered from the
+  per-sample verdict, which the next sample overwrites within a millisecond —
+  a 60 ms poll missed it essentially every time (the shell's scripted hand
+  stops after the wrap, so tests were green while reality was dark). The engine
+  now LATCHES every successful gated wrap (`WrapEvent`, monotonic sequence) and
+  the overlay consumes it by sequence; later guard-blocked samples no longer
+  cancel it, and `SetCursorPos` failure rolls it back. The `impact-flash`
+  scenario gained the real-machine sequence (the hand keeps pushing after the
+  wrap), which the old implementation fails.
+- **The repaint timer lived on the first edge strip's window**: with zero
+  strips (early startup, or no outer edges) the timer never started and both
+  the glow and the readout were dead. It now lives on a dedicated offscreen
+  anchor window, independent of the strips.
+- **The acceleration was almost never measurable on real hardware.** v0.7.0 cut
+  the measurement window at the FIRST backward sample, and a real mouse reports
+  ±1 px of hand jitter while pushing, so the 100 ms window collapsed below its
+  12 ms minimum on real hardware — the slope read n/a and fail-closed refused
+  everything. A reversal is now "net travel backwards past
+  `kImpactAccelJitterPx` (3 px)"; each half's speed uses a real least-squares
+  fit (v0.7.0's comment claimed a fit while the code differenced two endpoints,
+  feeding the ±0.5 px quantisation straight into the answer). A jittering
+  1000 Hz hand now reads +8480 px/s² on an accelerating flick and −40 on a
+  steady push, instead of n/a.
+- **"n/a" no longer stands alone.** Every arrival carries an `accelIssue`
+  reason (`reversal` / `window-too-short` / `sparse` …); the readout's caption
+  gives a one-word reason (`accel n/a (reversed)`) and the data window gives the
+  full name per decision. "Why was I refused" is now diagnosable.
+- **"gate 3000, best 908".** Three stacked causes: (1) the arrival trace mixed
+  eras — rows recorded under an older, lower gate sat next to the current
+  gate's line; (2) the panel labelled the PREDICTION at the current gate as
+  "wrap", which read as "low speeds wrapped too"; (3) the suggestion looked for
+  a ≥25% RELATIVE gap, a metric that naturally favours the low end. Now: the
+  trace resets when the gate/band/accel changes; the histogram's bars are split
+  by actual outcome, with "wrapped" and "would wrap now" counted separately;
+  the suggestion uses a multiplicative gap (≥1.5×, both sides ≥1/6 of the
+  samples), and when the current gate already sits inside the widest gap it
+  says "the current gate fits" instead of producing a second number.
+
+### Changed
+
+- **The overlay's `edge arrivals` panel merged into the data window.** One
+  histogram implementation now (`src/arrival_hist.{h,cpp}`): ticks at their
+  true log positions (the old data window drew an evenly-spaced text string
+  that disagreed with its own axis), numeric `gate`/`best` labels, bars split
+  by outcome, and "N hits · M wrapped · K would wrap at gate" counts. The data
+  window grew 460×520 → 480×620; every decision row now carries the
+  acceleration and its reason. What stays on the edges: the tuning bands, the
+  gate line and the arrival readout.
+- The readout is driven from the LATCHED arrival verdict (it persists until the
+  next arrival) instead of the per-sample verdict; a guard-blocked sample still
+  overrides the caption with `guard · blocked`.
+- The glow is brighter: peak alpha 220 → 245 (a 4 px pale strip was nearly
+  invisible on light wallpapers). Duration and colour unchanged.
+- With impact mode off, the data window no longer slams `gateOff` arrivals into
+  the 500 px/s bucket (the two old implementations disagreed about
+  unmeasurable rows).
+
+### Added
+
+- The shell's `hand` command gained an optional `jitterPx` argument (1 px
+  against the travel every N samples), so real hand jitter is reproducible in
+  the shell.
+- New scenario `accel-jitter.txt` (a jittering 1000 Hz hand: an accelerating
+  flick must be measured and wrap; a steady push must not fabricate a slope),
+  plus the real-sequence case in `impact-flash.txt`.
+- Unit tests: `tests/test_arrival_hist.cpp` (slot/x agreement, split counts,
+  unmeasurable rows skipped), trace reset on gate change, `WrapEvent`
+  latch/rollback, acceleration through jitter (and no invented slope),
+  `adviseGate` multiplicative-gap and fits semantics.
+- L1 170 → 187 cases; scenarios 14 → 15.
+
 ## [0.7.0] - 2026-11-14
 
 ### Fixed

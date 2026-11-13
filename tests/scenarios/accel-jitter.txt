@@ -1,0 +1,25 @@
+monitor 0,0,1920,1080,0,0,1920,1032
+set mode both
+set edge 1
+set guard 50
+set impactGate on
+set speed 700
+set band 400
+set accel 1000
+
+# A jittering hand at 1000 Hz. v0.7.0 cut the acceleration window at the first
+# backward sample, so on real hardware the slope read n/a and the gate refused
+# everything — the shell never saw it because its hand walked a straight line.
+# The wobble here is one pixel against the travel every 8th sample.
+
+# (1) an accelerating flick, jittery: measured, positive, and it wraps
+hand 1500 800 4200 1000 400 8
+expect wrap
+expect accel>=1000
+wait 70
+
+# (2) a jittery CONSTANT speed: no invented slope, refused by the floor
+move 100 540 8
+hand 1500 3000 3000 1000 400 8
+expect no-wrap
+wait 70

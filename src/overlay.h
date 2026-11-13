@@ -8,6 +8,12 @@
 //   * a small floating panel near the last edge hit with the measured approach
 //     speed against the gate, hidden again two seconds later.
 //
+// The histogram and the suggested gate live in the data window (they were
+// duplicated here as "edge arrivals" with a second, differently-scaled
+// implementation; one histogram now, one place to be right). What stays on the
+// edges is what the eye needs WHILE the hand is at the edge: bands, and the
+// instantaneous readout.
+//
 // Design notes (both learned the hard way):
 //   * A whole-monitor layered window with colour-key transparency is wrong.
 //     A colour key is all-transparent or all-opaque per pixel, so a
@@ -92,24 +98,16 @@ private:
                       const Colors& colors);
     // The impact-wrap glow: one bar along the edge the pointer came through,
     // fading out on ImpactFlash's clock. Painting it is best-effort — it is
-    // decoration, so a failure here must never affect anything else.
-    void paintImpactFlash(const EdgeVerdict& verdict, const Settings& settings,
-                          const Colors& colors);
+    // decoration, so a failure here must never affect anything else. Fed by the
+    // engine's LATCHED wrap event (WrapEvent), not the per-sample verdict: the
+    // verdict lives for one sample and a 60 ms poll missed it every time.
+    void paintImpactFlash(const Settings& settings, const Colors& colors,
+                          int monitorIndex);
     void hideImpactFlash();
     // The length of one edge of one monitor, so the glow can be sized as a
     // fraction of it.
     int edgeLengthOf(int monitorIndex, EdgeType edge) const;
-    // The trace panel: a log-bucketed histogram of arrival speeds with the
-    // current gate and the suggested gate drawn in, plus the counts. This is
-    // what makes "what is optimal" answerable at a glance.
-    void buildTrace(const std::vector<Arrival>& arrivals, const Settings& settings,
-                    const Colors& colors);
     void hideReadout();
-    void hideTrace();
-    // Fit a histogram of `arrivals` into `buckets`, returning the peak count so
-    // the panel can scale. Pure-ish: no drawing, easy to reason about.
-    static int bucketize(const std::vector<Arrival>& arrivals, int bucketCount,
-                         int* buckets);
     void repaint(const Settings& settings, const Colors& colors);
 
     static LRESULT CALLBACK wndProcStatic(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
@@ -118,11 +116,11 @@ private:
     std::vector<MonitorBox> m_monitors;
     std::vector<MonitorEdge> m_edges;
     std::vector<Strip> m_strips;
+    Layer m_anchor; // a 1x1 offscreen window that only owns the repaint timer
     Layer m_readout;
-    Layer m_trace;
     Layer m_flash;
     ImpactFlash m_flashState;
-    long long m_drawnFlashUs = -1; // the verdict time the glow was painted for
+    long long m_drawnFlashSeq = 0; // the wrap event the glow was painted for
     std::thread m_thread;
     std::atomic<bool> m_running { false };
     DWORD m_threadId = 0;
@@ -131,10 +129,8 @@ private:
     bool m_tuningOverlayBuilt = false;
     long long m_drawnVerdictUs = -1;
     long long m_drawnPps = -1;
+    long long m_drawnAccel = -1; // part of the readout's change key (with the above)
     bool m_readoutShown = false;
-    size_t m_drawnArrivals = 0; // rebuild the trace only when this grows
-    long long m_drawnSuggest = -1;
-    long long m_drawnGate = -1; // the gate the trace was drawn with
 
     std::mutex m_colorsMutex;
     Colors m_colors;

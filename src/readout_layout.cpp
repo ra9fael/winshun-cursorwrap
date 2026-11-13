@@ -5,6 +5,26 @@
 
 namespace cw {
 
+// The one-word reason for the readout's caption line, which has ~180 px. The
+// full name ("window-too-short") lives in accelIssueName and the data window;
+// here it collapses to the word that answers "what do I change".
+const char* accelIssueShort(AccelIssue issue)
+{
+    switch (issue) {
+    case AccelIssue::FewSamples:
+    case AccelIssue::HalfSamples:
+        return "sparse";
+    case AccelIssue::WindowTooShort:
+    case AccelIssue::HalfTime:
+    case AccelIssue::HalfTravel:
+        return "short";
+    case AccelIssue::Reversal:
+        return "reversed";
+    default:
+        return "n/a";
+    }
+}
+
 std::string accelLineText(const EdgeVerdict& v)
 {
     char buf[96];
@@ -26,6 +46,11 @@ std::string readoutCaption(const EdgeVerdict& v)
     // wrap, because the verdict is rebuilt per sample (see wrap_logic.cpp).
     if (v.guardBlocked)
         return "guard · blocked";
+    // "not accelerating" was only half the story: when the slope could not be
+    // measured at all the refusal is fail-closed, and the user must see WHY —
+    // a bare "not accelerating" read as "the hand really was steady".
+    if (v.accelBlocked && !v.accelMeasured)
+        return std::string("accel n/a (") + accelIssueShort(v.accelIssue) + ")";
     if (v.accelBlocked)
         return "not accelerating";
     return "approach speed";

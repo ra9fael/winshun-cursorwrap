@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+#include <cstdlib>
 
 namespace cw {
 namespace {
@@ -13,10 +14,6 @@ namespace {
 constexpr wchar_t kClassName[] = L"WinShunCursorWrapData";
 constexpr int kTimerId = 0xC0DE;
 constexpr int kRefreshMs = 150;
-// Log-bucketed histogram: the buckets are the overlay's scale, so the two
-// views read the same numbers.
-constexpr int kBuckets = 22;
-constexpr long long kLogFloor = 500;
 
 std::atomic<DataWindow*> g_window = nullptr;
 
@@ -56,13 +53,33 @@ const wchar_t* edgeNameW(EdgeType edge)
     return L"?";
 }
 
-// What one arrival or skip looks like on its row.
+// One arrival or skip looks like this on its row.
 std::wstring verdictText(const Decision& d)
 {
     if (d.wrapped)
         return L"wrap";
     std::string reason = skipReasonName(d.reason);
     return widen(reason);
+}
+
+// The acceleration column: a signed measurement, or WHY it could not be
+// measured. "n/a" alone made the user read the threshold into the empty slot;
+// a reason makes the row answer "what do I change".
+std::wstring accelText(const Decision& d)
+{
+    if (!d.accelMeasured) {
+        std::wstring text = L"n/a";
+        const char* why = accelIssueName(d.accelIssue);
+        if (why && std::string(why) != "off" && std::string(why) != "ok") {
+            text += L" (";
+            text += widen(why);
+            text += L")";
+        }
+        return text;
+    }
+    std::wstring text = d.measuredAccelPps2 >= 0 ? L"+" : L"\u2212";
+    text += num(std::llabs(d.measuredAccelPps2)) + L" px/s\u00b2";
+    return text;
 }
 
 } // namespace
@@ -219,46 +236,15 @@ LRESULT DataWindow::wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     }
 }
 
-int DataWindow::bucketize(const std::vector<Arrival>& arrivals, int bucketCount, int* buckets)
-{
-    for (int i = 0; i < bucketCount; ++i)
-        buckets[i] = 0;
-    if (arrivals.empty() || bucketCount <= 0)
-        return 0;
-    // Log scale so slow drifts and fast hits are both legible; the top of the
-    // scale is 20 000 px/s, well past the 20 000 gate maximum.
-    constexpr double logCeil = 20000.0;
-    int peak = 0;
-    for (const Arrival& a : arrivals) {
-        const double speed = a.measuredPps <= 0 ? static_cast<double>(kLogFloor)
-                                                : static_cast<double>(a.measuredPps);
-        const double clamped = std::max(static_cast<double>(kLogFloor),
-                                        std::min(speed, logCeil));
-        const double t = (std::log(clamped) - std::log(static_cast<double>(kLogFloor)))
-            / (std::log(logCeil) - std::log(static_cast<double>(kLogFloor)));
-        int index = static_cast<int>(t * (bucketCount - 1) + 0.5);
-        index = std::max(0, std::min(bucketCount - 1, index));
-        ++buckets[index];
-        peak = std::max(peak, buckets[index]);
-    }
-    return peak;
-}
-
 void DataWindow::paintHistogram(HDC dc, int x, int y, int w, int h,
-                                const DataSnapshot& snap)
+                                const DataSnapshot& snap, const Colors& colors)
 {
-    Colors colors;
-    {
-        std::lock_guard lock(m_colorsMutex);
-        colors = m_colors;
-    }
     const COLORREF bar = blend(colors.background, colors.accent, 55);
     const COLORREF hot = RGB(0x30, 0xc0, 0x60);
     const COLORREF gateColor = RGB(0xe0, 0xa0, 0x20);
 
-    int buckets[kBuckets] = {};
-    const int peak = bucketize(snap.arrivals, kBuckets, buckets);
-    if (peak <= 0) {
+    const Histogram hist = buildHistogram(snap.arrivals, snap.settings.impactSpeedPps);
+    if (hist.peak <= 0) {
         SetTextColor(dc, blend(colors.text, colors.background, 45));
         SelectObject(dc, m_font);
         RECT r { x, y + h / 2 - 8, x + w, y + h / 2 + 8 };
@@ -267,34 +253,37 @@ void DataWindow::paintHistogram(HDC dc, int x, int y, int w, int h,
         return;
     }
 
-    // Gate lines: current gate and the suggested one, so the two clusters can
-    // be read against them.
-    const long long suggested = suggestGate(snap.arrivals);
-    const auto logPos = [&](long long pps) -> int {
-        constexpr double logCeil = 20000.0;
-        const double clamped = std::max(static_cast<double>(kLogFloor),
-                                        std::min(static_cast<double>(pps), logCeil));
-        const double t = (std::log(clamped) - std::log(static_cast<double>(kLogFloor)))
-            / (std::log(logCeil) - std::log(static_cast<double>(kLogFloor)));
-        return x + static_cast<int>(t * (w - 1));
-    };
-
-    const int slot = w / kBuckets;
-    for (int i = 0; i < kBuckets; ++i) {
-        if (buckets[i] <= 0)
+    // Bars: the row's total height is its bucket count; the wrapped share is
+    // stacked on top in green so "did low speeds wrap?" is readable as a
+    // colour, not a guess.
+    const int slot = w / kHistBuckets;
+    for (int i = 0; i < kHistBuckets; ++i) {
+        if (hist.total[i] <= 0)
             continue;
-        const int height = std::max(2, buckets[i] * (h - 4) / peak);
-        RECT r { x + i * slot, y + h - height, x + i * slot + slot - 2, y + h };
-        HBRUSH brush = CreateSolidBrush(i == kBuckets - 1 ? hot : bar);
-        FillRect(dc, &r, brush);
+        const int totalH = std::max(2, hist.total[i] * (h - 4) / hist.peak);
+        const int wrappedH = hist.wrapped[i] > 0
+            ? std::max(1, hist.wrapped[i] * (h - 4) / hist.peak)
+            : 0;
+        RECT all { x + i * slot, y + h - totalH, x + i * slot + slot - 2, y + h };
+        HBRUSH brush = CreateSolidBrush(bar);
+        FillRect(dc, &all, brush);
         DeleteObject(brush);
+        if (wrappedH > 0) {
+            RECT done { x + i * slot, y + h - totalH, x + i * slot + slot - 2,
+                        y + h - totalH + std::min(wrappedH, totalH) };
+            brush = CreateSolidBrush(hot);
+            FillRect(dc, &done, brush);
+            DeleteObject(brush);
+        }
     }
-    const auto gateLine = [&](long long pps, COLORREF color, int offset) {
+
+    // Gate and advice lines. Their positions come from the same scale as the
+    // slots, so a line always lands where its speed actually buckets.
+    const GateAdvice advice = adviseGate(snap.arrivals, snap.settings.impactSpeedPps);
+    const auto gateLine = [&](long long pps, COLORREF color) {
         if (pps <= 0)
             return;
-        int gx = logPos(pps) + offset;
-        if (gx < x || gx >= x + w)
-            return;
+        const int gx = histXForSpeed(pps, x, w - 1);
         HPEN pen = CreatePen(PS_SOLID, 1, color);
         HGDIOBJ old = SelectObject(dc, pen);
         MoveToEx(dc, gx, y, nullptr);
@@ -303,8 +292,11 @@ void DataWindow::paintHistogram(HDC dc, int x, int y, int w, int h,
         DeleteObject(pen);
     };
     if (snap.settings.impactGate)
-        gateLine(snap.settings.impactSpeedPps, gateColor, 0);
-    gateLine(suggested, hot, 1);
+        gateLine(snap.settings.impactSpeedPps, gateColor);
+    if (advice.pps > 0)
+        gateLine(advice.pps, hot);
+    else if (advice.fits)
+        gateLine(snap.settings.impactSpeedPps, hot); // same line, "fits" label below
 }
 
 void DataWindow::paint()
@@ -391,6 +383,7 @@ void DataWindow::paint()
                     last += L" @ " + num(d.measuredPps) + L" px/s";
                     if (d.gatePps > 0)
                         last += L" (gate " + num(d.gatePps) + L")";
+                    last += L", accel " + accelText(d);
                 }
             }
         } else {
@@ -411,26 +404,66 @@ void DataWindow::paint()
     {
         SelectObject(dc, m_font);
         SetTextColor(dc, colors.text);
-        const long long suggested = suggestGate(snap.arrivals);
-        std::wstring title = L"arrival speeds (" + num(static_cast<long long>(snap.arrivals.size()))
-            + L" hits)";
-        if (suggested > 0)
-            title += L"   suggested gate " + num(suggested) + L" px/s";
+        const GateAdvice advice = adviseGate(snap.arrivals, snap.settings.impactSpeedPps);
+        const Histogram hist = buildHistogram(snap.arrivals, snap.settings.impactSpeedPps);
+        std::wstring title = L"edge arrivals (" + num(hist.measured) + L" hits · "
+            + num(hist.wrappedCount) + L" wrapped";
+        if (snap.settings.impactGate)
+            title += L" · " + num(hist.wouldWrap) + L" would wrap at "
+                + num(snap.settings.impactSpeedPps);
+        title += L")";
         RECT r { left, y, right, y + 18 };
-        DrawTextW(dc, title.c_str(), -1, &r, DT_LEFT | DT_SINGLELINE);
+        DrawTextW(dc, title.c_str(), -1, &r, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
+        y += 18;
+        SetTextColor(dc, muted);
+        std::wstring note;
+        if (snap.settings.impactGate) {
+            if (advice.fits)
+                note = L"gate " + num(snap.settings.impactSpeedPps)
+                    + L" px/s — fits the gap, keep it";
+            else if (advice.pps > 0)
+                note = L"gate " + num(snap.settings.impactSpeedPps) + L" px/s — suggested "
+                    + num(advice.pps) + L" px/s";
+            else
+                note = L"gate " + num(snap.settings.impactSpeedPps)
+                    + L" px/s — not enough data for a suggestion";
+        } else {
+            note = L"impact mode off: every arrival wraps, the histogram records anyway";
+        }
+        RECT rn { left, y, right, y + 18 };
+        DrawTextW(dc, note.c_str(), -1, &rn, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
         y += 20;
-        const int graphH = 84;
+        const int graphH = 110;
         RECT box { left, y, right, y + graphH };
         HBRUSH brush = CreateSolidBrush(panel);
         FillRect(dc, &box, brush);
         DeleteObject(brush);
-        paintHistogram(dc, left + 6, y + 4, right - left - 12, graphH - 8, snap);
-        y += graphH + 8;
+        paintHistogram(dc, left + 6, y + 4, right - left - 12, graphH - 8, snap, colors);
+        y += graphH;
+        // Ticks at their true log positions (the old fixed even-spaced string
+        // labelled positions no mark actually sat at).
         SelectObject(dc, m_mono);
         SetTextColor(dc, muted);
-        RECT axis { left, y, right, y + 16 };
-        DrawTextW(dc, L"500        2k        5k        10k       20k", -1, &axis,
-                  DT_LEFT | DT_SINGLELINE);
+        const int plotL = left + 6;
+        const int plotW = right - left - 12;
+        const long long marks[] = { 500, 1000, 2000, 4000, 8000, 16000 };
+        for (const long long mark : marks) {
+            std::wstring label = mark >= 1000 ? num(mark / 1000) + L"k" : num(mark);
+            const int mx = histXForSpeed(mark, plotL, plotW);
+            RECT rt { mx - 14, y, mx + 16, y + 16 };
+            DrawTextW(dc, label.c_str(), -1, &rt, DT_LEFT | DT_SINGLELINE | DT_NOPREFIX);
+        }
+        y += 20;
+        // The legend for the split bars.
+        HBRUSH brush2 = CreateSolidBrush(RGB(0x30, 0xc0, 0x60));
+        RECT sw { left, y + 3, left + 10, y + 13 };
+        FillRect(dc, &sw, brush2);
+        DeleteObject(brush2);
+        SelectObject(dc, m_font);
+        SetTextColor(dc, muted);
+        RECT rl { left + 16, y, right, y + 16 };
+        DrawTextW(dc, L"wrapped (grey top of a bar = refused by the gate)", -1, &rl,
+                  DT_LEFT | DT_SINGLELINE | DT_NOPREFIX);
         y += 20;
     }
 
@@ -462,7 +495,8 @@ void DataWindow::paint()
         SelectObject(dc, m_bold);
         SetTextColor(dc, colors.text);
         RECT r { left, y, right, y + 18 };
-        DrawTextW(dc, L"recent decisions (newest first)", -1, &r, DT_LEFT | DT_SINGLELINE);
+        DrawTextW(dc, L"recent decisions (newest first) — speed, acceleration, verdict", -1,
+                  &r, DT_LEFT | DT_SINGLELINE);
         y += 20;
 
         RECT box { left, y, right, height - 12 };
@@ -482,10 +516,13 @@ void DataWindow::paint()
             text += L"  ";
             text += d.measuredPps > 0 ? num(d.measuredPps) + L" px/s" : L"     —";
             text += L"  ";
+            text += accelText(d);
+            text += L"  ";
             text += verdictText(d);
             if (d.monitorIndex >= 0)
                 text += L"  m" + num(d.monitorIndex);
-            SetTextColor(dc, d.wrapped ? ok : muted);
+            SetTextColor(dc, d.wrapped ? ok : (d.accelMeasured || d.reason == SkipReason::None
+                                                   ? muted : warn));
             RECT r2 { left + 8, rowY, right - 8, rowY + rowH };
             DrawTextW(dc, text.c_str(), -1, &r2,
                       DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);

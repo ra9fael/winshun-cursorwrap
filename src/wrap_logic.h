@@ -125,6 +125,22 @@ struct Sample {
     long long osMs = 0;
 };
 
+// Why the acceleration slope could not be measured. "n/a" alone forced the
+// user to guess between "the band is too narrow", "the report rate is too low"
+// and "the hand jittered"; the reason makes the readout answer, not tease.
+// Off must be 0: an aggregate-initialised verdict/arrival has the condition off.
+enum class AccelIssue : int {
+    Off = 0,        // the acceleration floor is disabled: nothing to measure
+    Ok,             // measured (the value itself may still fail the floor)
+    FewSamples,     // fewer than two usable samples in the window
+    WindowTooShort, // the window never reached kImpactAccelMinWindowUs
+    Reversal,       // the hand turned around inside the window
+    HalfSamples,    // one half of the window holds a single sample
+    HalfTime,       // one half is shorter than kImpactAccelMinHalfUs
+    HalfTravel,     // one half travels less than kImpactAccelMinHalfTravelPx
+};
+const char* accelIssueName(AccelIssue issue);
+
 // Why a move did not wrap. A single "suppressed" total is useless when the
 // user reports "it does not wrap at all": nine different gates can each say
 // no, and only the split tells them apart.
@@ -169,6 +185,9 @@ struct Decision {
     bool onEdge = false;
     long long measuredPps = 0;
     long long gatePps = 0;
+    long long measuredAccelPps2 = 0; // what the slope read (0 when not measured)
+    bool accelMeasured = false;
+    AccelIssue accelIssue = AccelIssue::Off;
     SkipReason reason = SkipReason::None; // None + wrapped: an accepted arrival
     bool wrapped = false;
 };
@@ -191,6 +210,7 @@ struct EdgeVerdict {
     long long thresholdAccelPps2 = 0;
     bool accelBlocked = false;  // refused because the hand was not speeding up
     bool accelMeasured = false; // the acceleration could be measured at all
+    AccelIssue accelIssue = AccelIssue::Off; // why it could not be measured
     bool wrapped = false;      // the move wrapped
     bool gateOff = false;      // impact gate disabled: arrival wraps outright
     bool guardBlocked = false; // suppressed by the anti-oscillation guard
@@ -207,15 +227,46 @@ struct Arrival {
     int monitorIndex = -1;
     EdgeType edge = EdgeType::Left;
     long long measuredPps = 0; // the approach speed measured in the band
+    long long measuredAccelPps2 = 0; // the slope measured at the same arrival
+    bool accelMeasured = false;
+    AccelIssue accelIssue = AccelIssue::Off;
     long long gatePps = 0;     // the gate configured at that moment
     bool wrapped = false;
     bool gateOff = false;      // gate was off: the arrival wrapped outright
+};
+
+// A successful, gate-accepted wrap, LATCHED for the overlay's glow. The
+// per-sample verdict cannot carry it: it lives for exactly one sample, and a
+// 60 ms repaint poll misses it — which is why the glow never showed on a real
+// machine while the shell (whose scripted hand stops after the wrap) passed.
+// Only updated on a real wrap; never cancelled by later guard samples.
+struct WrapEvent {
+    long long seq = 0;         // 0 = none yet; consumers compare against this
+    long long tUs = 0;
+    int monitorIndex = -1;
+    EdgeType edge = EdgeType::Left;
+    int64_t edgeCoord = 0;     // the edge line's coordinate (x for Left/Right)
+    int64_t along = 0;         // where along the edge, monitor-local px
+    int64_t x = 0;
+    int64_t y = 0;
 };
 
 // The gate between the two clusters of arrival speeds: intentional pushes sit
 // in the upper cluster, incidental drifts in the lower one. Returns 0 when the
 // trace has no clear gap yet — never a fabricated number. Pure; unit-tested.
 long long suggestGate(const std::vector<Arrival>& arrivals);
+
+// Advice for the tuner: the gap in the arrival speeds of the CURRENT trace
+// (the engine clears it whenever the impact settings change, so every row was
+// judged under the current gate — mixing eras is what once suggested 908 with
+// the gate at 3000). `fits` means the current gate already sits inside the
+// widest gap, so the answer is "keep it" rather than another number.
+struct GateAdvice {
+    long long pps = 0;    // 0: no suggestion (not enough data, or `fits`)
+    int considered = 0;   // usable arrivals the advice looked at
+    bool fits = false;    // the current gate already separates the clusters
+};
+GateAdvice adviseGate(const std::vector<Arrival>& arrivals, long long currentGate);
 
 // Diagnostics snapshot for the Shift+Enter copy row.
 struct Diagnostics {
@@ -278,9 +329,20 @@ public:
     // blocks: a small struct copied under the engine mutex.
     EdgeVerdict lastVerdict() const;
 
+    // The most recent ARRIVAL, latched: unlike the per-sample verdict it stays
+    // until the next arrival, so a 60 ms poll of the readout can actually see
+    // it (the per-sample verdict lives for one sample — the same race that hid
+    // the impact glow). Used for the readout's speed/acceleration lines.
+    EdgeVerdict lastArrivalVerdict() const;
+
+    // The latched wrap event for the impact glow (see WrapEvent).
+    WrapEvent lastWrapEvent() const;
+
     // The recorded edge arrivals, oldest first. The tuner copies these to draw
     // the histogram and the suggested gate. Bounded (kTraceMax) so a long
-    // session cannot grow without limit.
+    // session cannot grow without limit. Cleared whenever the impact settings
+    // change: a row measured under an old gate says nothing about the new one,
+    // and mixing them is how the histogram once argued against its own gate.
     std::vector<Arrival> arrivals() const;
     // Drop the recorded arrivals (the tuner's "clear" action).
     void clearArrivals();
@@ -344,6 +406,12 @@ public:
     static constexpr long long kImpactAccelMaxBandPx = 2000;
     // A hand cannot exceed this; a larger slope means quantisation, not motion.
     static constexpr long long kImpactAccelMaxPps2 = 2'000'000;
+    // Hand jitter: a real mouse reports ±1 px against the direction of travel
+    // during a firm push. Treating any backward step as a reversal collapsed
+    // the acceleration window to a couple of samples — the reason the slope
+    // read "n/a" on real hardware while every scripted test measured it. A
+    // reversal is now "the net travel went backwards by more than this".
+    static constexpr long long kImpactAccelJitterPx = 3;
     // 1000 Hz gaming mice: 32 samples were only 32 ms; 128 covers the
     // window with headroom for a busy hook chain.
     static constexpr size_t kHistoryMax = 128;
@@ -361,6 +429,7 @@ struct ApproachMeasure {
     // speed) and "could not measure" are different answers: the first must fail
     // an acceleration floor, the second must not pretend it passed.
     bool accelMeasured = false;
+    AccelIssue accelIssue = AccelIssue::Off; // the reason it could not be measured
 };
 
 private:
@@ -382,7 +451,10 @@ private:
     Sample m_lastWrap { kNever, kNever };
     bool m_hasLastWrap = false;
     EdgeVerdict m_verdict; // the latest edge arrival, for the overlay
+    EdgeVerdict m_arrivalVerdict; // latched arrival, for the readout (see above)
     std::vector<Arrival> m_arrivals; // bounded trace, for the tuner
+    WrapEvent m_wrapEvent; // latched successful wrap, for the impact glow
+    long long m_wrapSeq = 0;
     long long m_arrivalSeq = 0;
     // The edge this arrival run belongs to: repeated samples while the pointer
     // is clamped at one edge are one arrival, not hundreds.

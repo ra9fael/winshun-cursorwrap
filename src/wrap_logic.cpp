@@ -63,6 +63,21 @@ const char* skipReasonName(SkipReason reason)
     return "unknown";
 }
 
+const char* accelIssueName(AccelIssue issue)
+{
+    switch (issue) {
+    case AccelIssue::Off: return "off";
+    case AccelIssue::Ok: return "ok";
+    case AccelIssue::FewSamples: return "few-samples";
+    case AccelIssue::WindowTooShort: return "window-too-short";
+    case AccelIssue::Reversal: return "reversal";
+    case AccelIssue::HalfSamples: return "half-one-sample";
+    case AccelIssue::HalfTime: return "half-too-short";
+    case AccelIssue::HalfTravel: return "half-travel-too-short";
+    }
+    return "unknown";
+}
+
 WrapEngine::WrapEngine(Settings settings)
     : m_settings(settings)
 {
@@ -71,7 +86,23 @@ WrapEngine::WrapEngine(Settings settings)
 void WrapEngine::setSettings(const Settings& settings)
 {
     std::lock_guard lock(m_mutex);
+    // The trace only means anything under the gate it was measured with. Every
+    // arrival stores the verdict made under the settings of its moment, so
+    // keeping rows across a gate/band/accel change mixes eras — the histogram
+    // then shows slow rows recorded by an old, lower gate next to a "gate 3000"
+    // line, and the suggestion argues with the setting it is supposed to tune.
+    // Normal mode (the gate off) never reads this trace; clearing it costs
+    // nothing but a few rows of tuner history.
+    const bool impactChanged = settings.impactGate != m_settings.impactGate
+        || settings.impactSpeedPps != m_settings.impactSpeedPps
+        || settings.impactBandPx != m_settings.impactBandPx
+        || settings.impactAccelPps2 != m_settings.impactAccelPps2;
     m_settings = settings;
+    if (impactChanged) {
+        m_arrivals.clear();
+        m_hasArrivalEdge = false;
+        m_arrivalMonitor = -1;
+    }
 }
 
 Settings WrapEngine::settings() const
@@ -118,12 +149,15 @@ void WrapEngine::resetState()
     m_previous = { kNever, kNever };
     m_lastWrap = { kNever, kNever };
     m_verdict = {};
+    m_arrivalVerdict = {};
     m_arrivals.clear();
     m_arrivalSeq = 0;
     m_hasArrivalEdge = false;
     m_arrivalMonitor = -1;
     m_decisions.clear();
     m_decisionSeq = 0;
+    m_wrapEvent = {};
+    m_wrapSeq = 0;
     m_hasLastSample = false;
     m_lastSample = { kNever, kNever };
     m_lastReason = SkipReason::None;
@@ -142,6 +176,9 @@ void WrapEngine::noteDecision(const Sample& sample, SkipReason reason, bool onEd
     d.onEdge = onEdge;
     d.measuredPps = verdict.measuredPps;
     d.gatePps = verdict.thresholdPps;
+    d.measuredAccelPps2 = verdict.measuredAccelPps2;
+    d.accelMeasured = verdict.accelMeasured;
+    d.accelIssue = verdict.accelIssue;
     d.reason = reason;
     d.wrapped = reason == SkipReason::None;
     m_decisions.push_back(d);
@@ -342,10 +379,19 @@ WrapEngine::ApproachMeasure WrapEngine::approachSpeedPps(EdgeType edge,
     // When that happens the window is too short to measure and the slope is
     // reported as NOT measured, so the speed floor alone decides. Fabricating a
     // slope from two quantised samples is what made the numbers untunable.
+    //
+    // Jitter: a real mouse reports ±1 px AGAINST the direction of travel while
+    // the hand pushes. v0.7.0 broke the window at the first backward step, so on
+    // real hardware it collapsed to one or two samples and the slope read n/a
+    // almost every time — the shell never saw this because its scripted hand
+    // walks a straight line. A reversal is now "the NET travel from this sample
+    // back to the arrival went backwards past kImpactAccelJitterPx", which a
+    // genuine direction change still trips and a 1 px wobble does not.
     struct AccelWindow {
         size_t start = 0;
         size_t end = 0;
         bool usable = false;
+        AccelIssue issue = AccelIssue::WindowTooShort;
     } aw;
     if (m_settings.impactAccelPps2 > 0) {
         // The acceleration window may reach FURTHER BACK than the speed band.
@@ -364,15 +410,24 @@ WrapEngine::ApproachMeasure WrapEngine::approachSpeedPps(EdgeType edge,
                 break; // clock gap: the stroke starts at j
             if (elapsedUs(prev, m_history[end]) > kImpactAccelWindowUs)
                 break; // the window is full
-            if (travel(prev, m_history[j]) < 0)
-                break; // reversed
             if (std::llabs(coord(prev, edge) - edgeCoord) > accelBand)
                 break; // too far back to be the same gesture
+            if (travel(prev, m_history[end]) < -kImpactAccelJitterPx) {
+                aw.issue = AccelIssue::Reversal;
+                break; // a genuine direction change: the stroke starts at j
+            }
             --j;
         }
         aw.start = j;
         aw.end = end;
         aw.usable = elapsedUs(m_history[j], m_history[end]) >= kImpactAccelMinWindowUs;
+        if (!aw.usable && aw.issue != AccelIssue::Reversal) {
+            // The window never got long enough to mean anything: the usual
+            // causes are a wide band crossed at high speed, or a report rate
+            // so coarse that the whole stroke fits in a few samples.
+            aw.issue = elapsedUs(m_history[j], m_history[end]) <= 0
+                ? AccelIssue::FewSamples : AccelIssue::WindowTooShort;
+        }
     }
 
     // (5) Minimal travel: a stroke shorter than kImpactMinTravelPx is jitter at
@@ -398,34 +453,24 @@ WrapEngine::ApproachMeasure WrapEngine::approachSpeedPps(EdgeType edge,
     // instead of printing a six-digit number, and the gate still passes it.
     out.speedPps = pps > kImpactSpeedMaxPps ? kImpactSpeedMaxPps : pps;
 
-    // Forward acceleration: the slope of speed against time over the FIXED
-    // acceleration window, fitted by least squares through every sample in it.
-    //
-    // A two-point, two-half difference was the previous approach and it is why
-    // the number could not be tuned: at 1000 Hz each half is ~20 ms of samples
-    // that quantise to 1 px steps, so the difference of two averages bounced
-    // between -2500 and +27833 px/s² for a hand that was, in one case,
-    // accelerating at a genuine 5000 px/s² and in another holding a constant
-    // speed. Regressing position against time over the whole window uses all the
-    // samples instead of two, so quantisation averages out (about sqrt(n)) and
-    // the sign is stable.
-    //
-    // sign convention: POSITIVE means the hand was speeding up as it approached.
-    // A hand that brakes into the edge gives a negative value, which is exactly
-    // what must refuse to wrap.
     // Forward acceleration: compare the fitted speed of the FIRST half of the
     // acceleration window with the fitted speed of the SECOND half.
     //
-    // Each half speed is a least-squares slope through every sample in that half,
-    // which is what suppresses quantisation: the standard deviation of that slope
-    // falls as sqrt(12/n), so ±0.5 px steps become a usable number once a half
-    // holds a handful of samples. Differencing two ENDPOINTS of the same window
-    // (the previous approach) put the whole ±0.5 px straight into the answer.
+    // Each half speed is a LEAST-SQUARES slope through every sample in that
+    // half. v0.7.0 claimed this in its comment but actually differenced the two
+    // endpoints of each half, which puts the ±0.5 px quantisation of two single
+    // samples straight into the answer; regressing position against time over
+    // the half uses all of its samples, and that error falls as sqrt(n). The
+    // two speeds are separated by the time between the halves' middles.
     //
     // sign convention: POSITIVE means the hand was speeding up as it approached.
     // A hand that brakes into the edge gives a negative value, which is exactly
     // what must refuse to wrap.
-    if (aw.usable) {
+    if (!aw.usable) {
+        out.accelIssue = m_settings.impactAccelPps2 > 0 ? aw.issue : AccelIssue::Off;
+        return out;
+    }
+    {
         const size_t mid = aw.start + (aw.end - aw.start) / 2;
         const long long firstUs = elapsedUs(m_history[aw.start], m_history[mid]);
         const long long secondUs = elapsedUs(m_history[mid], m_history[aw.end]);
@@ -434,24 +479,65 @@ WrapEngine::ApproachMeasure WrapEngine::approachSpeedPps(EdgeType edge,
         // Each half must carry enough samples, time and travel for its slope to
         // mean something. Otherwise the honest answer is "not measurable": the
         // gate then falls back to the speed floor instead of acting on noise.
-        if (mid > aw.start && mid < aw.end && firstUs >= kImpactAccelMinHalfUs
-            && secondUs >= kImpactAccelMinHalfUs
-            && firstPx >= kImpactAccelMinHalfTravelPx
-            && secondPx >= kImpactAccelMinHalfTravelPx) {
-            const long long firstPps = firstPx * 1'000'000LL / firstUs;
-            const long long secondPps = secondPx * 1'000'000LL / secondUs;
-            // The two speeds are separated by the time between the MIDDLES of the
-            // halves, which is (firstUs + secondUs) / 2.
-            const long long dtUs = (firstUs + secondUs) / 2;
-            if (dtUs > 0) {
-                long long accel = (secondPps - firstPps) * 1'000'000LL / dtUs;
-                if (accel > kImpactAccelMaxPps2)
-                    accel = kImpactAccelMaxPps2;
-                if (accel < -kImpactAccelMaxPps2)
-                    accel = -kImpactAccelMaxPps2;
-                out.accelPps2 = accel;
-                out.accelMeasured = true;
+        if (mid <= aw.start || mid >= aw.end) {
+            out.accelIssue = AccelIssue::HalfSamples;
+            return out;
+        }
+        if (firstUs < kImpactAccelMinHalfUs || secondUs < kImpactAccelMinHalfUs) {
+            out.accelIssue = AccelIssue::HalfTime;
+            return out;
+        }
+        if (firstPx < kImpactAccelMinHalfTravelPx
+            || secondPx < kImpactAccelMinHalfTravelPx) {
+            out.accelIssue = AccelIssue::HalfTravel;
+            return out;
+        }
+        // Least-squares slope of coordinate against time, px/s. Returns 0 when
+        // the half's timestamps do not span anything (a degenerate fit).
+        const auto fittedPps = [&](size_t a, size_t b) -> long long {
+            long long t0 = 0;
+            for (size_t k = a; k <= b; ++k) {
+                if (m_history[k].tUs <= 0)
+                    return 0; // a hole in the clock: no fit
+                if (t0 == 0)
+                    t0 = m_history[k].tUs;
             }
+            const double n = static_cast<double>(b - a + 1);
+            double sumT = 0, sumC = 0, sumTT = 0, sumTC = 0;
+            for (size_t k = a; k <= b; ++k) {
+                const double t = static_cast<double>(m_history[k].tUs - t0); // us
+                const double c = static_cast<double>(coord(m_history[k], edge));
+                sumT += t;
+                sumC += c;
+                sumTT += t * t;
+                sumTC += t * c;
+            }
+            const double denom = n * sumTT - sumT * sumT;
+            if (!(denom > 0.0))
+                return 0;
+            const double pxPerUs = (n * sumTC - sumT * sumC) / denom;
+            return static_cast<long long>(pxPerUs * 1'000'000.0);
+        };
+        const long long firstPps = fittedPps(aw.start, mid);
+        const long long secondPps = fittedPps(mid, aw.end);
+        if (firstPps == 0 || secondPps == 0) {
+            out.accelIssue = AccelIssue::FewSamples;
+            return out;
+        }
+        // The two speeds are separated by the time between the MIDDLES of the
+        // halves, which is (firstUs + secondUs) / 2.
+        const long long dtUs = (firstUs + secondUs) / 2;
+        if (dtUs > 0) {
+            long long accel = (secondPps - firstPps) * 1'000'000LL / dtUs;
+            if (accel > kImpactAccelMaxPps2)
+                accel = kImpactAccelMaxPps2;
+            if (accel < -kImpactAccelMaxPps2)
+                accel = -kImpactAccelMaxPps2;
+            out.accelPps2 = accel;
+            out.accelMeasured = true;
+            out.accelIssue = AccelIssue::Ok;
+        } else {
+            out.accelIssue = AccelIssue::WindowTooShort;
         }
     }
     return out;
@@ -516,6 +602,11 @@ std::pair<int64_t, int64_t> WrapEngine::onMouseMove(const Sample& sample, bool m
         m_verdict.y = sample.y;
         m_verdict.monitorIndex = m_topology.nearestMonitor(sample.x, sample.y);
         m_verdict.guardBlocked = true;
+        // The guard swallow must not also swallow the next arrival: the hand is
+        // still pressing the same edge, and when the latch finally releases the
+        // new push must be recorded as a NEW arrival, not merged into the old
+        // row (which carried a different speed and a different verdict).
+        m_hasArrivalEdge = false;
         return skip(SkipReason::Guard);
     }
     // Past the guard: the pointer is neither near the landing point nor on an
@@ -565,6 +656,7 @@ std::pair<int64_t, int64_t> WrapEngine::onMouseMove(const Sample& sample, bool m
         m_verdict.thresholdPps = m_settings.impactSpeedPps;
         m_verdict.measuredAccelPps2 = measure.accelPps2;
         m_verdict.accelMeasured = measure.accelMeasured;
+        m_verdict.accelIssue = measure.accelIssue;
         m_verdict.thresholdAccelPps2 = m_settings.impactAccelPps2;
         m_verdict.gateOff = false;
         m_verdict.wrapped = false;
@@ -616,7 +708,14 @@ std::pair<int64_t, int64_t> WrapEngine::onMouseMove(const Sample& sample, bool m
         m_verdict.gateOff = true;
         m_verdict.wrapped = true;
         m_verdict.guardBlocked = false;
+        m_verdict.accelIssue = AccelIssue::Off;
     }
+
+    // Latch the arrival verdict. The per-sample verdict is gone with the next
+    // sample, so a 60 ms poll of the readout usually missed it entirely; the
+    // latched one stays until the next edge arrival and is what the readout
+    // actually shows.
+    m_arrivalVerdict = m_verdict;
 
     // The arrival itself: record it BEFORE the gate decides, so a blocked
     // drift is part of the trace too. A trace of only accepted hits could
@@ -632,6 +731,9 @@ std::pair<int64_t, int64_t> WrapEngine::onMouseMove(const Sample& sample, bool m
         a.monitorIndex = index;
         a.edge = edge;
         a.measuredPps = m_verdict.measuredPps;
+        a.measuredAccelPps2 = m_verdict.measuredAccelPps2;
+        a.accelMeasured = m_verdict.accelMeasured;
+        a.accelIssue = m_verdict.accelIssue;
         a.gatePps = m_verdict.thresholdPps;
         a.gateOff = m_verdict.gateOff;
         a.wrapped = !gatedOut;
@@ -666,6 +768,20 @@ std::pair<int64_t, int64_t> WrapEngine::onMouseMove(const Sample& sample, bool m
         noteDecision(sample, SkipReason::None, true, m_verdict, index);
         m_lastReason = SkipReason::None;
         m_history.clear(); // the landing point starts a fresh movement
+        // Latch the wrap for the overlay's glow. The glow's consumer polls at
+        // 60 ms, so it must survive the guard-blocked samples that follow; the
+        // per-sample verdict cannot.
+        const MonitorBox& srcBox = m_topology.monitors()[static_cast<size_t>(index)];
+        ++m_wrapSeq;
+        m_wrapEvent.seq = m_wrapSeq;
+        m_wrapEvent.tUs = sample.tUs;
+        m_wrapEvent.monitorIndex = index;
+        m_wrapEvent.edge = edge;
+        m_wrapEvent.edgeCoord = m_verdict.edgeCoord;
+        m_wrapEvent.along = horizontal(edge) ? sample.y - srcBox.top
+                                             : sample.x - srcBox.left;
+        m_wrapEvent.x = nx;
+        m_wrapEvent.y = ny;
         return { nx, ny };
     }
     return { sample.x, sample.y };
@@ -684,6 +800,9 @@ void WrapEngine::onWrapFailed()
     m_hasArrivalEdge = false;
     if (m_stats.wraps > 0)
         --m_stats.wraps;
+    // The wrap this glow was latched for never happened: drop it, or the next
+    // poll of the overlay would light an edge for a wrap the OS refused.
+    m_wrapEvent = {};
     // A failed wrap is not an arrival for the tuner's histogram: it must not
     // teach suggestGate that this speed wraps.
     if (!m_arrivals.empty())
@@ -704,6 +823,18 @@ EdgeVerdict WrapEngine::lastVerdict() const
 {
     std::lock_guard lock(m_mutex);
     return m_verdict;
+}
+
+EdgeVerdict WrapEngine::lastArrivalVerdict() const
+{
+    std::lock_guard lock(m_mutex);
+    return m_arrivalVerdict;
+}
+
+WrapEvent WrapEngine::lastWrapEvent() const
+{
+    std::lock_guard lock(m_mutex);
+    return m_wrapEvent;
 }
 
 std::vector<MonitorBox> WrapEngine::monitorsSnapshot() const
@@ -730,14 +861,19 @@ void WrapEngine::clearArrivals()
     m_arrivals.clear();
 }
 
-// The suggestion rule, in one paragraph: an intentional push and an incidental
-// drift produce two clusters of arrival speeds. Sort them, find the widest
-// relative gap between consecutive distinct values, and put the gate in the
-// middle of that gap. With no gap worth the name (one cluster only) return 0
-// rather than inventing a threshold — a wrong threshold feels more broken than
-// no suggestion.
-long long suggestGate(const std::vector<Arrival>& arrivals)
+// The advice rule, in one paragraph: an intentional push and an incidental
+// drift produce two clusters of arrival speeds. Sort them and look for the
+// widest MULTIPLICATIVE gap between consecutive values (a 700→1000 px/s step
+// is a 43% jump and means nothing; 1000→3000 is a 3× jump and means two
+// gestures), then put the gate at the geometric middle of that gap. Both sides
+// must hold at least a sixth of the samples, so a single outlier pair cannot
+// win, and a gap under 1.5× is treated as noise, not two populations. When the
+// current gate already sits inside the widest gap, `fits` says so: the user
+// asked why a good gate kept getting a different suggestion, and the answer
+// "keep it" is worth more than a second number.
+GateAdvice adviseGate(const std::vector<Arrival>& arrivals, long long currentGate)
 {
+    GateAdvice advice;
     std::vector<long long> speeds;
     speeds.reserve(arrivals.size());
     for (const Arrival& a : arrivals) {
@@ -745,30 +881,43 @@ long long suggestGate(const std::vector<Arrival>& arrivals)
             continue; // unmeasurable arrivals say nothing about the gate
         speeds.push_back(a.measuredPps);
     }
-    if (speeds.size() < 6)
-        return 0; // too few arrivals to cluster
+    advice.considered = static_cast<int>(speeds.size());
+    if (speeds.size() < 8)
+        return advice; // too few arrivals to cluster
     std::sort(speeds.begin(), speeds.end());
 
-    // Widest relative gap between consecutive values, ignoring both tails:
-    // the slowest drift and the fastest flick are outliers, not clusters.
-    const size_t lo = std::max<size_t>(1, speeds.size() / 10);
-    const size_t hi = speeds.size() - speeds.size() / 10;
-    long long bestGap = 0;
+    const size_t n = speeds.size();
+    // Ignore both tails: the slowest drift and the fastest flick are outliers.
+    const size_t lo = std::max<size_t>(1, n / 6);
+    const size_t hi = n - n / 6;
+    long long bestRatio = 0; // per mille, 1000 = same speed
     size_t bestAt = 0;
     for (size_t i = lo; i < hi; ++i) {
-        const long long gap = speeds[i] - speeds[i - 1];
         const long long base = std::max<long long>(speeds[i - 1], 200);
-        const long long relative = gap * 1000 / base; // per mille
-        if (relative > bestGap) {
-            bestGap = relative;
+        const long long ratio = speeds[i] * 1000 / base;
+        if (ratio > bestRatio) {
+            bestRatio = ratio;
             bestAt = i;
         }
     }
-    // A gap under 25% of the lower cluster is noise, not two populations.
-    if (bestAt == 0 || bestGap < 250)
-        return 0;
-    const long long mid = (speeds[bestAt - 1] + speeds[bestAt]) / 2;
-    return mid < 500 ? 500 : (mid > 20000 ? 20000 : mid);
+    if (bestAt == 0 || bestRatio < 1500)
+        return advice; // no gap worth the name: one population
+    const long long lower = speeds[bestAt - 1];
+    const long long upper = speeds[bestAt];
+    // Geometric middle, then clamped into the setting's range.
+    const double mid = std::sqrt(static_cast<double>(lower) * static_cast<double>(upper));
+    long long suggested = static_cast<long long>(mid);
+    suggested = suggested < 500 ? 500 : (suggested > 20000 ? 20000 : suggested);
+    // The gate fits when it already separates the two clusters: inside the gap
+    // with a little slack for the measurement noise either side of it.
+    const bool fits = currentGate > 0 && currentGate * 1000 >= lower * 900
+        && currentGate * 1000 <= upper * 1100;
+    if (fits) {
+        advice.fits = true;
+        return advice;
+    }
+    advice.pps = suggested;
+    return advice;
 }
 
 Diagnostics WrapEngine::diagnostics(bool hookOk) const

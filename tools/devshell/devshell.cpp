@@ -811,8 +811,14 @@ bool Scenario::run(const std::string& rawLine)
         // cannot model acceleration (equal steps = constant speed) and a hand
         // written as explicit `move` lines cannot model quantisation at 1000 Hz.
         //
-        //   hand <x> <v0> <v1> <rateHz> <maxMs>
-        long long x = 0, rateHz = 125, maxMs = 2000;
+        //   hand <x> <v0> <v1> <rateHz> <maxMs> [jitterPx]
+        //
+        // `jitterPx` superimposes a deterministic ±1 px wobble against the
+        // direction of travel on every Nth sample, the way a real driver
+        // reports while a hand pushes. Without it the shell's hand walks a
+        // perfectly straight line — which is exactly the one situation the
+        // acceleration window's tolerance cannot be tested in.
+        long long x = 0, rateHz = 125, maxMs = 2000, jitterEvery = 0;
         double v0 = 0, v1 = 0;
         if (parts.size() < 6 || !parseInt(parts[1], x) || !parseDouble(parts[2], v0)
             || !parseDouble(parts[3], v1) || !parseInt(parts[4], rateHz)
@@ -822,6 +828,8 @@ bool Scenario::run(const std::string& rawLine)
             ++m_checks;
             return false;
         }
+        if (parts.size() > 6)
+            parseInt(parts[6], jitterEvery);
         if (rateHz < 1)
             rateHz = 1;
         const int64_t target = edgeTargetX(*m_engine);
@@ -843,6 +851,8 @@ bool Scenario::run(const std::string& rawLine)
             const double v = v0 + (v1 - v0) * frac;
             exact += v * static_cast<double>(dtUs) / 1'000'000.0;
             long long px = static_cast<long long>(exact);
+            if (jitterEvery > 0 && n % jitterEvery == 0 && px > x + 4)
+                px -= 1; // hand jitter: one pixel against the travel
             if (px > target)
                 px = target;
             const auto [nx, ny] = m_pointer->deliver({ px, 540, m_clockUs, m_clockUs / 1000 });
@@ -863,7 +873,8 @@ bool Scenario::run(const std::string& rawLine)
         note("hand v=" + std::to_string(static_cast<long long>(v0)) + "->" +
              std::to_string(static_cast<long long>(v1)) + " px/s at " +
              std::to_string(rateHz) + "Hz, " + std::to_string(emitted) +
-             " samples: speed=" + std::to_string(m_lastSpeed) + " accel=" +
+             " samples" + (jitterEvery > 0 ? " (jitter 1px/" + std::to_string(jitterEvery) + ")" : "")
+             + ": speed=" + std::to_string(m_lastSpeed) + " accel=" +
              std::to_string(m_lastAccel) + (wrapped ? " WRAP" : " no-wrap") + " landed=" +
              std::to_string(landedX) + "," + std::to_string(landedY));
         settle(line);
@@ -902,8 +913,8 @@ int runDiag()
     }
     for (const std::string& gap : d.gaps)
         std::printf("  gap: %s\n", gap.c_str());
-    std::printf("suggest gate: %lld px/s (needs >= 6 arrivals)\n",
-                suggestGate(engine.arrivals()));
+    std::printf("suggest gate: %lld px/s (needs >= 8 arrivals)\n",
+                adviseGate(engine.arrivals(), 0).pps);
     return 0;
 }
 

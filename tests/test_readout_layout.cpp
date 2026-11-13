@@ -118,4 +118,15 @@ CW_TEST(readout_caption_matches_the_verdict)
     EdgeVerdict slow = gateOnVerdict(true, true, 3479);
     slow.accelBlocked = true;
     CW_CHECK(readoutCaption(slow) == "not accelerating");
+
+    // Fail-closed refusals must say WHY the slope is missing — "not
+    // accelerating" read as "the hand really was steady".
+    EdgeVerdict unmeasured = gateOnVerdict(true, false, 0);
+    unmeasured.accelBlocked = true;
+    unmeasured.accelIssue = AccelIssue::Reversal;
+    const std::string caption = readoutCaption(unmeasured);
+    CW_CHECK(caption.find("n/a") != std::string::npos);
+    CW_CHECK(caption.find("reversed") != std::string::npos);
+    unmeasured.accelIssue = AccelIssue::WindowTooShort;
+    CW_CHECK(readoutCaption(unmeasured).find("short") != std::string::npos);
 }

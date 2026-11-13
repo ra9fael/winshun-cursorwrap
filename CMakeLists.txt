@@ -25,6 +25,7 @@ add_executable(WinShunCursorWrap WIN32
     src/main.cpp
     src/wrap_topology.cpp
     src/wrap_logic.cpp
+    src/arrival_hist.cpp
     src/query_parser.cpp
     src/settings_store.cpp
     src/mouse_hook.cpp
@@ -64,6 +65,7 @@ if(WIN32)
         tools/devshell/devshell.cpp
         src/wrap_topology.cpp
         src/wrap_logic.cpp
+        src/arrival_hist.cpp
         src/settings_store.cpp
         src/overlay.cpp
         src/readout_layout.cpp
@@ -95,6 +97,8 @@ add_executable(cw_tests
     tests/test_guard_rearm.cpp
     tests/test_readout_layout.cpp
     tests/test_impact_flash.cpp
+    tests/test_arrival_hist.cpp
+    src/arrival_hist.cpp
     src/readout_layout.cpp
     src/impact_flash.cpp
     src/wrap_topology.cpp
