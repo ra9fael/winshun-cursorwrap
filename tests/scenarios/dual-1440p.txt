@@ -1,0 +1,41 @@
+# The user's real desktop: 2 x 2560x1440 side by side, taskbar on the primary.
+# Kept as a scenario because it is the layout every complaint came from, and
+# because it is NOT the 1920x1080 shape the other scenarios use: an off-by-one
+# that hides at 1920 can still show up here.
+#
+# Run: build/cw_devshell.exe run tests/scenarios/dual-1440p.txt
+
+# Both displays are 2560x1440 with a 48 px bottom taskbar (work area ends at
+# 1392, so the last usable row is 1391).
+monitor 0,0,2560,1440,0,0,2560,1392;-2560,0,0,1440,-2560,0,0,1392
+set impactGate off
+set mode both
+set edge 1
+set guard 50
+set disableOnSingleMonitor off
+
+# --- the horizontal ring ------------------------------------------------
+# Right edge of the right display lands one pixel inside the left display's
+# left edge: -2560 + 1 = -2559. Negative coordinates are where an off-by-one in
+# the inset arithmetic actually shows up.
+expect wrap
+expect at -2559 700
+stroke 2500 700 2559 700 10 8
+
+# And the mirror: -2560 -> 2560 - 1 - 1 = 2558.
+expect wrap
+expect at 2558 700
+stroke -1600 700 -2560 700 10 8
+
+# --- the vertical ring avoids the taskbar ------------------------------
+set mode vertical
+# Bottom -> top: row 1.
+expect wrap
+expect at 700 1
+stroke 700 900 700 1439 10 8
+# Top -> bottom: the last row of the WORK area (1391), not the last row of the
+# display (1439), which belongs to the taskbar.
+expect wrap
+expect at 700 1391
+stroke 700 500 700 0 10 8
+dump

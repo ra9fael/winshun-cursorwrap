@@ -157,6 +157,7 @@ build\cw_devshell.exe gui                     # real windows, keys 1/2/3, q quit
 | `gate-off-churn.txt` | With impact mode off, sweeping across an edge must not fire repeatedly: holding at the edge and sliding along it wrap once, and re-arm after leaving |
 | `acceleration.txt` | The acceleration condition: steady refused / real ramp wraps / braking refused / the floor is settable (500 passes and 3000 refuses the same mild flick) |
 | `regressions.txt` | Behavioural regressions of earlier fixes (single monitor, guard, mode filtering, landings) |
+| `dual-1440p.txt` | The user's real desktop (2 x 2560x1440, taskbar on the primary): exact landings including negative coordinates, and the taskbar avoided at both ends of the vertical ring |
 | `teardown.txt` | Windows and worker threads shut down without leftovers |
 
 A scenario file holds one command per line (`#` comments): `monitor` (optionally
@@ -256,7 +257,7 @@ coordinates.
 - L1 green (currently 140 cases + 6 fixtures, all synthetic geometry;
   `live-single.json` is read by the probe only, not by L1)
 - L3 fully passing (currently 119/119)
-- L3.5 scenarios passing (currently 10, via `python tests/devshell_scenarios.py`)
+- L3.5 scenarios passing (currently 11, via `python tests/devshell_scenarios.py`)
 - L0 static validation passing
 - The single-display (including Remote Desktop) part of L4 has been measured and
   passed; **all multi-display boxes must be checked** before multi-display can be
