@@ -23,6 +23,18 @@
 #include "overlay.h"
 
 #include "qpc_time.h"
+#include "readout_layout.h"
+
+namespace {
+
+// Left/Right edges run vertically; Top/Bottom run horizontally. Local because
+// wrap_logic's helper is in an anonymous namespace there.
+bool edgeIsVertical(cw::EdgeType t)
+{
+    return t == cw::EdgeType::Left || t == cw::EdgeType::Right;
+}
+
+} // namespace
 
 #include <algorithm>
 #include <cmath>
@@ -37,7 +49,10 @@ constexpr UINT_PTR kTimerId = 7;
 constexpr UINT kRepaintMs = 60;
 constexpr int kMinBandPx = 8;
 constexpr int kReadoutW = 196;
-constexpr int kReadoutH = 60;
+
+// The readout height is DERIVED from the rows that will be painted, never a
+// constant: see readout_layout.h for why (a hard-coded 60 px window with the
+// acceleration line drawn from y=46 put the glyphs past the border).
 // A band alpha this low reads as a tint over any wallpaper instead of a panel.
 constexpr uint8_t kBandAlpha = 24;
 constexpr uint8_t kLineAlpha = 235;
@@ -163,6 +178,13 @@ void Overlay::run()
     }
     m_readout = {};
     m_readoutShown = false;
+    if (m_flash.hwnd) {
+        DestroyWindow(m_flash.hwnd);
+        destroyLayer(m_flash);
+    }
+    m_flash = {};
+    m_flashState.cancel();
+    m_drawnFlashUs = -1;
     if (m_trace.hwnd) {
         DestroyWindow(m_trace.hwnd);
         destroyLayer(m_trace);
@@ -335,8 +357,11 @@ void Overlay::rebuildStrips(const Settings& settings, const Colors& colors)
         m_edges = m_engine->outerEdgesSnapshot();
     }
     m_bandPx = std::max(kMinBandPx, settings.impactBandPx);
+    m_tuningOverlayBuilt = settings.tuningOverlay;
 
     const COLORREF tint = dim(colors.accent, 70);
+    const uint8_t bandAlpha = settings.tuningOverlay ? kBandAlpha : 0;
+    const uint8_t lineAlpha = settings.tuningOverlay ? kLineAlpha : 0;
     for (const MonitorEdge& edge : m_edges) {
         if (edge.monitorIndex < 0
             || static_cast<size_t>(edge.monitorIndex) >= m_monitors.size())
@@ -379,12 +404,12 @@ void Overlay::rebuildStrips(const Settings& settings, const Colors& colors)
         DeleteObject(brush);
 
         // Translucent tint, opaque line: two ranges instead of per-pixel work.
-        setAlpha(strip.layer, 0, 0, w, h, kBandAlpha);
+        setAlpha(strip.layer, 0, 0, w, h, bandAlpha);
         switch (edge.type) {
-        case EdgeType::Left: setAlpha(strip.layer, 0, 0, 2, h, kLineAlpha); break;
-        case EdgeType::Right: setAlpha(strip.layer, w - 2, 0, w, h, kLineAlpha); break;
-        case EdgeType::Top: setAlpha(strip.layer, 0, 0, w, 2, kLineAlpha); break;
-        case EdgeType::Bottom: setAlpha(strip.layer, 0, h - 2, w, h, kLineAlpha); break;
+        case EdgeType::Left: setAlpha(strip.layer, 0, 0, 2, h, lineAlpha); break;
+        case EdgeType::Right: setAlpha(strip.layer, w - 2, 0, w, h, lineAlpha); break;
+        case EdgeType::Top: setAlpha(strip.layer, 0, 0, w, 2, lineAlpha); break;
+        case EdgeType::Bottom: setAlpha(strip.layer, 0, h - 2, w, h, lineAlpha); break;
         }
         present(strip.layer);
         m_strips.push_back(std::move(strip));
@@ -399,7 +424,10 @@ void Overlay::buildReadout(const EdgeVerdict& verdict, const Settings& settings,
         return;
     const MonitorBox& box = m_monitors[static_cast<size_t>(verdict.monitorIndex)];
     const int w = kReadoutW;
-    const int h = kReadoutH;
+    // The acceleration line is drawn only when the user enabled that condition,
+    // so the window is sized for what will actually be painted.
+    const bool withAccel = cw::showsAccelLine(verdict);
+    const int h = cw::readoutHeight(verdict);
     const int margin = 20;
     int x = static_cast<int>(verdict.x) + margin;
     int y = static_cast<int>(verdict.y) - h / 2;
@@ -445,29 +473,36 @@ void Overlay::buildReadout(const EdgeVerdict& verdict, const Settings& settings,
     const wchar_t* caption = verdict.gateOff ? L"edge · impact off"
         : verdict.guardBlocked                 ? L"guard · blocked"
                                                : L"approach speed";
-    TextOutW(layer.dc, 10, 7, caption, static_cast<int>(wcslen(caption)));
+    TextOutW(layer.dc, cw::ReadoutMetrics::padX, cw::ReadoutMetrics::padTop, caption,
+             static_cast<int>(wcslen(caption)));
 
+    const int bigY = cw::readoutBigY();
     SelectObject(layer.dc, big);
     SetTextColor(layer.dc, state);
     wchar_t line[96];
     if (verdict.gateOff || verdict.guardBlocked || verdict.thresholdPps <= 0) {
         const wchar_t* word = verdict.wrapped ? L"wrap" : L"—";
-        TextOutW(layer.dc, 10, 20, word, static_cast<int>(wcslen(word)));
+        TextOutW(layer.dc, cw::ReadoutMetrics::padX, bigY, word, static_cast<int>(wcslen(word)));
     } else {
         swprintf(line, 96, L"%lld / %lld px/s", verdict.measuredPps, verdict.thresholdPps);
-        TextOutW(layer.dc, 10, 20, line, static_cast<int>(wcslen(line)));
+        TextOutW(layer.dc, cw::ReadoutMetrics::padX, bigY, line, static_cast<int>(wcslen(line)));
         // The acceleration line: only when the user turned that condition on, so
         // the panel does not show a meaningless 0 for everyone else. A negative
         // value means the hand was braking — the reason it did not wrap.
-        if (verdict.thresholdAccelPps2 > 0) {
+        //
+        // "accel 測不到" is spelled out rather than an em dash: the dash made
+        // users read the line as "the acceleration is 1600" (the threshold),
+        // when it actually means the slope could not be measured at all.
+        if (withAccel) {
             SelectObject(layer.dc, small);
             SetTextColor(layer.dc, verdict.accelBlocked ? state : colors.text);
             if (verdict.accelMeasured)
                 swprintf(line, 96, L"accel %+lld / %lld px/s²", verdict.measuredAccelPps2,
                          verdict.thresholdAccelPps2);
             else
-                swprintf(line, 96, L"accel — / %lld px/s²", verdict.thresholdAccelPps2);
-            TextOutW(layer.dc, 10, 46, line, static_cast<int>(wcslen(line)));
+                swprintf(line, 96, L"accel n/a / %lld px/s²", verdict.thresholdAccelPps2);
+            TextOutW(layer.dc, cw::ReadoutMetrics::padX, cw::readoutAccelY(verdict), line,
+                     static_cast<int>(wcslen(line)));
         }
     }
     DeleteObject(small);
@@ -689,7 +724,8 @@ void Overlay::repaint(const Settings& settings, const Colors& colors)
     // the static strips when either moves.
     const int band = std::max(kMinBandPx, settings.impactBandPx);
     const std::vector<MonitorEdge> edges = m_engine->outerEdgesSnapshot();
-    bool stale = band != m_bandPx || edges.size() != m_edges.size();
+    bool stale = band != m_bandPx || settings.tuningOverlay != m_tuningOverlayBuilt
+        || edges.size() != m_edges.size();
     if (!stale) {
         for (size_t i = 0; i < edges.size(); ++i) {
             if (edges[i].monitorIndex != m_edges[i].monitorIndex
@@ -711,18 +747,49 @@ void Overlay::repaint(const Settings& settings, const Colors& colors)
     // The trace panel changes when the arrivals change, or when a moving part
     // it draws (the gate line) changes.
     const std::vector<Arrival> arrivals = m_engine->arrivals();
-    const long long suggestion = suggestGate(arrivals);
-    const bool traceStale = !arrivals.empty()
-        && (arrivals.size() != m_drawnArrivals || suggestion != m_drawnSuggest
-            || settings.impactSpeedPps != m_drawnGate);
-    if (traceStale)
-        buildTrace(arrivals, settings, colors);
-    else if (arrivals.empty())
+    const long long suggestion = settings.tuningOverlay ? suggestGate(arrivals) : -1;
+    if (!settings.tuningOverlay) {
         hideTrace();
+        hideReadout();
+    } else {
+        const bool traceStale = !arrivals.empty()
+            && (arrivals.size() != m_drawnArrivals || suggestion != m_drawnSuggest
+                || settings.impactSpeedPps != m_drawnGate);
+        if (traceStale)
+            buildTrace(arrivals, settings, colors);
+        else if (arrivals.empty())
+            hideTrace();
+    }
 
     const EdgeVerdict verdict = m_engine->lastVerdict();
+
+    // The impact glow. Triggered exactly once per NEW wrapped verdict, and only
+    // when the user asked for it: impactFlash on, the impact gate on, and the
+    // gate actually let the move through. A refused arrival cancels it, so a
+    // glow can never be read as "that one wrapped too".
+    if (verdict.tUs > 0 && verdict.tUs != m_drawnFlashUs) {
+        m_drawnFlashUs = verdict.tUs;
+        // The clock the glow fades on is nowUs(), not verdict.tUs: on a real
+        // machine they are the same counter, but a caller that drives the engine
+        // with its own timestamps must not end up with a glow that is already
+        // "expired" the moment it is created.
+        const long long startedUs = nowUs();
+        const bool wants = settings.impactFlash && settings.impactGate;
+        if (!wants || !verdict.wrapped || verdict.guardBlocked || verdict.gateOff)
+            m_flashState.cancel();
+        else if (verdict.monitorIndex >= 0
+                 && static_cast<size_t>(verdict.monitorIndex) < m_monitors.size()) {
+            const MonitorBox& source = m_monitors[static_cast<size_t>(verdict.monitorIndex)];
+            const int64_t along = edgeIsVertical(verdict.edge)
+                ? verdict.y - source.top : verdict.x - source.left;
+            m_flashState.trigger(verdict.edge, verdict.edgeCoord, along,
+                                 edgeLengthOf(verdict.monitorIndex, verdict.edge), startedUs);
+        }
+    }
+    paintImpactFlash(verdict, settings, colors);
+
     const bool fresh = verdict.tUs > 0 && nowUs() - verdict.tUs < kReadoutTtlUs;
-    if (!fresh) {
+    if (!settings.tuningOverlay || !fresh) {
         if (m_readoutShown)
             hideReadout();
         return;
@@ -733,6 +800,107 @@ void Overlay::repaint(const Settings& settings, const Colors& colors)
     m_drawnVerdictUs = verdict.tUs;
     m_drawnPps = verdict.measuredPps;
     buildReadout(verdict, settings, colors);
+}
+
+bool Overlay::impactFlashVisible() const
+{
+    return m_flashState.active() && m_flashState.alphaAt(nowUs()) > 0.0;
+}
+
+void Overlay::hideImpactFlash()
+{
+    if (m_flash.hwnd && m_flash.shown) {
+        ShowWindow(m_flash.hwnd, SW_HIDE);
+        m_flash.shown = false;
+    }
+}
+
+// The length of one edge of one monitor, in pixels. The glow is sized as a
+// fraction of it, so a 4K display does not get a kilometre of light.
+int Overlay::edgeLengthOf(int monitorIndex, EdgeType edge) const
+{
+    if (monitorIndex < 0 || static_cast<size_t>(monitorIndex) >= m_monitors.size())
+        return 0;
+    const MonitorBox& box = m_monitors[static_cast<size_t>(monitorIndex)];
+    return static_cast<int>(edgeIsVertical(edge) ? box.bottom - box.top
+                                             : box.right - box.left);
+}
+
+void Overlay::paintImpactFlash(const EdgeVerdict& verdict, const Settings& settings,
+                               const Colors& colors)
+{
+    // Deliberately unconditional about the clock: ImpactFlash owns the timing,
+    // and a stale or backwards timestamp makes it report 0 so the glow goes away
+    // instead of sticking.
+    const long long t = nowUs();
+    const double alpha = m_flashState.alphaAt(t);
+    if (alpha <= 0.0 || !m_flashState.active()) {
+        hideImpactFlash();
+        return;
+    }
+    if (!settings.impactFlash) {
+        hideImpactFlash();
+        return;
+    }
+
+    const EdgeType edge = m_flashState.edge();
+    const bool horiz = edgeIsVertical(edge);
+    const int thickness = ImpactFlash::kThickness;
+    const int length = static_cast<int>(m_flashState.lengthAlong());
+    const int start = static_cast<int>(m_flashState.startAlong());
+    const int64_t coord = m_flashState.edgeCoord();
+
+    int x = 0;
+    int y = 0;
+    int w = 0;
+    int h = 0;
+    if (horiz) {
+        // A vertical bar hugging the left/right edge.
+        x = static_cast<int>(edge == EdgeType::Left ? coord : coord - thickness + 1);
+        w = thickness;
+        h = length;
+        // `start` is measured along the edge from the monitor's top.
+        y = verdict.monitorIndex >= 0
+                && static_cast<size_t>(verdict.monitorIndex) < m_monitors.size()
+            ? static_cast<int>(m_monitors[static_cast<size_t>(verdict.monitorIndex)].top) + start
+            : start;
+    } else {
+        const int monitorLeft = verdict.monitorIndex >= 0
+                && static_cast<size_t>(verdict.monitorIndex) < m_monitors.size()
+            ? static_cast<int>(m_monitors[static_cast<size_t>(verdict.monitorIndex)].left)
+            : 0;
+        x = monitorLeft + start;
+        y = static_cast<int>(edge == EdgeType::Top ? coord : coord - thickness + 1);
+        w = length;
+        h = thickness;
+    }
+    if (w <= 0 || h <= 0)
+        return;
+    if (!createLayer(m_flash, x, y, w, h))
+        return;
+    Layer& layer = m_flash;
+    SetWindowPos(layer.hwnd, HWND_TOPMOST, x, y, w, h, SWP_NOACTIVATE);
+
+    // A soft bar: brightest in the middle, transparent at both ends, so it reads
+    // as light rather than as a rectangle.
+    const uint8_t peak = static_cast<uint8_t>(std::min(255.0, alpha * 220.0));
+    HBRUSH brush = CreateSolidBrush(dim(colors.accent, 40));
+    RECT all { 0, 0, w, h };
+    FillRect(layer.dc, &all, brush);
+    DeleteObject(brush);
+    const int span = horiz ? h : w;
+    for (int i = 0; i < span; ++i) {
+        const double d = span <= 1 ? 0.0
+            : std::abs(static_cast<double>(i) - (span - 1) / 2.0) / ((span - 1) / 2.0);
+        const double edgeFade = 1.0 - d * d; // 1 in the middle, 0 at the ends
+        const uint8_t a = static_cast<uint8_t>(peak * std::max(0.0, edgeFade));
+        if (horiz)
+            setAlpha(layer, 0, i, w, i + 1, a);
+        else
+            setAlpha(layer, i, 0, i + 1, h, a);
+    }
+    present(layer);
+    m_flash.shown = true;
 }
 
 } // namespace cw

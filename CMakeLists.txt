@@ -30,6 +30,8 @@ add_executable(WinShunCursorWrap WIN32
     src/mouse_hook.cpp
     src/monitor_watcher.cpp
     src/overlay.cpp
+    src/readout_layout.cpp
+    src/impact_flash.cpp
     src/data_window.cpp
     cursorwrap.rc
 )
@@ -64,6 +66,8 @@ if(WIN32)
         src/wrap_logic.cpp
         src/settings_store.cpp
         src/overlay.cpp
+        src/readout_layout.cpp
+        src/impact_flash.cpp
         src/data_window.cpp
     )
     target_include_directories(cw_devshell PRIVATE src)
@@ -88,6 +92,11 @@ add_executable(cw_tests
     tests/test_settings_store.cpp
     tests/test_settings_roundtrip.cpp
     tests/test_hook_latency.cpp
+    tests/test_guard_rearm.cpp
+    tests/test_readout_layout.cpp
+    tests/test_impact_flash.cpp
+    src/readout_layout.cpp
+    src/impact_flash.cpp
     src/wrap_topology.cpp
     src/wrap_logic.cpp
     src/query_parser.cpp

@@ -78,6 +78,7 @@ enum class CommandKind {
     SetSingle,      // value: 0 = wrap on one monitor, 1 = do not
     SetOverlay,     // value: 0 = overlay off, 1 = overlay on
     SetData,        // value: 0 = data window closed, 1 = open
+    SetImpactFlash, // value: 0 = off, 1 = on
     CopyDiagnostics,
     CopyTrace,   // copy the recorded arrivals as CSV
     ClearTrace,  // drop the recorded arrivals

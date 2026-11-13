@@ -126,6 +126,9 @@ void markOverride(cw::RawSettings& raw, const cw::SettingsField& field,
     } else if (key == "dataWindow") {
         raw.dataWindow = s.dataWindow;
         raw.hasDataWindow = true;
+    } else if (key == "impactFlash") {
+        raw.impactFlash = s.impactFlash;
+        raw.hasImpactFlash = true;
     }
 }
 
@@ -168,6 +171,7 @@ cw::RawSettings rawFromJson(const Json& s)
     numberField("impactAccelPps2", raw.impactAccelPps2, raw.hasImpactAccel);
     boolField("tuningOverlay", raw.tuningOverlay, raw.hasTuningOverlay);
     boolField("dataWindow", raw.dataWindow, raw.hasDataWindow);
+    boolField("impactFlash", raw.impactFlash, raw.hasImpactFlash);
     return raw;
 }
 
@@ -464,6 +468,7 @@ protected:
             m_settings.adjacencyTolerancePx = defaults.adjacencyTolerancePx;
             m_settings.tuningOverlay = defaults.tuningOverlay;
             m_settings.dataWindow = defaults.dataWindow;
+            m_settings.impactFlash = defaults.impactFlash;
             persistOverrides();
             pushSettings();
             return listEffects(effect::notify(chinese ? "已恢复宿主设置卡" : "Host settings restored"));
@@ -671,7 +676,12 @@ private:
     // initialized(), settingsChanged() and after every window command.
     void applyWindowSettings()
     {
-        const bool overlayOn = m_settings.tuningOverlay && m_hookEnabled && m_engine;
+        // The impact glow uses the same transparent, non-activating overlay
+        // thread, but it is independently configurable: turning it on must not
+        // require turning on the tuning bands/readout as well.
+        const bool overlayOn = (m_settings.tuningOverlay
+                                || (m_settings.impactFlash && m_settings.impactGate))
+            && m_hookEnabled && m_engine;
         if (overlayOn && !m_overlay.active())
             m_overlay.start(m_engine->monitorsSnapshot());
         else if (!overlayOn && m_overlay.active())
@@ -766,7 +776,7 @@ private:
         m_overrides = raw.hasWrapMode || raw.hasActivation || raw.hasImpactGate
             || raw.hasImpactSpeed || raw.hasImpactBand || raw.hasImpactAccel
             || raw.hasWrapGuard || raw.hasEdgeThreshold || raw.hasAdjacency || raw.hasDrag
-            || raw.hasSingle || raw.hasTuningOverlay || raw.hasDataWindow;
+            || raw.hasSingle || raw.hasTuningOverlay || raw.hasDataWindow || raw.hasImpactFlash;
     }
 
     void persistOverrides()
@@ -828,6 +838,9 @@ private:
         case cw::CommandKind::SetData:
             m_settings.dataWindow = cmd.value != 0;
             break;
+        case cw::CommandKind::SetImpactFlash:
+            m_settings.impactFlash = cmd.value < 0 ? !m_settings.impactFlash : cmd.value != 0;
+            break;
         case cw::CommandKind::ClearTrace:
             if (m_engine)
                 m_engine->clearArrivals();
@@ -850,6 +863,7 @@ private:
             m_settings.adjacencyTolerancePx = defaults.adjacencyTolerancePx;
             m_settings.tuningOverlay = defaults.tuningOverlay;
             m_settings.dataWindow = defaults.dataWindow;
+            m_settings.impactFlash = defaults.impactFlash;
             break;
         }
         default:
@@ -1119,6 +1133,14 @@ private:
                                         : "Enter for the submenu (switch, band, gate, guard, threshold)",
                                 "cursorwrap tune "));
 
+        rows.push_back(drillRow("cursorwrap.row.flash",
+                                std::string(chinese ? "撞击穿越光效：" : "Impact glow: ")
+                                    + (m_settings.impactFlash ? (chinese ? "开" : "on")
+                                                              : (chinese ? "关" : "off")),
+                                chinese ? "Enter 切换；成功撞击穿越时沿边亮一下，纯装饰"
+                                        : "Enter to toggle; a short glow along the edge after a successful impact wrap, decoration only",
+                                "cursorwrap flash "));
+
         rows.push_back(drillRow("cursorwrap.row.data",
                                 std::string(chinese ? "数据窗口：" : "Data window: ")
                                     + (m_settings.dataWindow ? (chinese ? "开" : "on")
@@ -1180,26 +1202,39 @@ private:
 
     Items speedMenu()
     {
+        return numericMenu("cursorwrap.speed", "speed", m_settings.impactSpeedPps,
+                           { 500, 1000, 2000, 3000, 5000, 8000, 12000, 20000 }, " px/s");
+    }
+
+    // A numeric submenu: the presets PLUS the value actually in effect, so the
+    // menu can always show what the plugin is using.
+    //
+    // The card in WinShun's settings page accepts any number, while these menus
+    // list a fixed set. A card-only value used to produce a menu with NO row
+    // highlighted and no way to select that value again — and because v0.6.0
+    // changed impactBandPx's default to 400 while the presets were
+    // {50,80,120,150,200,300,500}, the DEFAULT state highlighted nothing at all.
+    // Merging the current value in fixes both, and keeps free-form tuning.
+    Items numericMenu(const char* id, const char* field, long long current,
+                      std::initializer_list<long long> presets, const char* unit)
+    {
         Items rows;
         rows.push_back(backRow());
-        for (const long long v : { 500, 1000, 2000, 3000, 5000, 8000, 12000, 20000 }) {
-            std::string title = intText(v) + " px/s";
-            rows.push_back(valueRow("cursorwrap.speed", std::move(title), "speed", v,
-                                    m_settings.impactSpeedPps == v));
+        std::vector<long long> values(presets);
+        if (std::find(values.begin(), values.end(), current) == values.end())
+            values.push_back(current);
+        std::sort(values.begin(), values.end());
+        for (const long long v : values) {
+            std::string title = intText(v) + unit;
+            rows.push_back(valueRow(id, std::move(title), field, v, current == v));
         }
         return rows;
     }
 
     Items bandMenu()
     {
-        Items rows;
-        rows.push_back(backRow());
-        for (const long long v : { 50, 80, 120, 150, 200, 300, 500 }) {
-            std::string title = intText(v) + " px";
-            rows.push_back(valueRow("cursorwrap.band", std::move(title), "band", v,
-                                    m_settings.impactBandPx == v));
-        }
-        return rows;
+        return numericMenu("cursorwrap.band", "band", m_settings.impactBandPx,
+                           { 50, 80, 120, 150, 200, 300, 500 }, " px");
     }
 
     // The acceleration floor. 0 is a real choice (the condition off), so it gets
@@ -1211,10 +1246,15 @@ private:
         rows.push_back(backRow());
         rows.push_back(valueRow("cursorwrap.accel", chinese ? "关闭（只看速度）" : "off (speed only)",
                                 "accel", 0, m_settings.impactAccelPps2 == 0));
-        for (const long long v : { 2000, 5000, 10000, 20000, 40000, 80000 }) {
+        std::vector<long long> values { 2000, 5000, 10000, 20000, 40000, 80000 };
+        const long long current = m_settings.impactAccelPps2;
+        if (current > 0 && std::find(values.begin(), values.end(), current) == values.end())
+            values.push_back(current);
+        std::sort(values.begin(), values.end());
+        for (const long long v : values) {
             std::string title = intText(v) + " px/s²";
             rows.push_back(valueRow("cursorwrap.accel", std::move(title), "accel", v,
-                                    m_settings.impactAccelPps2 == v));
+                                    current == v));
         }
         return rows;
     }
@@ -1265,38 +1305,20 @@ private:
 
     Items guardMenu()
     {
-        Items rows;
-        rows.push_back(backRow());
-        for (const long long v : { 10, 30, 50, 80, 120, 200 }) {
-            std::string title = intText(v) + " px";
-            rows.push_back(valueRow("cursorwrap.guard", std::move(title), "guard", v,
-                                    m_settings.wrapGuardPx == v));
-        }
-        return rows;
+        return numericMenu("cursorwrap.guard", "guard", m_settings.wrapGuardPx,
+                           { 10, 30, 50, 80, 120, 200 }, " px");
     }
 
     Items edgeMenu()
     {
-        Items rows;
-        rows.push_back(backRow());
-        for (const long long v : { 1, 2, 5, 10, 20 }) {
-            std::string title = intText(v) + " px";
-            rows.push_back(valueRow("cursorwrap.edge", std::move(title), "edge", v,
-                                    m_settings.edgeThresholdPx == v));
-        }
-        return rows;
+        return numericMenu("cursorwrap.edge", "edge", m_settings.edgeThresholdPx,
+                           { 1, 2, 5, 10, 20 }, " px");
     }
 
     Items toleranceMenu()
     {
-        Items rows;
-        rows.push_back(backRow());
-        for (const long long v : { 10, 30, 50, 80, 120, 200 }) {
-            std::string title = intText(v) + " px";
-            rows.push_back(valueRow("cursorwrap.tol", std::move(title), "tol", v,
-                                    m_settings.adjacencyTolerancePx == v));
-        }
-        return rows;
+        return numericMenu("cursorwrap.tol", "tol", m_settings.adjacencyTolerancePx,
+                           { 10, 30, 50, 80, 120, 200 }, " px");
     }
 
     // A two-way row (on/off) for a boolean setting that has no dedicated

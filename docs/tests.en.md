@@ -95,7 +95,7 @@ The hook callback and settings delivery can be tested without a real hook:
 python tests/protocol_roundtrip.py
 ```
 
-Run on 2026-11-14: **123 checks passed**, process exit code 0.
+Run on 2026-11-14: **147 checks passed**, process exit code 0.
 
 | Check | Spec |
 |---|---|
@@ -160,13 +160,15 @@ build\cw_devshell.exe gui                     # real windows, keys 1/2/3, q quit
 | `dual-1440p.txt` | The user's real desktop (2 x 2560x1440, taskbar on the primary): exact landings including negative coordinates, and the taskbar avoided at both ends of the vertical ring |
 | `teardown.txt` | Windows and worker threads shut down without leftovers |
 | `accel-fail-closed.txt` | The acceleration floor is fail-closed: steady 12000/16000 px/s, narrow bands (50/100/150/400) and a braking move are all refused even when unmeasurable, while a genuine 500->9000 px/s flick still wraps and `accel=0` keeps the gate off |
+| `guard-rearm.txt` | A continuous edge push wraps exactly once; moving back inside the monitor re-arms the next push; repeats the sequence symmetrically on both horizontal edges; a 62 px/s crawl wraps; and the guard verdict has a regression test against stale `wrapped` state |
+| `impact-flash.txt` | The optional glow is off by default, never fires for a refused wrap or with the impact gate off, appears on a successful impact wrap, and fades after its 180 ms lifetime — independently of the tuning overlay |
 
 A scenario file holds one command per line (`#` comments): `monitor` (optionally
 with a work area — `l,t,r,b,workL,workT,workR,workB` — to declare a taskbar),
 `set`, `move`, `stroke`, `brake`, `hand` (linear speed ramp at a real report rate,
 integer pixel quantisation), `sweep` (feeds a wrap back into the next sample, the
 way a hand keeps moving), `modifier`, `drag`, `wait`, `show`, `dump`,
-`expect wrap|no-wrap|speed>=N|speed<N|accel>=N|accel<N|at <x> <y>`. A failed
+`expect wrap|no-wrap|speed>=N|speed<N|accel>=N|accel<N|at <x> <y>|flash on|off`. A failed
 expectation is a non-zero exit.
 
 **What it can and cannot prove**: it proves the *behaviour* of the decision logic
@@ -255,10 +257,10 @@ coordinates.
 
 ## Acceptance criteria
 
-- L1 green (currently 155 cases + 6 fixtures, all synthetic geometry;
+- L1 green (currently 170 cases + 6 fixtures, all synthetic geometry;
   `live-single.json` is read by the probe only, not by L1)
-- L3 fully passing (currently 123/123)
-- L3.5 scenarios passing (currently 12, via `python tests/devshell_scenarios.py`)
+- L3 fully passing (currently 147/147)
+- L3.5 scenarios passing (currently 14, via `python tests/devshell_scenarios.py`)
 - L0 static validation passing
 - The single-display (including Remote Desktop) part of L4 has been measured and
   passed; **all multi-display boxes must be checked** before multi-display can be

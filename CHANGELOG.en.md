@@ -9,6 +9,63 @@ single source of truth; release tags are `v<version>`.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-14
+
+### Fixed
+
+- **The "still on that edge" guard now tests direction, not a 2 px distance.**
+  The v0.6.0 form compared the pointer to the exact edge line within 2 px, but a
+  driver jittering under a pressed hand is already ±1 px, so one gesture
+  succeeded or failed on a single pixel of noise (away=2 blocked, away=3
+  wrapped) — the user's "works now and then". The latch now releases as soon as
+  the pointer is more than `edgeThresholdPx` back inside the monitor, which is
+  symmetric by construction. Unit tests cover both horizontal and both vertical
+  edges, one continuous push, re-arming, and a 62 px/s crawl.
+- **The readout no longer shows "guard · blocked" and "wrap" together.** A
+  guard-suppressed sample set `guardBlocked` without clearing the previous
+  sample's `wrapped`, so both flags survived in the verdict (the user's
+  screenshot). The verdict is now rebuilt per sample, the two flags are mutually
+  exclusive by construction, and an exhaustive test walks 40 random sequences.
+- **The pointer was yanked back to the landing point after an impact wrap.**
+  Same root: the hand kept pushing, the latch released 3 px out, and the very
+  next sample wrapped a second time. The `guard-rearm` scenario pins "one push =
+  one wrap".
+- **Numeric submenus always contain the value in effect.** The settings card
+  accepts any number while the submenus listed a fixed set, so a card-only value
+  was neither highlighted nor selectable — and 0.6.0 made this worse by changing
+  `impactBandPx`'s default to 400 while the presets were {50..500}, so the
+  default state highlighted nothing. All six numeric submenus now merge the
+  current value into the candidates (deduped, sorted, marked current).
+- **The tuning readout no longer clips its text.** The window was a hard-coded
+  60 px while the acceleration line was drawn from y=46 with a 13 px font: the
+  glyphs ran to y≈63, past the border. The height is now derived from the rows
+  that will be painted (`readout_layout.h`, pure functions with tests), and the
+  acceleration row is only reserved when it will actually be drawn.
+- **"accel — / 1600" became "accel n/a / 1600".** The em dash read as "the
+  acceleration IS 1600"; it now says explicitly that the slope could not be
+  measured, with the threshold still named.
+
+### Added
+
+- **An optional impact-wrap glow (off by default).** A successful impact wrap
+  lights a 180 ms bar along the edge the pointer came through (`impactFlash`,
+  with switches in the settings card and the search bar: `flash on/off`,
+  `光效 开/关`). It is independent of the tuning overlay. It is decoration —
+  it never changes whether a wrap happens, never intercepts the mouse, and fails
+  silently. It never fires for a refused wrap or with the impact gate off. The
+  `impact-flash` scenario pins all four.
+
+### Tests
+
+- New `tests/test_guard_rearm.cpp` (latch, symmetry, slow crawl, verdict
+  exclusivity), `tests/test_readout_layout.cpp` (geometry and wording),
+  `tests/test_impact_flash.cpp` (clock, cancel, length, bounds).
+- New scenarios `guard-rearm.txt` and `impact-flash.txt`; the devshell's `wait`
+  now settles pending expectations (a queued `expect flash` was never checked
+  before), plus a new `expect flash on|off`.
+- L1 155 -> 170 cases; scenarios 12 -> 14; protocol checks 123 -> 147 (submenu
+  current-value matrix, the glow switches and card sync).
+
 ## [0.6.0] - 2026-11-14
 
 ### Fixed

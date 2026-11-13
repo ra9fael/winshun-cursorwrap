@@ -102,6 +102,7 @@ void WrapEngine::rebuild(const std::vector<MonitorBox>& monitors)
     m_hasPrevious = false;
     m_hasLastWrap = false;
     m_hasWrapEdge = false;
+    m_wrapMonitor = -1;
     m_previous = { kNever, kNever };
     m_lastWrap = { kNever, kNever };
 }
@@ -113,6 +114,7 @@ void WrapEngine::resetState()
     m_hasPrevious = false;
     m_hasLastWrap = false;
     m_hasWrapEdge = false;
+    m_wrapMonitor = -1;
     m_previous = { kNever, kNever };
     m_lastWrap = { kNever, kNever };
     m_verdict = {};
@@ -192,8 +194,9 @@ CursorDirection WrapEngine::direction(const Sample& s) const
 
 bool WrapEngine::withinGuard(int64_t x, int64_t y) const
 {
-    // Near the LANDING point: a wrap teleports the pointer, so the hand is still
-    // where it was. Without this the next sample wraps straight back.
+    // (1) SPACE — near the LANDING point. A wrap teleports the pointer, so the
+    // hand is still where it was; without this the next sample wraps straight
+    // back. PowerToys' CursorWrap has exactly this (WRAP_DISTANCE_THRESHOLD=50).
     if (m_hasLastWrap) {
         const int64_t dx = x - m_lastWrap.x;
         const int64_t dy = y - m_lastWrap.y;
@@ -201,33 +204,14 @@ bool WrapEngine::withinGuard(int64_t x, int64_t y) const
         if (dx * dx + dy * dy <= guard * guard)
             return true;
     }
-    // The pointer has not yet LEFT the edge it wrapped at. This is the case the
-    // user reported: holding the pointer at x=1919 keeps producing samples, and
-    // each one is a fresh "arrival" unless the plugin demands that the pointer
-    // leave first. Measured before this check: every event at the edge wrapped,
-    // and sliding ALONG the bottom edge wrapped repeatedly although nothing was
-    // arriving from outside.
-    //
-    // "Left" is measured against the approach band, not against the single edge
-    // line: a hand that is still within impactBandPx of the same edge has not
-    // gone anywhere, while a deliberate move of more than that is a new
-    // approach. Without the band the check would either latch forever (never
-    // wraps again) or fire on every pixel of a slow slide.
-    if (m_hasWrapEdge) {
-        // Still within the edge BAND of the edge that wrapped? Then the pointer
-        // has not left it and this sample is the same arrival, not a new one.
-        //
-        // The test is per-axis and small: only the perpendicular distance to
-        // that one edge matters. Using the wide impactBandPx here would swallow
-        // a deliberate move to a DIFFERENT edge of the same monitor (a corner
-        // turn), which is a genuine second arrival and must wrap.
-        const int64_t away = (m_wrapEdge == EdgeType::Left || m_wrapEdge == EdgeType::Right)
-            ? std::llabs(x - m_wrapEdgeCoord)
-            : std::llabs(y - m_wrapEdgeCoord);
-        const int64_t slack = std::max<int64_t>(m_settings.edgeThresholdPx, 2);
-        if (away <= slack)
-            return true; // still on that edge: not a new arrival
-    }
+    // (2) PUSH — one continuous push is one wrap, however long the hand holds.
+    // The latch is released in onMouseMove as soon as the pointer is more than
+    // edgeThresholdPx inside the monitor again, so a deliberate second push
+    // always re-arms. This is the direction-of-travel distinction, not a 2 px
+    // distance test: the latter was the v0.6.0 bug, and was driver-jitter-sized
+    // and off by one in opposite directions on the two horizontal edges.
+    if (m_hasWrapEdge)
+        return true;
     return false;
 }
 
@@ -481,6 +465,10 @@ std::pair<int64_t, int64_t> WrapEngine::onMouseMove(const Sample& sample, bool m
     noteSample(sample);
     m_lastSample = sample;
     m_hasLastSample = true;
+    // The verdict is PER SAMPLE, never patched: it is what the overlay and the
+    // data window read. Reset before any early exit so a missing monitor, drag,
+    // modifier refusal, or guard cannot inherit a previous sample's wrapped flag.
+    m_verdict = EdgeVerdict {};
 
     // Every exit funnels through here so the per-reason counters see every
     // move: "it does not wrap at all" is only answerable when the diagnostic
@@ -502,7 +490,31 @@ std::pair<int64_t, int64_t> WrapEngine::onMouseMove(const Sample& sample, bool m
         return skip(SkipReason::Dragging);
     if (m_settings.activation != ActivationMode::Always && !modifierHeld)
         return skip(SkipReason::NoModifier);
+    // Release the "still pressed against that edge" latch as soon as the pointer
+    // is more than edgeThresholdPx INSIDE the monitor again: the push is over.
+    // This must happen HERE, before the guard can swallow the sample, or the
+    // latch could never be released by anything a hand pressing on an edge
+    // produces (the v0.6.0 bug).
+    if (m_hasWrapEdge) {
+        const MonitorBox box = m_topology.monitors()[static_cast<size_t>(m_wrapMonitor)];
+        const int64_t inset = std::max<int64_t>(m_settings.edgeThresholdPx, 1);
+        bool backInside = false;
+        switch (m_wrapEdge) {
+        case EdgeType::Left: backInside = sample.x > box.left + inset; break;
+        case EdgeType::Right: backInside = sample.x < box.right - 1 - inset; break;
+        case EdgeType::Top: backInside = sample.y > box.top + inset; break;
+        case EdgeType::Bottom: backInside = sample.y < box.bottom - 1 - inset; break;
+        }
+        if (backInside) {
+            m_hasWrapEdge = false;
+            m_wrapMonitor = -1;
+        }
+    }
     if (withinGuard(sample.x, sample.y)) {
+        m_verdict.tUs = sample.tUs;
+        m_verdict.x = sample.x;
+        m_verdict.y = sample.y;
+        m_verdict.monitorIndex = m_topology.nearestMonitor(sample.x, sample.y);
         m_verdict.guardBlocked = true;
         return skip(SkipReason::Guard);
     }
@@ -510,6 +522,7 @@ std::pair<int64_t, int64_t> WrapEngine::onMouseMove(const Sample& sample, bool m
     // outer edge, so the next arrival is a genuine new one.
     m_hasLastWrap = false;
     m_hasWrapEdge = false;
+    m_wrapMonitor = -1;
     const int index = m_topology.nearestMonitor(sample.x, sample.y);
     if (index < 0)
         return skip(SkipReason::OffMonitor); // no monitors at all
@@ -643,18 +656,12 @@ std::pair<int64_t, int64_t> WrapEngine::onMouseMove(const Sample& sample, bool m
     if (nx != sample.x || ny != sample.y) {
         m_lastWrap = { nx, ny };
         m_hasLastWrap = true;
-        // The pointer has not left the band of this edge yet: another sample at
-        // the same edge is the same arrival, not a new one.
         m_hasWrapEdge = true;
         m_wrapEdge = edge;
-        // The edge coordinate this wrap happened at, derived from the landing
-        // side so it does not depend on a gate-only local variable.
-        {
-            const MonitorBox box = m_topology.monitors()[static_cast<size_t>(index)];
-            m_wrapEdgeCoord = (edge == EdgeType::Left) ? box.left
-                : (edge == EdgeType::Right) ? box.right - 1
-                : (edge == EdgeType::Top) ? box.top : box.bottom - 1;
-        }
+        m_wrapMonitor = index;
+        // Start the cooldown. This is the whole "one push, one wrap" mechanism
+        // now: a hand pressing on an edge keeps producing samples for tens of ms,
+        // and none of them may wrap again.
         ++m_stats.wraps;
         noteDecision(sample, SkipReason::None, true, m_verdict, index);
         m_lastReason = SkipReason::None;
@@ -669,9 +676,11 @@ void WrapEngine::onWrapFailed()
     std::lock_guard lock(m_mutex);
     // Undo the record onMouseMove just made. The pointer is still at the edge the
     // hand was pushing on, so the guard must not be armed at the landing point it
-    // never reached: leave it unarmed and let the next sample decide again.
+    // never reached: leave it unarmed and let the next sample decide again. The
+    // cooldown is cleared too — this wrap never happened.
     m_hasLastWrap = false;
     m_hasWrapEdge = false;
+    m_wrapMonitor = -1;
     m_hasArrivalEdge = false;
     if (m_stats.wraps > 0)
         --m_stats.wraps;
@@ -828,6 +837,8 @@ void applySettings(const RawSettings& raw, Settings& out, bool merge)
         out.tuningOverlay = raw.tuningOverlay;
     if (raw.hasDataWindow)
         out.dataWindow = raw.dataWindow;
+    if (raw.hasImpactFlash)
+        out.impactFlash = raw.impactFlash;
 
     auto applyNumber = [](double v, bool has, int lo, int hi, int def, int prev) {
         if (!has)

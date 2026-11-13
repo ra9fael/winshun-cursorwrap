@@ -154,6 +154,7 @@ def default_settings(**overrides) -> dict:
         "adjacencyTolerancePx": 50,
         "impactGate": False,
         "impactSpeedPps": 2000,
+        "impactFlash": False,
     }
     s.update(overrides)
     return s
@@ -217,7 +218,7 @@ def run(exe: Path) -> int:
         # or through a submenu) so the two surfaces cannot drift apart.
         manifest = json.loads((ROOT / "plugin.json").read_text(encoding="utf-8"))
         setting_keys = [s.get("key") for s in manifest.get("settings", [])]
-        check(len(setting_keys) == 13, f"manifest declares thirteen settings (got {len(setting_keys)})")
+        check(len(setting_keys) == 14, f"manifest declares fourteen settings (got {len(setting_keys)})")
         covered = {
             "wrapMode": "cursorwrap.row.mode",
             "activationMode": "cursorwrap.row.activation",
@@ -231,6 +232,7 @@ def run(exe: Path) -> int:
             "impactBandPx": "cursorwrap.row.band",
             "impactAccelPps2": "cursorwrap.row.accel",
             "tuningOverlay": "cursorwrap.row.tuner",
+            "impactFlash": "cursorwrap.row.flash",
             "dataWindow": "cursorwrap.row.data",
         }
         list_ids = [r.get("id") for r in items_of(drv.query(""))]
@@ -313,6 +315,33 @@ def run(exe: Path) -> int:
         check("开" in single_row["title"] or "on" in single_row["title"],
               "single on shows as on", single_row["title"])
         drv.query("single off")
+
+        print("query: impact flash setting is shared by the card and search bar")
+        drv.query("flash on")
+        flash_row = next(r for r in items_of(drv.query(""))
+                         if r.get("id") == "cursorwrap.row.flash")
+        check("开" in flash_row["title"] or "on" in flash_row["title"],
+              "flash on is reflected in the settings list", flash_row["title"])
+        # Clear the search-bar override before testing a card change: the plugin
+        # intentionally keeps search-bar overrides above unrelated card updates,
+        # because WinShun has no plugin->host settings-write channel.
+        drv.query("reset")
+        drv.settings_changed(default_settings(impactFlash=True))
+        time.sleep(0.2)
+        flash_row = next(r for r in items_of(drv.query(""))
+                         if r.get("id") == "cursorwrap.row.flash")
+        check("开" in flash_row["title"] or "on" in flash_row["title"],
+              "the settings card can turn the impact flash on", flash_row["title"])
+        drv.settings_changed(default_settings(impactFlash=False))
+        time.sleep(0.2)
+        flash_row = next(r for r in items_of(drv.query(""))
+                         if r.get("id") == "cursorwrap.row.flash")
+        check("关" in flash_row["title"] or "off" in flash_row["title"],
+              "the settings card can turn the impact flash off", flash_row["title"])
+        drv.query("光效")
+        check(any(i.get("id") == "cursorwrap.row.flash" for i in items_of(drv.query(""))),
+              "the localized flash command is accepted")
+        drv.query("flash off")
 
         print("query: the tuning overlay has its own submenu and parameters")
         qt = drv.query("tune")
@@ -548,6 +577,63 @@ def run(exe: Path) -> int:
         data_dir2.mkdir()
         drv = Driver(exe, data_dir2)
         drv.initialize()
+
+        print("every numeric submenu shows the value in effect (the user's report)")
+        # The card in WinShun's settings page accepts any number; the numeric
+        # submenus list a fixed set. A card-only value used to produce a menu with
+        # NO row highlighted and no way to pick that value again. Worse, 0.6.0
+        # changed impactBandPx's default to 400 while the presets were
+        # {50,80,120,150,200,300,500}, so the DEFAULT state highlighted nothing.
+        menu_rows = {
+            "speed": ("cursorwrap.speed", "impactSpeedPps"),
+            "band": ("cursorwrap.band", "impactBandPx"),
+            "accel": ("cursorwrap.accel", "impactAccelPps2"),
+            "guard": ("cursorwrap.guard", "wrapGuardPx"),
+            "edge": ("cursorwrap.edge", "edgeThresholdPx"),
+            "tol": ("cursorwrap.tol", "adjacencyTolerancePx"),
+        }
+
+        def highlighted(driver, menu, item_id) -> list[str]:
+            return [i.get("title") for i in items_of(driver.query(menu))
+                    if i.get("id") == item_id and i.get("subtitle")]
+
+        # (a) the shipped defaults must each be visible in their own menu
+        for menu, (item_id, key) in menu_rows.items():
+            got = highlighted(drv, menu, item_id)
+            check(len(got) == 1,
+                  f"the default {key} highlights exactly one row in '{menu}'", str(got))
+
+        # (b) a value the card can set but the presets never offer
+        drv.settings_changed(default_settings(
+            wrapMode="both", impactGate=True, impactSpeedPps=4321,
+            impactBandPx=222, impactAccelPps2=1234,
+            edgeThresholdPx=7, wrapGuardPx=77, adjacencyTolerancePx=33))
+        time.sleep(0.5)
+        for menu, (item_id, key) in menu_rows.items():
+            got = highlighted(drv, menu, item_id)
+            check(len(got) == 1,
+                  f"a card-only {key} highlights exactly one row in '{menu}'", str(got))
+        expect = {
+            "speed": ["4321 px/s"],
+            "band": ["222 px"],
+            "accel": ["1234 px/s\u00b2"],
+            "guard": ["77 px"],
+            "edge": ["7 px"],
+            "tol": ["33 px"],
+        }
+        for menu, want in expect.items():
+            got = highlighted(drv, menu, menu_rows[menu][0])
+            check(got == want, f"'{menu}' names the card-only value", f"{got} != {want}")
+
+        # (c) and the row is actionable: pressing it re-applies the same value
+        q = drv.query("band 222")
+        check(any(i.get("id") == "cursorwrap.band" for i in items_of(q)),
+              "the card-only band value is still selectable",
+              json.dumps(q)[:200])
+
+        # Restore the defaults for the checks that follow.
+        drv.settings_changed(default_settings())
+        time.sleep(0.4)
 
         print("cancel tolerance")
         drv.cancel(12345)  # a queryId that was never issued must be harmless

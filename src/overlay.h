@@ -19,6 +19,7 @@
 //     the 196x60 readout repaints, and only when its numbers change.
 #pragma once
 
+#include "impact_flash.h"
 #include "wrap_logic.h"
 
 #include <atomic>
@@ -53,6 +54,11 @@ public:
     };
     void setColors(const Colors& colors);
 
+    // Whether the impact glow is on screen right now. Exists for the devshell
+    // scenario DSL: the glow is decoration, and its trigger rule is the only
+    // part of it worth asserting.
+    bool impactFlashVisible() const;
+
 private:
     // One layered surface with its own top-down 32bpp DIB.
     struct Layer {
@@ -84,6 +90,15 @@ private:
     void rebuildStrips(const Settings& settings, const Colors& colors);
     void buildReadout(const EdgeVerdict& verdict, const Settings& settings,
                       const Colors& colors);
+    // The impact-wrap glow: one bar along the edge the pointer came through,
+    // fading out on ImpactFlash's clock. Painting it is best-effort — it is
+    // decoration, so a failure here must never affect anything else.
+    void paintImpactFlash(const EdgeVerdict& verdict, const Settings& settings,
+                          const Colors& colors);
+    void hideImpactFlash();
+    // The length of one edge of one monitor, so the glow can be sized as a
+    // fraction of it.
+    int edgeLengthOf(int monitorIndex, EdgeType edge) const;
     // The trace panel: a log-bucketed histogram of arrival speeds with the
     // current gate and the suggested gate drawn in, plus the counts. This is
     // what makes "what is optimal" answerable at a glance.
@@ -105,11 +120,15 @@ private:
     std::vector<Strip> m_strips;
     Layer m_readout;
     Layer m_trace;
+    Layer m_flash;
+    ImpactFlash m_flashState;
+    long long m_drawnFlashUs = -1; // the verdict time the glow was painted for
     std::thread m_thread;
     std::atomic<bool> m_running { false };
     DWORD m_threadId = 0;
     WrapEngine* m_engine = nullptr;
     int m_bandPx = 0; // the band width the strips were built for
+    bool m_tuningOverlayBuilt = false;
     long long m_drawnVerdictUs = -1;
     long long m_drawnPps = -1;
     bool m_readoutShown = false;

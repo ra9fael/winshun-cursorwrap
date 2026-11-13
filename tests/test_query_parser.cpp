@@ -162,6 +162,24 @@ CW_TEST(parser_data_window)
     CW_CHECK(parseCommand("database").kind == CommandKind::Unknown);
 }
 
+CW_TEST(parser_impact_flash)
+{
+    auto n = parseCommand("flash");
+    CW_CHECK(n.kind == CommandKind::SetImpactFlash && n.value == -1);
+    n = parseCommand("glow");
+    CW_CHECK(n.kind == CommandKind::SetImpactFlash && n.value == -1);
+    n = parseCommand("光效");
+    CW_CHECK(n.kind == CommandKind::SetImpactFlash && n.value == -1);
+    n = parseCommand("flash on");
+    CW_CHECK(n.kind == CommandKind::SetImpactFlash && n.value == 1);
+    n = parseCommand("glow off");
+    CW_CHECK(n.kind == CommandKind::SetImpactFlash && n.value == 0);
+    n = parseCommand("光效 开");
+    CW_CHECK(n.kind == CommandKind::SetImpactFlash && n.value == 1);
+    n = parseCommand("光效 关");
+    CW_CHECK(n.kind == CommandKind::SetImpactFlash && n.value == 0);
+}
+
 CW_TEST(parser_reset)
 {
     CW_CHECK(parseCommand("reset").kind == CommandKind::ResetToDefaults);

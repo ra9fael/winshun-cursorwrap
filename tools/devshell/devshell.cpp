@@ -296,6 +296,9 @@ bool applySetting(Settings& settings, const std::string& key, const std::string&
     } else if (key == "tuningOverlay") {
         raw.tuningOverlay = on;
         raw.hasTuningOverlay = true;
+    } else if (key == "impactFlash") {
+        raw.impactFlash = on;
+        raw.hasImpactFlash = true;
     } else if (key == "dataWindow") {
         raw.dataWindow = on;
         raw.hasDataWindow = true;
@@ -340,7 +343,7 @@ bool applySetting(Settings& settings, const std::string& key, const std::string&
 // --- the scenario runner ----------------------------------------------------
 
 struct Expectation {
-    std::string kind; // wrap | no-wrap | speed>=N | accel>=N | at X Y | x< | y<
+    std::string kind; // wrap | no-wrap | speed>=N | accel>=N | at X Y | x< | y< | flash
     long long value = 0;
     long long value2 = 0;
 };
@@ -377,6 +380,8 @@ private:
     Overlay* m_overlay;
     DataWindow* m_dataWindow;
     std::vector<Expectation> m_expect;
+    // A `flash` expectation can only be judged after the overlay repaints.
+    bool m_flashWait = false;
     std::vector<std::string> m_log;
     int m_failures = 0;
     int m_checks = 0;
@@ -398,9 +403,10 @@ void Scenario::check(bool ok, const std::string& text)
 void Scenario::syncWindows()
 {
     const Settings current = m_engine->settings();
-    if (current.tuningOverlay && !m_overlay->active())
+    const bool overlayOn = current.tuningOverlay || (current.impactFlash && current.impactGate);
+    if (overlayOn && !m_overlay->active())
         m_overlay->start(m_engine->monitorsSnapshot());
-    else if (!current.tuningOverlay && m_overlay->active())
+    else if (!overlayOn && m_overlay->active())
         m_overlay->stop();
     if (current.dataWindow && !m_dataWindow->active())
         m_dataWindow->start([this] { return snapshot(); });
@@ -410,7 +416,9 @@ void Scenario::syncWindows()
 
 void Scenario::settle(const std::string& line)
 {
+    std::vector<Expectation> next;
     for (const Expectation& e : m_expect) {
+        bool keep = false;
         if (e.kind == "wrap")
             check(m_lastWrapped, line + " -> expected a wrap, got none");
         else if (e.kind == "no-wrap")
@@ -433,14 +441,29 @@ void Scenario::settle(const std::string& line)
             check(m_lastAccel < e.value, line + " -> expected accel < " +
                                              std::to_string(e.value) + ", measured " +
                                              std::to_string(m_lastAccel));
+        else if (e.kind == "flash") {
+            // The glow is driven by the overlay's 60 ms repaint, so it cannot be
+            // observed at the instant the move is delivered: leave it queued and
+            // judge it on the next settle (the scenario puts a `wait` after it).
+            if (m_flashWait) {
+                m_flashWait = false;
+                const bool on = m_overlay && m_overlay->impactFlashVisible();
+                check(on == (e.value != 0), line + " -> expected the impact glow " +
+                                               (e.value ? "on" : "off") + ", it is " +
+                                               (on ? "on" : "off"));
+            } else
+                keep = true;
+        }
         else if (e.kind == "at")
             check(m_pointer->x() == e.value && m_pointer->y() == e.value2,
                   line + " -> expected the pointer at " + std::to_string(e.value) + "," +
                       std::to_string(e.value2) + ", it is at " +
                       std::to_string(m_pointer->x()) + "," +
                       std::to_string(m_pointer->y()));
+        if (keep)
+            next.push_back(e);
     }
-    m_expect.clear();
+    m_expect = std::move(next);
 }
 
 void Scenario::dumpState()
@@ -545,6 +568,16 @@ bool Scenario::run(const std::string& rawLine)
         } else if (what.rfind("accel<", 0) == 0) {
             e.kind = "accel<";
             e.value = std::atoll(what.c_str() + 6);
+        } else if (what == "flash") {
+            // expect flash on|off -- the impact glow is showing right now.
+            if (parts.size() < 3 || (parts[2] != "on" && parts[2] != "off")) {
+                note("FAIL flash expectation needs on|off: " + line);
+                ++m_failures;
+                ++m_checks;
+                return false;
+            }
+            e.kind = "flash";
+            e.value = parts[2] == "on" ? 1 : 0;
         } else if (what == "at") {
             if (parts.size() < 4 || !parseInt(parts[2], e.value)
                 || !parseInt(parts[3], e.value2)) {
@@ -577,11 +610,19 @@ bool Scenario::run(const std::string& rawLine)
         note("show " + what + " (overlay=" + (m_overlay->active() ? "on" : "off")
              + " data=" + (m_dataWindow->active() ? "on" : "off") + ")");
         return true;
-    }    if (cmd == "wait") {
+    }
+    if (cmd == "wait") {
         long long ms = 200;
         if (parts.size() > 1)
             parseInt(parts[1], ms);
         std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+        // A wait is what lets a timed effect (the impact glow, driven by the
+        // overlay's 60 ms repaint) reach its next state, so a queued `flash`
+        // expectation can be judged after it. Without this it sat in the queue
+        // until the next move command and was silently never checked.
+        m_flashWait = true;
+        settle(line);
+        m_flashWait = false;
         return true;
     }
     if (cmd == "dump") {

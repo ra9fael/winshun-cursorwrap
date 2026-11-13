@@ -86,15 +86,17 @@ CW_TEST(verdict_guard_blocked_flag)
 {
     WrapEngine e;
     e.rebuild({ box(0, 0, 1920, 1080, true) });
-    e.onMouseMove({ 1919, 540 }, false, false); // wraps, lands at x=1
+    e.onMouseMove({ 1919, 540, 1'000'000 }, false, false); // wraps, lands at x=1
     CW_CHECK_EQ(e.stats().wraps, 1);
-    // Immediately back at the destination: guard absorbs, no new verdict.
-    e.onMouseMove({ 0, 540 }, false, false);
+    // Pushing further OUT from the same edge: the guard absorbs it and no new
+    // wrap happens. The verdict must now describe THIS sample, so `wrapped` is
+    // false — before v0.7.0 it kept the previous sample's true, which is why the
+    // readout could show "guard blocked" and "wrap" together.
+    e.onMouseMove({ 1920, 540, 1'008'000 }, false, false);
     CW_CHECK_EQ(e.stats().wraps, 1);
     const EdgeVerdict v = e.lastVerdict();
-    // The verdict still describes the previous (wrapped) arrival: guard
-    // arrivals never reach the edge decision.
-    CW_CHECK(v.wrapped);
+    CW_CHECK(v.guardBlocked);
+    CW_CHECK(!v.wrapped);
 }
 
 CW_TEST(verdict_resets_with_state)

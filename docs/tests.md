@@ -95,7 +95,7 @@ fixture 是**合成几何**，不是真机采集，因此可安全提交（不�
 python tests/protocol_roundtrip.py
 ```
 
-2026-11-14 实跑：**123 项检查全部通过**，进程退出码 0。
+2026-11-14 实跑：**147 项检查全部通过**，进程退出码 0。
 
 | 检查 | 对应 |
 |---|---|
@@ -156,12 +156,14 @@ build\cw_devshell.exe gui                     # 真窗口，键盘 1/2/3 驱动�
 | `dual-1440p.txt` | 用户的真实桌面（2 × 2560×1440，主屏带任务栏）：含负坐标的精确落点，纵向环两端都避开任务栏 |
 | `teardown.txt` | 窗口与线程收尾无残留 |
 | `accel-fail-closed.txt` | 加速度门槛为 fail-closed：稳态 12000/16000 px/s、窄带（50/100/150/400）与刹车动作即使不可测量也一律拒绝，而真实 500->9000 px/s 甩动仍然穿越，`accel=0` 时门槛关闭 |
+| `guard-rearm.txt` | 连续压边只穿越一次；回到屏幕内后重新武装；左右外缘对称；62 px/s 慢爬也穿越；并有单元测试防止 `wrapped` 状态残留 |
+| `impact-flash.txt` | 光效默认关闭；被拒绝的穿越和撞击模式关闭时不发光；成功的撞击穿越会发光；180 ms 后自行熄灭；不依赖调参浮层开启 |
 
 场景文件一行一条命令，`#` 起注释：`monitor`（可带工作区：
 `l,t,r,b,workL,workT,workR,workB`，用来声明任务栏）、`set`、`move`、`stroke`、
 `brake`、`hand`（按真实回报率线性加速并做整数像素量化）、`sweep`（把回绕结果反馈
 给下一次采样，像真手一样连续移动）、`modifier`、`drag`、`wait`、`show`、`dump`、
-`expect wrap|no-wrap|speed>=N|speed<N|accel>=N|accel<N|at <x> <y>`。
+`expect wrap|no-wrap|speed>=N|speed<N|accel>=N|accel<N|at <x> <y>|flash on|off`。
 期望没满足时退出码非 0。
 
 **它能证明什么 / 不能证明什么**：能证明判定逻辑与 GUI 的**行为**（画在哪些边、
@@ -240,10 +242,10 @@ build\cw_devshell.exe gui                     # 真窗口，键盘 1/2/3 驱动�
 
 ## 验收标准
 
-- L1 全绿（当前 155 用例 + 6 布局 fixture，全部是合成几何；`live-single.json` 只被
+- L1 全绿（当前 170 用例 + 6 布局 fixture，全部是合成几何；`live-single.json` 只被
   探针读取，不进 L1）
 - L3 全通过（当前 119/119）
-- L3.5 场景全通过（当前 12 个场景，`python tests/devshell_scenarios.py`）
+- L3.5 场景全通过（当前 14 个场景，`python tests/devshell_scenarios.py`）
 - L0 静态校验通过
 - L4 单屏与远程桌面单屏部分已实测通过；**多屏部分全部勾选后**才可宣布多屏可发布，
   当前属发布阻塞项

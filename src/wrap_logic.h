@@ -60,6 +60,10 @@ struct Settings {
     // what the search bar can turn on.
     bool tuningOverlay = false;     // draw the edge bands and the readout
     bool dataWindow = false;        // show the live data window
+    // A short glow along the edge a successful impact wrap came through. It is
+    // decoration, so it is off by default: the plugin's job is to move the
+    // pointer, and an unrequested flash on every wrap is an unrequested effect.
+    bool impactFlash = false;
 };
 
 // Parsed-setting values straight from the host JSON, already type-checked.
@@ -79,6 +83,7 @@ struct RawSettings {
     double impactAccelPps2 = 0;
     bool tuningOverlay = false;
     bool dataWindow = false;
+    bool impactFlash = false;
     bool hasWrapMode = false;
     bool hasActivation = false;
     bool hasDrag = false;
@@ -92,6 +97,7 @@ struct RawSettings {
     bool hasImpactAccel = false;
     bool hasTuningOverlay = false;
     bool hasDataWindow = false;
+    bool hasImpactFlash = false;
 };
 
 // Apply RawSettings onto Settings. Every bad value falls back to the default
@@ -390,9 +396,20 @@ private:
     // edge it wrapped at, so the next arrival counts again. This is what stops
     // "hold at the edge" and "slide along the edge" from wrapping on every
     // sample.
+    //
+    // After a wrap: which edge the pointer is still pressed against, and which
+    // monitor it belongs to. Cleared when the pointer comes back more than
+    // edgeThresholdPx INSIDE that monitor, i.e. when the push is over. This is
+    // what makes "one continuous push = one wrap" work for a hand that holds
+    // against the edge for any length of time.
+    //
+    // v0.6.0 compared the pointer to the edge LINE with a 2 px slack, which
+    // could not tell a continuing push from a fresh one (2 px is driver-jitter
+    // magnitude) and was off by one in opposite directions on the two horizontal
+    // edges. The inset test below is symmetric by construction.
     bool m_hasWrapEdge = false;
     EdgeType m_wrapEdge = EdgeType::Left;
-    int64_t m_wrapEdgeCoord = 0;
+    int m_wrapMonitor = -1;
     Sample m_lastSample { kNever, kNever };
     bool m_hasLastSample = false;
     // The skip reason of the previous sample: a decision is logged when it

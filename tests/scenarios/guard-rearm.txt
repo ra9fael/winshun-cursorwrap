@@ -1,0 +1,70 @@
+# The anti-oscillation guard chain: one push is one wrap, and a real second push
+# always re-arms. These are the devshell versions of the user's reports:
+#
+#   3. "a very slow arrival at the edge does not wrap" -- measured: speed is not
+#      the cause. The cause was that after a wrap the guard needed the pointer to
+#      drift 3 px off the edge before another wrap was possible, and one sample at
+#      exactly 2 px still blocked. So a slow hand that stops ON the edge and
+#      pushes again did nothing.
+#   4. "it shows blocked but it already wrapped" -- the guard branch set
+#      guardBlocked without clearing the previous wrapped.
+#   6b. "after a wrap the pointer flies far away" -- the hand keeps pushing, the
+#      latch releases, and the very next sample wraps a SECOND time, pulling the
+#      pointer back to the landing point.
+#
+# Run: build/cw_devshell.exe run tests/scenarios/guard-rearm.txt
+
+monitor 0,0,1920,1080,0,0,1920,1032
+set impactGate off
+set mode both
+set edge 1
+set guard 50
+
+# --- one continuous push is exactly one wrap ------------------------------
+# Press the right edge, then keep reporting the clamped coordinate like a hand
+# that is still pushing. Only the first sample may wrap.
+expect wrap
+stroke 1400 540 1919 540 10 8
+expect no-wrap
+move 1919 540 8
+expect no-wrap
+move 1919 540 8
+expect no-wrap
+move 1919 540 8
+expect no-wrap
+move 1919 540 8
+
+# --- a real second push re-arms within a few pixels -----------------------
+# Come back inside the monitor (this ends the push), then push again.
+expect no-wrap
+move 1910 540 8
+expect wrap
+move 1919 540 8
+
+# --- the same on the left edge, symmetrically ----------------------------
+# The v0.6.0 guard was off by one in OPPOSITE directions on the two edges.
+expect wrap
+stroke 500 300 0 300 10 8
+expect no-wrap
+move 0 300 8
+expect no-wrap
+move 0 300 8
+expect no-wrap
+move 10 300 8
+expect wrap
+move 0 300 8
+
+# --- a slow crawl still wraps (speed is not the gate) --------------------
+# 1 px per 16 ms is ~62 px/s. With the impact gate off nothing may refuse it.
+expect wrap
+sweep 30 800 -1 40 16
+expect no-wrap
+move 1100 800 8
+
+# --- the readout never says blocked and wrapped at once -----------------
+# Not assertable from a scenario, but this sequence is the one that used to
+# produce it: the guard-suppressed sample must report only guard.
+expect wrap
+stroke 1400 950 1919 950 10 8
+expect no-wrap
+move 1919 950 8

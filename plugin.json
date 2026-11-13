@@ -3,7 +3,7 @@
   "manifest": 1,
   "id": "ra9fael.cursorwrap",
   "name": {"zh": "光标回绕", "en": "Cursor wrap"},
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": {
     "zh": "光标到达屏幕外边时从对边进入（多显示器边缘拓扑，支持仅纵向/仅横向与按住 Ctrl/Shift 激活）；cursorwrap 关键字查看状态与开关",
     "en": "The cursor re-enters from the opposite edge when it reaches an outer edge (multi-monitor edge topology; vertical/horizontal-only modes and Ctrl/Shift activation); the cursorwrap keyword shows status and toggles it"
@@ -132,6 +132,16 @@
       "type": "bool",
       "title": {"zh": "调参可视化", "en": "Tuning overlay"},
       "hint": {"zh": "在能回绕的外边缘画出测速区间与门槛线，并在撞到边缘时显示实测速度；内边不画。与搜索栏的 tune 是同一个开关", "en": "draws the measuring band and the wrap line on outer edges only, plus the measured speed when you hit one; same switch as tune in the search bar"},
+      "default": false
+    },
+    {
+      "key": "impactFlash",
+      "type": "bool",
+      "title": {"zh": "撞击穿越光效", "en": "Impact wrap glow"},
+      "hint": {
+        "zh": "撞击模式成功穿越后，在被压的那条边上亮一道短暂的光（180 ms，沿边一小段）。纯装饰，默认关闭；不影响是否穿越，也不会拦截鼠标",
+        "en": "after a successful impact wrap, a short glow (180 ms, a fraction of the edge) along the edge you came through. Decoration only, off by default: it never affects whether a wrap happens and never intercepts the mouse"
+      },
       "default": false
     },
     {

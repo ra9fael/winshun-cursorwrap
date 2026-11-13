@@ -77,13 +77,16 @@ const std::vector<Field>& fields()
         { "dataWindow",
           [](cw::Settings& s) { s.dataWindow = true; },
           [](const cw::Settings& s) { return s.dataWindow == true; } },
+        { "impactFlash",
+          [](cw::Settings& s) { s.impactFlash = true; },
+          [](const cw::Settings& s) { return s.impactFlash == true; } },
     };
     return table;
 }
 
 // cw::Settings has this many data members. Keep in step with wrap_logic.h; a
 // new field makes the exhaustive test fail until it is listed above.
-constexpr size_t kFieldCount = 13;
+constexpr size_t kFieldCount = 14;
 
 } // namespace
 

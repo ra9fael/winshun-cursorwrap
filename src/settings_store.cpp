@@ -125,6 +125,12 @@ const std::vector<SettingsField>& settingsFields()
           [](const Settings&) { return 0LL; },
           [](const Settings& s) { return s.dataWindow; },
           [](const Settings&) { return std::string(); } },
+
+        { "impactFlash", FieldKind::Bool,
+          [](const Settings& s) { return s.impactFlash != Settings{}.impactFlash; },
+          [](const Settings&) { return 0LL; },
+          [](const Settings& s) { return s.impactFlash; },
+          [](const Settings&) { return std::string(); } },
     };
     return table;
 }
@@ -197,6 +203,9 @@ void applyKey(const winshun::Json& s, const SettingsField& field, Settings& out)
     } else if (key == "tuningOverlay") {
         raw.tuningOverlay = v.toBool();
         raw.hasTuningOverlay = true;
+    } else if (key == "impactFlash") {
+        raw.impactFlash = v.toBool();
+        raw.hasImpactFlash = true;
     } else if (key == "dataWindow") {
         raw.dataWindow = v.toBool();
         raw.hasDataWindow = true;

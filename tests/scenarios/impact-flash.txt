@@ -1,0 +1,46 @@
+monitor 0,0,1920,1080,0,0,1920,1032
+set mode both
+set edge 1
+set guard 50
+set impactGate on
+set speed 2000
+set band 400
+set accel 0
+
+# (1) the shipped default is OFF: a successful impact wrap paints nothing
+set impactFlash off
+hand 200 3000 3000 500 200
+expect no-wrap
+wait 70
+expect flash off
+wait 70
+
+# (2) a REFUSED wrap paints nothing either, even with the glow on
+set impactFlash on
+hand 200 200 200 125 400
+expect no-wrap
+wait 70
+expect flash off
+wait 70
+
+# (3) a successful impact wrap with the glow on paints it
+move 960 540
+hand 1600 2000 9000 500 400
+expect wrap
+wait 70
+expect flash on
+wait 70
+
+# (4) it fades on its own clock, without needing another wrap
+wait 300
+expect flash off
+wait 70
+
+# (5) gate off: the glow is an IMPACT effect, so it cannot fire
+set impactGate off
+set impactFlash on
+hand 1600 2000 9000 500 400
+expect wrap
+wait 70
+expect flash off
+wait 70
