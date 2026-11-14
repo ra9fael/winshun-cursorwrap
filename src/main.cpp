@@ -132,40 +132,6 @@ void markOverride(cw::RawSettings& raw, const cw::SettingsField& field,
     }
 }
 
-// Whether the card's push carries this field at all (the has* flags mirror
-// markOverride's switch; the two must list the same keys).
-bool rawCarries(const cw::RawSettings& raw, const cw::SettingsField& field)
-{
-    const std::string key = field.key;
-    if (key == "wrapMode") return raw.hasWrapMode;
-    if (key == "activationMode") return raw.hasActivation;
-    if (key == "disableDuringDrag") return raw.hasDrag;
-    if (key == "disableOnSingleMonitor") return raw.hasSingle;
-    if (key == "edgeThresholdPx") return raw.hasEdgeThreshold;
-    if (key == "wrapGuardPx") return raw.hasWrapGuard;
-    if (key == "adjacencyTolerancePx") return raw.hasAdjacency;
-    if (key == "impactGate") return raw.hasImpactGate;
-    if (key == "impactSpeedPps") return raw.hasImpactSpeed;
-    if (key == "impactBandPx") return raw.hasImpactBand;
-    if (key == "impactAccelPps2") return raw.hasImpactAccel;
-    if (key == "tuningOverlay") return raw.hasTuningOverlay;
-    if (key == "dataWindow") return raw.hasDataWindow;
-    if (key == "impactFlash") return raw.hasImpactFlash;
-    return false;
-}
-
-// The field's value as text, so two Settings can be compared per field without
-// a per-kind switch at every call site.
-std::string fieldValue(const cw::SettingsField& field, const cw::Settings& s)
-{
-    switch (field.kind) {
-    case cw::FieldKind::Number: return std::to_string(field.number(s));
-    case cw::FieldKind::Bool: return std::to_string(field.boolean(s) ? 1 : 0);
-    case cw::FieldKind::Text: return field.text(s);
-    }
-    return {};
-}
-
 cw::RawSettings rawFromJson(const Json& s)
 {
     cw::RawSettings raw;
@@ -325,13 +291,11 @@ public:
 protected:
     void initialized() override
     {
-        // Host card first (defaults + the user's values), then the search
-        // bar's overrides on top. The card mirror starts here: the startup
-        // push is not an edit, so nothing beats the pinned overrides yet.
+        // Start from the host's persisted values. Legacy local overrides must
+        // not silently restore a different speed or acceleration condition.
         applySettings(rawFromJson(settings()), m_settings, false);
-        m_cardMirror = m_settings;
-        m_hasCardMirror = true;
-        loadOverridesFromDisk();
+        deleteFile(overridePath(dataDir()));
+        m_overrides = false;
         m_engine = std::make_unique<cw::WrapEngine>(m_settings);
         m_engine->rebuild(enumerateMonitors());
 
@@ -610,42 +574,12 @@ protected:
 
     void settingsChanged(const Json& settings) override
     {
-        // LAST WRITER WINS, PER KEY. The card push used to be re-overridden by
-        // the search-bar's pinned file right after, so a value once typed into
-        // the search bar ("speed 3000") beat the card forever: the card showed
-        // 2000, the status row said 3000, and no card edit could change it.
-        //
-        // A key whose card value DIFFERS from the previous card push is an edit
-        // the user just made in the card, and it beats the pinned override for
-        // that key (and re-pins it). Keys the card did not touch keep the
-        // pinned value. One residual gap: re-typing the exact value already in
-        // the card is indistinguishable from a routine push, so it does not
-        // beat a pinned override — `reset` in the search bar always does.
         const cw::RawSettings cardRaw = rawFromJson(settings);
-        cw::Settings cardValues;
-        applySettings(cardRaw, cardValues, false);
-
-        cw::RawSettings cardEdits;
-        bool anyEdit = false;
-        if (m_hasCardMirror) {
-            for (const cw::SettingsField& field : cw::settingsFields()) {
-                if (!rawCarries(cardRaw, field))
-                    continue;
-                if (fieldValue(field, cardValues) != fieldValue(field, m_cardMirror)) {
-                    markOverride(cardEdits, field, cardValues);
-                    anyEdit = true;
-                }
-            }
-        }
-        m_cardMirror = cardValues;
-        m_hasCardMirror = true;
-
-        // Host card first (defaults + the user's values), then the search
-        // bar's overrides on top, then the card's fresh edits last.
         applySettings(cardRaw, m_settings, true);
-        loadOverridesFromDisk();
-        if (anyEdit)
-            applySettings(cardEdits, m_settings, true);
+        // Host notifications are authoritative, including values equal to
+        // defaults. Never put the legacy search-bar file back on top.
+        deleteFile(overridePath(dataDir()));
+        m_overrides = false;
         if (m_engine) {
             m_engine->setSettings(m_settings);
             // The adjacency tolerance changes the topology itself.
@@ -655,12 +589,7 @@ protected:
             m_hook->updateSettings(m_settings);
         // The two windows are settings now, so the settings page drives them.
         applyWindowSettings();
-        // The card's edits re-pin their keys: without this the next restart
-        // would re-apply the file's stale value over the card's new one.
-        if (anyEdit) {
-            std::lock_guard lock(m_persistMutex);
-            persistOverrides();
-        }
+        refresh();
     }
 
     void shuttingDown() override
@@ -1032,6 +961,15 @@ private:
 
     void pushSettings()
     {
+        Json::Object values;
+        for (const auto& field : cw::settingsFields()) {
+            switch (field.kind) {
+            case cw::FieldKind::Bool: values[field.key] = field.boolean(m_settings); break;
+            case cw::FieldKind::Number: values[field.key] = static_cast<double>(field.number(m_settings)); break;
+            case cw::FieldKind::Text: values[field.key] = field.text(m_settings); break;
+            }
+        }
+        updateHostSettings(std::move(values));
         if (m_engine)
             m_engine->setSettings(m_settings);
         if (m_hook)
@@ -1765,9 +1703,6 @@ private:
     bool m_watcherOk = false;
     bool m_hookEnabled = true;
     bool m_overrides = false;
-    // The card's values as of its previous push (the last-writer-wins sync).
-    cw::Settings m_cardMirror;
-    bool m_hasCardMirror = false;
 };
 
 int main()

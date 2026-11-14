@@ -9,6 +9,24 @@ single source of truth; release tags are `v<version>`.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-15
+
+### Fixed
+
+- **The settings card and search bar now share one live source of truth.**
+  Search-bar changes are sent to the host through `winshun/settings/update`,
+  the host stores the declared settings, and the next restart feeds the same
+  values back to the plugin. The plugin no longer reapplies its legacy local
+  override file after a card update, so a stale search-bar speed cannot keep
+  winning forever.
+
+### Added
+
+- The protocol round-trip fixture now behaves like the host: it receives and
+  persists `winshun/settings/update`, then sends the merged values back on
+  restart. The settings persistence checks cover search-bar updates followed
+  by card changes, including turning acceleration back off.
+
 ## [0.9.0] - 2026-11-15
 
 ### Fixed

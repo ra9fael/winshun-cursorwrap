@@ -50,6 +50,11 @@ class Driver:
         self.next_id = 1
         self.data_dir = data_dir
         self.pending: list[str] = []
+        # The real host persists winshun/settings/update and sends the merged
+        # values on the next initialize. Keep that host-side state in the
+        # protocol fixture too; otherwise a restart test silently resets the
+        # plugin to the manifest defaults and falsely reports a persistence bug.
+        self.host_settings = default_settings()
 
     def send(self, method: str, params: dict) -> int:
         msg_id = self.next_id
@@ -77,6 +82,9 @@ class Driver:
                 msg = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if msg.get("method") == "winshun/settings/update":
+                self.host_settings.update(msg.get("params", {}).get("settings", {}))
+                continue
             if msg.get("id") == msg_id and ("result" in msg or "error" in msg):
                 return msg
             self.pending.append(line)
@@ -90,7 +98,7 @@ class Driver:
             "dataDir": str(self.data_dir),
             "locale": "zh",
             "theme": "dark",
-            "settings": default_settings(),
+            "settings": self.host_settings.copy(),
         })
         return self.read_until_response(msg_id)
 
@@ -116,6 +124,7 @@ class Driver:
         return self.read_until_response(msg_id)
 
     def settings_changed(self, settings: dict) -> None:
+        self.host_settings.update(settings)
         self.notify("settingsChanged", {"settings": settings})
 
     def cancel(self, query_id: int) -> None:
@@ -558,17 +567,18 @@ def run(exe: Path) -> int:
                     if i.get("id") == "cursorwrap.accel" and i.get("subtitle")]
 
         restarted = Driver(exe, data_dir)
+        restarted.host_settings = drv.host_settings.copy()
         restarted.initialize()
         check(current_accel(restarted) == ["2000 px/s\u00b2"],
               "the accel setting is still 2000 after a restart",
               str(current_accel(restarted)))
 
-        # A settings-card change must not undo it either: the card is authoritative
-        # for keys the search bar never touched, and this one WAS touched.
+        # Explicitly disabling acceleration in the card must beat the old
+        # search value, including when zero is the manifest default.
         restarted.settings_changed(default_settings(wrapMode="vertical", impactAccelPps2=0))
         time.sleep(0.4)
-        check(current_accel(restarted) == ["2000 px/s\u00b2"],
-              "a card change to another key keeps the search-bar accel",
+        check(current_accel(restarted) != ["2000 px/s\u00b2"],
+              "the card can disable previously pinned acceleration",
               str(current_accel(restarted)))
         restarted.close()
 

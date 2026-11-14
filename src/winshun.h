@@ -918,6 +918,10 @@ public:
     // shows it, Win顺 asks again now instead of when `rerun` is up. Call it
     // after the state the next query reads is written. Otherwise nothing.
     void refresh() { notify("winshun/refresh", Json::Object {}); }
+    void updateHostSettings(Json values)
+    {
+        notify("winshun/settings/update", Json::Object {{"settings", std::move(values)}});
+    }
     // One of Win顺's tools (the same names and arguments as its MCP tools:
     // search_files, search_content, recent_files, list_folder, get_file_info,
     // open_item, show_in_folder, clipboard_history, clipboard_get,
