@@ -433,7 +433,7 @@ struct ApproachMeasure {
 };
 
 private:
-    bool withinGuard(int64_t x, int64_t y) const;
+    bool withinGuard(int64_t x, int64_t y, const Sample& sample) const;
     CursorDirection direction(const Sample& s) const;
     // Signed approach speed and forward acceleration toward `edge` over the
     // last continuous stroke clipped to the approach band; 0/0 when it cannot
@@ -450,6 +450,7 @@ private:
     bool m_hasPrevious = false;
     Sample m_lastWrap { kNever, kNever };
     bool m_hasLastWrap = false;
+    long long m_lastWrapTimeUs = 0; // when the wrap happened (the landing guard's cooldown)
     EdgeVerdict m_verdict; // the latest edge arrival, for the overlay
     EdgeVerdict m_arrivalVerdict; // latched arrival, for the readout (see above)
     std::vector<Arrival> m_arrivals; // bounded trace, for the tuner

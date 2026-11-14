@@ -47,6 +47,7 @@
 // The exit code is 0 when every expectation held.
 #include "data_window.h"
 #include "overlay.h"
+#include "qpc_time.h"
 #include "settings_store.h"
 #include "wrap_logic.h"
 #include "wrap_topology.h"
@@ -57,6 +58,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <sstream>
 #include <memory>
 #include <string>
 #include <thread>
@@ -264,6 +266,17 @@ int64_t edgeTargetX(const WrapEngine& engine)
     return target;
 }
 
+// The scenario clock's base: real QPC microseconds, the same clock the
+// overlay's fade and freshness run on (see m_clockUs).
+long long scenarioClockUs()
+{
+    LARGE_INTEGER now {}, freq {};
+    if (!QueryPerformanceFrequency(&freq) || freq.QuadPart <= 0
+        || !QueryPerformanceCounter(&now))
+        return 1'000'000;
+    return cw::counterToUs(now.QuadPart, freq.QuadPart);
+}
+
 const char* edgeName(EdgeType edge)
 {
     switch (edge) {
@@ -388,7 +401,15 @@ private:
     long long m_lastSpeed = 0;
     long long m_lastAccel = 0;
     bool m_lastWrapped = false;
-    long long m_clockUs = 1'000'000;
+    // The scenario clock. It starts at the REAL QueryPerformanceCounter, not
+    // at a small fictional base: the overlay's readout freshness compares the
+    // verdict's tUs against the real clock, and with a fictional base every
+    // verdict read "two seconds old" the moment it was made — the shell could
+    // never see the readout even though the real machine does. Timestamps land
+    // slightly in the future (a scripted hand compresses 400 ms of samples into
+    // ~5 ms of real time), which the freshness check reads as fresh; `wait`
+    // advances this clock so long scenarios stay roughly in sync.
+    long long m_clockUs = scenarioClockUs();
 };
 
 void Scenario::check(bool ok, const std::string& text)
@@ -487,6 +508,11 @@ void Scenario::dumpState()
                   edgeName(v.edge), v.measuredPps, v.thresholdPps, v.measuredAccelPps2,
                   v.thresholdAccelPps2, v.wrapped ? 1 : 0);
     note(buf);
+    if (m_overlay)
+        note("  overlay: active=" + std::string(m_overlay->active() ? "1" : "0")
+             + " repaints=" + std::to_string(m_overlay->debugRepaints())
+             + " timers=" + std::to_string(m_overlay->debugTimers())
+             + " messages=" + std::to_string(m_overlay->debugMessages()));
 }
 
 DataSnapshot Scenario::snapshot()
@@ -578,6 +604,57 @@ bool Scenario::run(const std::string& rawLine)
             }
             e.kind = "flash";
             e.value = parts[2] == "on" ? 1 : 0;
+        } else if (what == "readout") {
+            // expect readout on|off -- the edge readout is showing. Unlike the
+            // glow it is judged immediately: the readout is not a one-frame
+            // effect, it lingers while the verdict is fresh.
+            if (parts.size() < 3 || (parts[2] != "on" && parts[2] != "off")) {
+                note("FAIL readout expectation needs on|off: " + line);
+                ++m_failures;
+                ++m_checks;
+                return false;
+            }
+            const bool on = m_overlay && m_overlay->readoutVisible();
+            if (on != (parts[2] == "on")) {
+                // Diagnostic for a failed expectation: the freshness window is
+                // the usual suspect, so print the age of the latched verdict.
+                const cw::EdgeVerdict v = m_engine ? m_engine->lastArrivalVerdict()
+                                                   : cw::EdgeVerdict {};
+                LARGE_INTEGER now {}, freq {};
+                QueryPerformanceCounter(&now);
+                QueryPerformanceFrequency(&freq);
+                const long long ageMs = v.tUs > 0
+                    ? (cw::counterToUs(now.QuadPart, freq.QuadPart) - v.tUs) / 1000 : -1;
+                std::string dbg;
+                if (m_overlay)
+                    dbg = ", repaints=" + std::to_string(m_overlay->debugRepaints())
+                        + " builds=" + std::to_string(m_overlay->debugBuilds())
+                        + " hides=" + std::to_string(m_overlay->debugHides())
+                        + " lastFresh=" + (m_overlay->debugLastFresh() ? "1" : "0")
+                        + " lastTuning=" + (m_overlay->debugLastTuning() ? "1" : "0")
+                        + " overlayActive=" + (m_overlay->active() ? "1" : "0")
+                        + " runEntered=" + (m_overlay->debugRunEntered() ? "1" : "0")
+                        + " stripsBuilt=" + (m_overlay->debugStripsBuilt() ? "1" : "0")
+                        + " anchorReady=" + (m_overlay->debugAnchorReady() ? "1" : "0")
+                        + " loopExited=" + (m_overlay->debugLoopExited() ? "1" : "0")
+                        + " loopResult=" + std::to_string(m_overlay->debugLoopResult())
+                        + " messages=" + std::to_string(m_overlay->debugMessages())
+                        + " timers=" + std::to_string(m_overlay->debugTimers())
+                        + " setTimerOk=" + (m_overlay->debugSetTimerOk() ? "1" : "0")
+                        + " setTimerErr=" + std::to_string(m_overlay->debugSetTimerError())
+                        + " lastMsg=0x" + [&] {
+                              std::ostringstream os;
+                              os << std::hex << m_overlay->debugLastMsg();
+                              return os.str();
+                          }();
+                note("FAIL readout diagnostics: verdict tUs age = " + std::to_string(ageMs)
+                     + " ms, measured=" + std::to_string(v.measuredPps) + ", gate="
+                     + std::to_string(v.thresholdPps) + ", monitor="
+                     + std::to_string(v.monitorIndex) + dbg);
+            }
+            check(on == (parts[2] == "on"), line + " -> expected the readout " + parts[2]
+                                               + ", it is " + (on ? "on" : "off"));
+            return true;
         } else if (what == "at") {
             if (parts.size() < 4 || !parseInt(parts[2], e.value)
                 || !parseInt(parts[3], e.value2)) {
@@ -616,6 +693,9 @@ bool Scenario::run(const std::string& rawLine)
         if (parts.size() > 1)
             parseInt(parts[1], ms);
         std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+        // Real time passed, so the scenario clock passes too: the verdicts stay
+        // roughly comparable with the overlay's real-time freshness window.
+        m_clockUs += ms * 1000;
         // A wait is what lets a timed effect (the impact glow, driven by the
         // overlay's 60 ms repaint) reach its next state, so a queued `flash`
         // expectation can be judged after it. Without this it sat in the queue

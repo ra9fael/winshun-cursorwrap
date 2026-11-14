@@ -229,16 +229,34 @@ CursorDirection WrapEngine::direction(const Sample& s) const
     return d;
 }
 
-bool WrapEngine::withinGuard(int64_t x, int64_t y) const
+bool WrapEngine::withinGuard(int64_t x, int64_t y, const Sample& sample) const
 {
     // (1) SPACE — near the LANDING point. A wrap teleports the pointer, so the
     // hand is still where it was; without this the next sample wraps straight
     // back. PowerToys' CursorWrap has exactly this (WRAP_DISTANCE_THRESHOLD=50).
+    //
+    // The landing circle TRAPS a push at the landing edge, though: an R->L wrap
+    // lands ON the right monitor's right edge, and the next L->R gesture pins
+    // the pointer there — clamped, it can never travel the 50 px out of the
+    // circle, so "push right at the edge" refused forever (the user's "从左到右
+    // 无法穿越": their R->L test succeeded first and left the landing behind).
+    // With the impact gate ON the circle is redundant anyway: a pinned push has
+    // no measurable travel and the gate refuses it fail-closed, while a real
+    // run-up measures and wraps. So on the gated path the circle expires after
+    // a short cooldown — long enough to swallow the hand's residual push, short
+    // enough that the next deliberate push gets an honest gate verdict instead
+    // of an opaque "guard · blocked" forever. The gate-off path keeps the pure
+    // space guard: that is PowerToys' semantics and normal mode must not move.
+    static constexpr long long kGateLandingGuardUs = 300 * 1000;
     if (m_hasLastWrap) {
         const int64_t dx = x - m_lastWrap.x;
         const int64_t dy = y - m_lastWrap.y;
         const int64_t guard = m_settings.wrapGuardPx;
-        if (dx * dx + dy * dy <= guard * guard)
+        const bool inside = dx * dx + dy * dy <= guard * guard;
+        const bool expired = m_settings.impactGate && m_lastWrapTimeUs > 0
+            && sample.tUs >= m_lastWrapTimeUs
+            && sample.tUs - m_lastWrapTimeUs > kGateLandingGuardUs;
+        if (inside && !expired)
             return true;
     }
     // (2) PUSH — one continuous push is one wrap, however long the hand holds.
@@ -596,7 +614,7 @@ std::pair<int64_t, int64_t> WrapEngine::onMouseMove(const Sample& sample, bool m
             m_wrapMonitor = -1;
         }
     }
-    if (withinGuard(sample.x, sample.y)) {
+    if (withinGuard(sample.x, sample.y, sample)) {
         m_verdict.tUs = sample.tUs;
         m_verdict.x = sample.x;
         m_verdict.y = sample.y;
@@ -758,6 +776,7 @@ std::pair<int64_t, int64_t> WrapEngine::onMouseMove(const Sample& sample, bool m
     if (nx != sample.x || ny != sample.y) {
         m_lastWrap = { nx, ny };
         m_hasLastWrap = true;
+        m_lastWrapTimeUs = sample.tUs;
         m_hasWrapEdge = true;
         m_wrapEdge = edge;
         m_wrapMonitor = index;
@@ -795,6 +814,7 @@ void WrapEngine::onWrapFailed()
     // never reached: leave it unarmed and let the next sample decide again. The
     // cooldown is cleared too — this wrap never happened.
     m_hasLastWrap = false;
+    m_lastWrapTimeUs = 0;
     m_hasWrapEdge = false;
     m_wrapMonitor = -1;
     m_hasArrivalEdge = false;

@@ -132,6 +132,40 @@ void markOverride(cw::RawSettings& raw, const cw::SettingsField& field,
     }
 }
 
+// Whether the card's push carries this field at all (the has* flags mirror
+// markOverride's switch; the two must list the same keys).
+bool rawCarries(const cw::RawSettings& raw, const cw::SettingsField& field)
+{
+    const std::string key = field.key;
+    if (key == "wrapMode") return raw.hasWrapMode;
+    if (key == "activationMode") return raw.hasActivation;
+    if (key == "disableDuringDrag") return raw.hasDrag;
+    if (key == "disableOnSingleMonitor") return raw.hasSingle;
+    if (key == "edgeThresholdPx") return raw.hasEdgeThreshold;
+    if (key == "wrapGuardPx") return raw.hasWrapGuard;
+    if (key == "adjacencyTolerancePx") return raw.hasAdjacency;
+    if (key == "impactGate") return raw.hasImpactGate;
+    if (key == "impactSpeedPps") return raw.hasImpactSpeed;
+    if (key == "impactBandPx") return raw.hasImpactBand;
+    if (key == "impactAccelPps2") return raw.hasImpactAccel;
+    if (key == "tuningOverlay") return raw.hasTuningOverlay;
+    if (key == "dataWindow") return raw.hasDataWindow;
+    if (key == "impactFlash") return raw.hasImpactFlash;
+    return false;
+}
+
+// The field's value as text, so two Settings can be compared per field without
+// a per-kind switch at every call site.
+std::string fieldValue(const cw::SettingsField& field, const cw::Settings& s)
+{
+    switch (field.kind) {
+    case cw::FieldKind::Number: return std::to_string(field.number(s));
+    case cw::FieldKind::Bool: return std::to_string(field.boolean(s) ? 1 : 0);
+    case cw::FieldKind::Text: return field.text(s);
+    }
+    return {};
+}
+
 cw::RawSettings rawFromJson(const Json& s)
 {
     cw::RawSettings raw;
@@ -292,8 +326,11 @@ protected:
     void initialized() override
     {
         // Host card first (defaults + the user's values), then the search
-        // bar's overrides on top.
+        // bar's overrides on top. The card mirror starts here: the startup
+        // push is not an edit, so nothing beats the pinned overrides yet.
         applySettings(rawFromJson(settings()), m_settings, false);
+        m_cardMirror = m_settings;
+        m_hasCardMirror = true;
         loadOverridesFromDisk();
         m_engine = std::make_unique<cw::WrapEngine>(m_settings);
         m_engine->rebuild(enumerateMonitors());
@@ -516,6 +553,18 @@ protected:
                 } else if (field == "mode") {
                     m_settings.wrapMode = static_cast<cw::WrapMode>(value);
                     after = modeMenu();
+                } else if (field == "impact") {
+                    m_settings.impactGate = value != 0;
+                    after = impactMenu();
+                } else if (field == "tuner") {
+                    m_settings.tuningOverlay = value != 0;
+                    after = tunerMenu();
+                } else if (field == "flash") {
+                    m_settings.impactFlash = value != 0;
+                    after = settingsList(); // the flash row toggles in place; no submenu of its own
+                } else if (field == "data") {
+                    m_settings.dataWindow = value != 0;
+                    after = dataMenu();
                 }
                 if (!after.empty()) {
                     persistOverrides();
@@ -561,10 +610,42 @@ protected:
 
     void settingsChanged(const Json& settings) override
     {
-        // The host card is authoritative for keys the search bar has not
-        // overridden: start from the host's values, then re-apply the file.
-        applySettings(rawFromJson(settings), m_settings, true);
+        // LAST WRITER WINS, PER KEY. The card push used to be re-overridden by
+        // the search-bar's pinned file right after, so a value once typed into
+        // the search bar ("speed 3000") beat the card forever: the card showed
+        // 2000, the status row said 3000, and no card edit could change it.
+        //
+        // A key whose card value DIFFERS from the previous card push is an edit
+        // the user just made in the card, and it beats the pinned override for
+        // that key (and re-pins it). Keys the card did not touch keep the
+        // pinned value. One residual gap: re-typing the exact value already in
+        // the card is indistinguishable from a routine push, so it does not
+        // beat a pinned override — `reset` in the search bar always does.
+        const cw::RawSettings cardRaw = rawFromJson(settings);
+        cw::Settings cardValues;
+        applySettings(cardRaw, cardValues, false);
+
+        cw::RawSettings cardEdits;
+        bool anyEdit = false;
+        if (m_hasCardMirror) {
+            for (const cw::SettingsField& field : cw::settingsFields()) {
+                if (!rawCarries(cardRaw, field))
+                    continue;
+                if (fieldValue(field, cardValues) != fieldValue(field, m_cardMirror)) {
+                    markOverride(cardEdits, field, cardValues);
+                    anyEdit = true;
+                }
+            }
+        }
+        m_cardMirror = cardValues;
+        m_hasCardMirror = true;
+
+        // Host card first (defaults + the user's values), then the search
+        // bar's overrides on top, then the card's fresh edits last.
+        applySettings(cardRaw, m_settings, true);
         loadOverridesFromDisk();
+        if (anyEdit)
+            applySettings(cardEdits, m_settings, true);
         if (m_engine) {
             m_engine->setSettings(m_settings);
             // The adjacency tolerance changes the topology itself.
@@ -574,6 +655,12 @@ protected:
             m_hook->updateSettings(m_settings);
         // The two windows are settings now, so the settings page drives them.
         applyWindowSettings();
+        // The card's edits re-pin their keys: without this the next restart
+        // would re-apply the file's stale value over the card's new one.
+        if (anyEdit) {
+            std::lock_guard lock(m_persistMutex);
+            persistOverrides();
+        }
     }
 
     void shuttingDown() override
@@ -1053,9 +1140,11 @@ private:
                                 + (m_settings.impactGate
                                        ? (chinese ? "开" : "on")
                                        : (chinese ? "关" : "off")),
-                            chinese ? "Enter 切换 · 慢慢挪到边缘不回绕"
-                                    : "Enter to toggle · drifting to the edge does not wrap"));
-        rows.back().withActions({ {"toggleImpact", chinese ? "切换" : "Toggle", "Enter"} });
+                            chinese ? "Enter 切换 · 右键菜单可直接选开或关"
+                                    : "Enter to toggle · the context menu picks on or off"));
+        rows.back().withActions({ { "toggleImpact", chinese ? "切换" : "Toggle", "Enter" },
+            { "set:impact:1", chinese ? "开" : "On", "Ctrl+Enter" },
+            { "set:impact:0", chinese ? "关" : "Off", "Shift+Enter" } });
 
         rows.push_back(drillRow("cursorwrap.row.speed",
                                 std::string(chinese ? "撞击速度：" : "Impact speed: ")
@@ -1115,39 +1204,58 @@ private:
                                 std::string(chinese ? "拖拽时不回绕：" : "No wrap while dragging: ")
                                     + (m_settings.disableDuringDrag ? (chinese ? "开" : "on")
                                                                     : (chinese ? "关" : "off")),
-                                chinese ? "Enter 选择开关" : "Enter to pick on or off",
+                                chinese ? "Enter 选择开关 · 右键菜单可直接选开或关"
+                                        : "Enter to pick on or off · the context menu too",
                                 "cursorwrap drag "));
+        rows.back().withActions({ { "enterDrill", chinese ? "切换" : "Toggle", "Enter" },
+            { "set:drag:1", chinese ? "开" : "On", "Ctrl+Enter" },
+            { "set:drag:0", chinese ? "关" : "Off", "Shift+Enter" } });
 
         rows.push_back(drillRow("cursorwrap.row.single",
                                 std::string(chinese ? "单屏时禁用：" : "Disable on one monitor: ")
                                     + (m_settings.disableOnSingleMonitor ? (chinese ? "开" : "on")
                                                                          : (chinese ? "关" : "off")),
-                                chinese ? "Enter 选择开关" : "Enter to pick on or off",
+                                chinese ? "Enter 选择开关 · 右键菜单可直接选开或关"
+                                        : "Enter to pick on or off · the context menu too",
                                 "cursorwrap single "));
+        // The drill wins Enter (performPlugin prefers setQuery at index 0), so
+        // the row's own actions sit at Ctrl+Enter/Shift+Enter and the context
+        // menu; the first entry names what Enter honestly does.
+        rows.back().withActions({ { "enterDrill", chinese ? "切换" : "Toggle", "Enter" },
+            { "set:single:1", chinese ? "开" : "On", "Ctrl+Enter" },
+            { "set:single:0", chinese ? "关" : "Off", "Shift+Enter" } });
 
         rows.push_back(drillRow("cursorwrap.row.tuner",
                                 std::string(chinese ? "调参可视化：" : "Tuning overlay: ")
                                     + (m_settings.tuningOverlay ? (chinese ? "开" : "on")
                                                                 : (chinese ? "关" : "off")),
-                                chinese ? "Enter 打开子菜单（开关 / 区间 / 门槛 / 防震 / 阈值）"
-                                        : "Enter for the submenu (switch, band, gate, guard, threshold)",
-                                "cursorwrap tune "));
+                                chinese ? "Enter 打开子菜单（开关 / 区间 / 门槛 / 防震 / 阈值）· 右键菜单可直接选开或关"
+                                        : "Enter for the submenu (switch, band, gate, guard, threshold) · the context menu picks on or off",                                "cursorwrap tune "));
+        rows.back().withActions({ { "enterDrill", chinese ? "打开子菜单" : "Submenu", "Enter" },
+            { "set:tuner:1", chinese ? "开" : "On", "Ctrl+Enter" },
+            { "set:tuner:0", chinese ? "关" : "Off", "Shift+Enter" } });
 
         rows.push_back(drillRow("cursorwrap.row.flash",
                                 std::string(chinese ? "撞击穿越光效：" : "Impact glow: ")
                                     + (m_settings.impactFlash ? (chinese ? "开" : "on")
                                                               : (chinese ? "关" : "off")),
-                                chinese ? "Enter 切换；成功撞击穿越时沿边亮一下，纯装饰"
-                                        : "Enter to toggle; a short glow along the edge after a successful impact wrap, decoration only",
+                                chinese ? "Enter 切换；成功撞击穿越时沿边亮一下，纯装饰 · 右键菜单可直接选开或关"
+                                        : "Enter to toggle; a short glow along the edge after a successful impact wrap, decoration only · the context menu picks on or off",
                                 "cursorwrap flash "));
+        rows.back().withActions({ { "enterDrill", chinese ? "切换" : "Toggle", "Enter" },
+            { "set:flash:1", chinese ? "开" : "On", "Ctrl+Enter" },
+            { "set:flash:0", chinese ? "关" : "Off", "Shift+Enter" } });
 
         rows.push_back(drillRow("cursorwrap.row.data",
                                 std::string(chinese ? "数据窗口：" : "Data window: ")
                                     + (m_settings.dataWindow ? (chinese ? "开" : "on")
                                                              : (chinese ? "关" : "off")),
-                                chinese ? "Enter 打开子菜单（开关 / 决策日志 / 原因计数）"
-                                        : "Enter for the submenu (switch, decision log, skip reasons)",
+                                chinese ? "Enter 打开子菜单（开关 / 决策日志 / 原因计数）· 右键菜单可直接选开或关"
+                                        : "Enter for the submenu (switch, decision log, skip reasons) · the context menu picks on or off",
                                 "cursorwrap data "));
+        rows.back().withActions({ { "enterDrill", chinese ? "打开子菜单" : "Submenu", "Enter" },
+            { "set:data:1", chinese ? "开" : "On", "Ctrl+Enter" },
+            { "set:data:0", chinese ? "关" : "Off", "Shift+Enter" } });
 
         rows.push_back(drillRow("cursorwrap.row.best",
                                 std::string(chinese ? "建议门槛：" : "Suggested gate: ")
@@ -1657,6 +1765,9 @@ private:
     bool m_watcherOk = false;
     bool m_hookEnabled = true;
     bool m_overrides = false;
+    // The card's values as of its previous push (the last-writer-wins sync).
+    cw::Settings m_cardMirror;
+    bool m_hasCardMirror = false;
 };
 
 int main()

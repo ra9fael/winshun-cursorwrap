@@ -64,6 +64,25 @@ public:
     // scenario DSL: the glow is decoration, and its trigger rule is the only
     // part of it worth asserting.
     bool impactFlashVisible() const;
+    // Whether the edge readout is on screen right now (the scenario DSL
+    // asserts refused arrivals still show their measured numbers).
+    bool readoutVisible() const { return m_readout.shown; }
+    // TEMPORARY diagnostics for the readout-not-showing investigation.
+    long long debugRepaints() const { return m_debugRepaints.load(); }
+    long long debugBuilds() const { return m_debugBuilds.load(); }
+    long long debugHides() const { return m_debugHides.load(); }
+    bool debugLastFresh() const { return m_debugLastFresh.load(); }
+    bool debugLastTuning() const { return m_debugLastTuning.load(); }
+    bool debugRunEntered() const { return m_debugRunEntered.load(); }
+    bool debugAnchorReady() const { return m_debugAnchorReady.load(); }
+    bool debugStripsBuilt() const { return m_debugStripsBuilt.load(); }
+    bool debugLoopExited() const { return m_debugLoopExited.load(); }
+    long long debugLoopResult() const { return m_debugLoopResult.load(); }
+    long long debugMessages() const { return m_debugMessages.load(); }
+    long long debugTimers() const { return m_debugTimers.load(); }
+    bool debugSetTimerOk() const { return m_debugSetTimerOk.load(); }
+    long long debugSetTimerError() const { return m_debugSetTimerError.load(); }
+    long long debugLastMsg() const { return m_debugLastMsg.load(); }
 
 private:
     // One layered surface with its own top-down 32bpp DIB.
@@ -134,6 +153,22 @@ private:
 
     std::mutex m_colorsMutex;
     Colors m_colors;
+    // TEMPORARY readout diagnostics.
+    std::atomic<long long> m_debugRepaints { 0 };
+    std::atomic<long long> m_debugBuilds { 0 };
+    std::atomic<long long> m_debugHides { 0 };
+    std::atomic<bool> m_debugLastFresh { false };
+    std::atomic<bool> m_debugLastTuning { false };
+    std::atomic<bool> m_debugRunEntered { false };
+    std::atomic<bool> m_debugAnchorReady { false };
+    std::atomic<bool> m_debugStripsBuilt { false };
+    std::atomic<bool> m_debugLoopExited { false };
+    std::atomic<long long> m_debugLoopResult { 0 };
+    std::atomic<long long> m_debugMessages { 0 };
+    std::atomic<long long> m_debugTimers { 0 };
+    std::atomic<bool> m_debugSetTimerOk { false };
+    std::atomic<long long> m_debugSetTimerError { 0 };
+    std::atomic<long long> m_debugLastMsg { 0 };
 };
 
 } // namespace cw

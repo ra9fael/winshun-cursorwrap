@@ -174,3 +174,60 @@ CW_TEST(verdict_wrapped_and_guard_blocked_are_mutually_exclusive)
         }
     }
 }
+// --- the gated landing guard's time expiry ---------------------------------
+//
+// An R->L wrap lands ON the destination monitor's right edge. The next L->R
+// gesture pins the pointer there: clamped, it can never travel the guard's
+// 50 px, so the landing circle refused it forever ("从左到右无法穿越"). With
+// the impact gate on, the circle expires after a short cooldown; the gate
+// itself refuses a pinned push (no travel -> unmeasurable -> fail closed), so
+// the guard is not needed to stop a bounce-back.
+
+CW_TEST(gated_landing_guard_expires_but_normal_mode_does_not)
+{
+    WrapEngine gated;
+    {
+        Settings s;
+        s.impactGate = true;
+        s.impactSpeedPps = 2000;
+        s.impactBandPx = 400;
+        gated.setSettings(s);
+    }
+    gated.rebuild({ single() });
+    Driver d { gated };
+    // A fast approach so the gate can measure. The approach starts INSIDE the
+    // band (400 px): the band is a hard limit, and a stroke that starts outside
+    // it measures nothing — that is documented behaviour, not the trap here.
+    // Wrap at the right edge, landing at x=1 — which is ON the left outer edge
+    // (threshold 1), exactly the trap shape the user hit on their right
+    // monitor's right edge.
+    CW_CHECK_EQ(d.move(1600, 540).first, 1600);
+    CW_CHECK_EQ(d.move(1919, 540).first, 1);
+
+    // Right after the wrap the circle still holds: a sample pinned at the
+    // landing is guard-blocked, not a gate verdict.
+    const auto [bx, by] = d.move(1, 540, 100'000); // +100 ms
+    (void)bx;
+    (void)by;
+    CW_CHECK(d.verdict().guardBlocked);
+
+    // Past the cooldown the same pinned push is no longer guard-blocked: it
+    // reaches the gate, which measures zero travel and refuses fail-closed.
+    const auto [cx, cy] = d.move(1, 540, 300'000); // +400 ms since the wrap
+    (void)cx;
+    (void)cy;
+    CW_CHECK(!d.verdict().guardBlocked);
+    CW_CHECK(!d.verdict().wrapped);
+    CW_CHECK_EQ(d.verdict().measuredPps, 0);
+
+    // Normal mode (the gate off) keeps the pure space guard: the circle never
+    // expires there, because nothing else stands between a bounce and a wrap.
+    WrapEngine plain;
+    plain.rebuild({ single() });
+    Driver p { plain };
+    CW_CHECK_EQ(p.move(1919, 540).first, 1);
+    const auto [nx, ny] = p.move(1, 540, 500'000); // half a second later
+    (void)nx;
+    (void)ny;
+    CW_CHECK(p.verdict().guardBlocked);
+}

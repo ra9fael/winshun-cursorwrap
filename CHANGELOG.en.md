@@ -9,6 +9,19 @@ single source of truth; release tags are `v<version>`.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-15
+
+### Fixed
+
+- **Card edits were pinned down by the search bar's overrides ("the search bar always wins").** Every card push was followed by a full re-apply of the overrides file, so any key once typed into the search bar beat the card forever. Per-key last writer wins now: a key whose card value differs from the previous card push is an edit made in the card — its override is dropped, the card's value applies and re-pins. One residual gap: re-typing the exact number an override pins is indistinguishable from a routine push; `reset` in the search bar always recovers.
+- **The landing guard locked out the reverse gesture ("L->R never wraps, R->L does").** An R->L wrap lands ON the right monitor's right edge, and the next L->R gesture pins the pointer there: clamped, it can never travel the guard's 50 px, so the guard refused forever — any run-up shorter than 50 px fails regardless of direction (the side tested first simply had no stale landing). With the impact gate on, the circle is redundant anyway (a pinned push has no travel to measure; the gate refuses it fail-closed), so it expires after a 300 ms cooldown; normal mode keeps the pure space guard untouched. After the cooldown the same pinned push gets the honest gate reading (`0 / 3000 px/s`) instead of an opaque "guard · blocked" forever.
+- The context menu no longer swallows a drill row's actions: the menu now also names "fill the search box", and the footer's Enter hint stops lying about rows that carry both actions and a drill (it said "on" while Enter entered the submenu).
+
+### Added
+
+- **Context menus for the switch rows**: impact mode, disable-on-one-monitor, no-wrap-while-dragging, tuning overlay, impact glow and the data window all carry On (Ctrl+Enter) / Off (Shift+Enter) actions, selectable straight from the right-click menu; Enter is unchanged (toggle or submenu).
+- New scenario `dual-lr.txt`: two-display wrapping in both directions plus the landing-guard cooldown (flicks both ways, a pinned push at the landing, the honest reading after the cooldown).
+
 ## [0.8.0] - 2026-11-15
 
 ### Fixed

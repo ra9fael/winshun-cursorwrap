@@ -123,6 +123,7 @@ void Overlay::stop()
 
 void Overlay::run()
 {
+    m_debugRunEntered.store(true);
     g_overlay.store(this);
     m_threadId = GetCurrentThreadId();
 
@@ -140,6 +141,7 @@ void Overlay::run()
     }
     const Settings settings = m_engine ? m_engine->settings() : Settings {};
     rebuildStrips(settings, colors);
+    m_debugStripsBuilt.store(true);
 
     // The repaint timer lives on its own offscreen anchor window. It used to
     // sit on the first strip's window, which meant: no strips (a fresh start
@@ -148,14 +150,25 @@ void Overlay::run()
     m_anchor.hwnd = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, kClassName,
                                     L"cursorwrap timer", WS_POPUP, -32000, -32000, 1, 1,
                                     nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
-    if (m_anchor.hwnd)
-        SetTimer(m_anchor.hwnd, kTimerId, kRepaintMs, nullptr);
+    if (m_anchor.hwnd) {
+        const BOOL timerOk = SetTimer(m_anchor.hwnd, kTimerId, kRepaintMs, nullptr);
+        m_debugSetTimerOk.store(timerOk != 0);
+        m_debugSetTimerError.store(static_cast<long long>(GetLastError()));
+        m_debugAnchorReady.store(true);
+    }
 
     MSG msg;
-    while (m_running.load() && GetMessageW(&msg, nullptr, 0, 0) > 0) {
+    while (m_running.load()) {
+        const BOOL got = GetMessageW(&msg, nullptr, 0, 0);
+        if (got <= 0) {
+            m_debugLoopExited.store(true);
+            m_debugLoopResult.store(static_cast<long long>(got));
+            break;
+        }
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
+    m_debugLoopExited.store(true);
 
     for (Strip& strip : m_strips) {
         if (strip.layer.hwnd)
@@ -194,6 +207,10 @@ LRESULT CALLBACK Overlay::wndProcStatic(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
 
 LRESULT Overlay::wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
+    m_debugMessages.fetch_add(1);
+    m_debugLastMsg.store(static_cast<long long>(msg));
+    if (msg == WM_TIMER)
+        m_debugTimers.fetch_add(1);
     switch (msg) {
     case WM_TIMER:
         if (wp == kTimerId && m_engine) {
@@ -523,6 +540,7 @@ void Overlay::repaint(const Settings& settings, const Colors& colors)
 {
     if (!m_engine)
         return;
+    m_debugRepaints.fetch_add(1);
 
     // The band width is a setting, and the monitor layout can change: rebuild
     // the static strips when either moves.
@@ -586,9 +604,13 @@ void Overlay::repaint(const Settings& settings, const Colors& colors)
     }
 
     const bool fresh = shown.tUs > 0 && nowUs() - shown.tUs < kReadoutTtlUs;
+    m_debugLastFresh.store(fresh);
+    m_debugLastTuning.store(settings.tuningOverlay);
     if (!settings.tuningOverlay || !fresh) {
-        if (m_readoutShown)
+        if (m_readoutShown) {
             hideReadout();
+            m_debugHides.fetch_add(1);
+        }
         return;
     }
     if (shown.tUs == m_drawnVerdictUs && shown.measuredPps == m_drawnPps
@@ -597,6 +619,7 @@ void Overlay::repaint(const Settings& settings, const Colors& colors)
     m_drawnVerdictUs = shown.tUs;
     m_drawnPps = shown.measuredPps;
     m_drawnAccel = shown.measuredAccelPps2;
+    m_debugBuilds.fetch_add(1);
     buildReadout(shown, settings, colors);
 }
 

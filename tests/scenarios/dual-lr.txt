@@ -1,0 +1,44 @@
+# The user's report: L->R never wrapped while R->L did. The root cause was the
+# landing guard: an R->L wrap lands ON the right monitor's right edge, and an
+# L->R push from that landing pins the pointer against the edge — it can never
+# travel the 50 px out of the guard circle, so the guard refused forever. With
+# the impact gate on, the landing circle now expires after 300 ms (a pinned
+# push has no travel for the gate to measure, so the gate still refuses a
+# bounce-back fail-closed), and a real run-up wraps.
+monitor 0,0,2560,1440,0,0,2560,1392;2560,0,5120,1440,2560,0,5120,1392
+set mode horizontal
+set edge 1
+set guard 50
+set tol 10
+set impactGate on
+set speed 3000
+set band 200
+set accel 0
+set tuningOverlay on
+wait 300
+
+# (1) L->R: a jittery flick into the far right edge wraps...
+move 200 540 8
+hand 4500 3400 3500 1000 400 8
+expect wrap
+wait 70
+expect readout on
+
+# (2) ...and R->L does too.
+move 600 540 8
+stroke 600 540 0 540 8 8
+expect wrap
+wait 70
+expect readout on
+
+# (3) A push from the fresh landing is still swallowed by the guard: the hand
+# has not stopped yet, and this is the bounce the guard exists for.
+move 5118 540 8
+expect no-wrap
+wait 350
+
+# (4) The SAME pinned push, after the cooldown: no longer guard-blocked, and
+# the gate gives the honest answer (a pinned push has no speed to measure).
+move 5118 540 8
+expect no-wrap
+expect speed< 3000
