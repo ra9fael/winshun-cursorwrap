@@ -9,6 +9,15 @@ single source of truth; release tags are `v<version>`.
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-11-15
+
+### Fixed
+
+- **The MSVC build compiles again.** `main.cpp` now includes `<algorithm>` for
+  `std::sort` (GCC pulled it in transitively), and the NaN/infinity settings
+  test uses `std::numeric_limits` instead of a literal division by zero, which
+  MSVC rejects at compile time. No behavior change.
+
 ## [0.10.0] - 2026-11-15
 
 ### Fixed

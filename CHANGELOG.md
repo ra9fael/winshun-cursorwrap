@@ -9,6 +9,14 @@ single source of truth; release tags are `v<version>`.
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-11-15
+
+### Fixed
+
+- **MSVC 构建恢复。** `main.cpp` 补上 `<algorithm>`：`std::sort` 原来只是被 GCC
+  间接带入，MSVC 不认识；NaN/infinity 设置测试改用 `std::numeric_limits`，不再写
+  字面量除以零（MSVC 在编译期直接报错）。行为没有变化。
+
 ## [0.10.0] - 2026-11-15
 
 ### Fixed
