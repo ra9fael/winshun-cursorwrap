@@ -5,6 +5,8 @@
 #include "test_harness.h"
 #include "wrap_logic.h"
 
+#include <limits>
+
 using namespace cw;
 
 namespace {
@@ -202,10 +204,10 @@ CW_TEST(settings_type_confusion_ignored)
 CW_TEST(settings_nan_rejected)
 {
     RawSettings raw;
-    const double nan = 0.0 / 0.0;
+    const double nan = std::numeric_limits<double>::quiet_NaN();
     raw.edgeThresholdPx = nan;
     raw.hasEdgeThreshold = true;
-    raw.wrapGuardPx = 1.0 / 0.0; // +inf
+    raw.wrapGuardPx = std::numeric_limits<double>::infinity(); // +inf
     raw.hasWrapGuard = true;
     Settings s;
     applySettings(raw, s, false);

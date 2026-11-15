@@ -23,6 +23,7 @@
 #include "settings_store.h"
 #include "wrap_logic.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
