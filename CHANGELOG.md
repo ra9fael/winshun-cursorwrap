@@ -9,6 +9,13 @@ single source of truth; release tags are `v<version>`.
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-11-15
+
+### Fixed
+
+- 随包发布的两个 PowerShell 开发脚本改为带 BOM 的 UTF-8：Windows PowerShell 5.1
+  读中文不再乱码，也满足插件库静态检查对 `.ps1` 编码的要求。功能没有变化。
+
 ## [0.10.1] - 2026-11-15
 
 ### Fixed

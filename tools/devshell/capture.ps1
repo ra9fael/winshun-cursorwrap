@@ -1,4 +1,4 @@
-# capture.ps1 — take a screenshot of the dev shell while it holds its windows
+﻿# capture.ps1 — take a screenshot of the dev shell while it holds its windows
 # open, so the overlay and the data window can be inspected (and diffed against
 # a run with them off).
 #

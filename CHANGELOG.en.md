@@ -9,6 +9,15 @@ single source of truth; release tags are `v<version>`.
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-11-15
+
+### Fixed
+
+- The two PowerShell dev scripts shipped in the package are stored as UTF-8
+  with BOM, so Windows PowerShell 5.1 no longer garbles their Chinese text; the
+  plugin registry's static check requires that encoding for `.ps1` files. No
+  behavior change.
+
 ## [0.10.1] - 2026-11-15
 
 ### Fixed
