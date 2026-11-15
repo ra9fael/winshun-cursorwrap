@@ -16,6 +16,8 @@ single source of truth; release tags are `v<version>`.
 - **MSVC 构建恢复。** `main.cpp` 补上 `<algorithm>`：`std::sort` 原来只是被 GCC
   间接带入，MSVC 不认识；NaN/infinity 设置测试改用 `std::numeric_limits`，不再写
   字面量除以零（MSVC 在编译期直接报错）。行为没有变化。
+- 静态检查不再要求检出目录名等于插件 id：GitHub Actions 的检出目录是仓库名
+  `winshun-cursorwrap`，只有 id 形态的本地目录（带点）才继续比对。本机布局照旧。
 
 ## [0.10.0] - 2026-11-15
 

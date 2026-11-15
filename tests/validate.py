@@ -56,7 +56,10 @@ def validate_manifest() -> dict:
           "plugin.json must point $schema at the WinShun plugin schema")
     check(manifest.get("manifest") == 1, "manifest must be 1")
     check(manifest.get("id") == "ra9fael.cursorwrap", "id must be ra9fael.cursorwrap")
-    check(ROOT.name == manifest.get("id"), f"folder name {ROOT.name!r} must equal the id")
+    # A GitHub Actions checkout is named after the repository (winshun-cursorwrap),
+    # not after the plugin id, so only enforce the id for an id-shaped local folder.
+    if "." in ROOT.name:
+        check(ROOT.name == manifest.get("id"), f"folder name {ROOT.name!r} must equal the id")
     version = manifest.get("version", "")
     check(bool(re.fullmatch(r"\d+\.\d+\.\d+", version)), f"version {version!r} must be X.Y.Z")
     for field in ("author", "license"):

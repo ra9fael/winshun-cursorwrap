@@ -17,6 +17,9 @@ single source of truth; release tags are `v<version>`.
   `std::sort` (GCC pulled it in transitively), and the NaN/infinity settings
   test uses `std::numeric_limits` instead of a literal division by zero, which
   MSVC rejects at compile time. No behavior change.
+- The static check no longer requires the checkout folder name to equal the
+  plugin id: GitHub Actions checks out `winshun-cursorwrap`, the repository
+  name. Only an id-shaped folder (with a dot) is still compared.
 
 ## [0.10.0] - 2026-11-15
 
