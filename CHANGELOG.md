@@ -18,6 +18,7 @@ single source of truth; release tags are `v<version>`.
   字面量除以零（MSVC 在编译期直接报错）。行为没有变化。
 - 静态检查不再要求检出目录名等于插件 id：GitHub Actions 的检出目录是仓库名
   `winshun-cursorwrap`，只有 id 形态的本地目录（带点）才继续比对。本机布局照旧。
+- 手动发布路径修好：构建任务现在拉取 tag，发布前可以复核版本标签。
 
 ## [0.10.0] - 2026-11-15
 

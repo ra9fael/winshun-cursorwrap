@@ -20,6 +20,8 @@ single source of truth; release tags are `v<version>`.
 - The static check no longer requires the checkout folder name to equal the
   plugin id: GitHub Actions checks out `winshun-cursorwrap`, the repository
   name. Only an id-shaped folder (with a dot) is still compared.
+- The manual publish path works: the build job fetches tags, so it can
+  re-check the version tag before publishing.
 
 ## [0.10.0] - 2026-11-15
 
