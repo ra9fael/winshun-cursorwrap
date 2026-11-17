@@ -2,8 +2,11 @@
   "$schema": "https://raw.githubusercontent.com/LingCore/WinShun-plugins/main/schema/plugin.schema.json",
   "manifest": 1,
   "id": "ra9fael.cursorwrap",
-  "name": {"zh": "光标回绕", "en": "Cursor wrap"},
-  "version": "0.10.2",
+  "name": {
+    "zh": "光标回绕",
+    "en": "Cursor wrap"
+  },
+  "version": "1.0.0",
   "description": {
     "zh": "光标到达屏幕外边时从对边进入（多显示器边缘拓扑，支持仅纵向/仅横向与按住 Ctrl/Shift 激活）；cursorwrap 关键字查看状态与开关",
     "en": "The cursor re-enters from the opposite edge when it reaches an outer edge (multi-monitor edge topology; vertical/horizontal-only modes and Ctrl/Shift activation); the cursorwrap keyword shows status and toggles it"
@@ -12,7 +15,9 @@
   "homepage": "https://github.com/ra9fael/winshun-cursorwrap",
   "license": "MIT",
   "minWinShun": "0.22.0",
-  "permissions": ["ui"],
+  "permissions": [
+    "ui"
+  ],
   "runtime": {
     "mode": "resident",
     "program": "cursorwrap.exe",
@@ -25,17 +30,48 @@
   "commands": [
     {
       "id": "cursorwrap",
-      "keyword": ["cursorwrap", "wrap", "环绕"],
-      "title": {"zh": "光标回绕", "en": "Cursor wrap"},
-      "hint": {"zh": "留空列出设置；也可输 tune / best / trace", "en": "empty lists the settings; try tune / best / trace"},
+      "keyword": [
+        "cursorwrap",
+        "wrap",
+        "环绕"
+      ],
+      "title": {
+        "zh": "光标回绕",
+        "en": "Cursor wrap"
+      },
+      "hint": {
+        "zh": "状态与入口；速度 / 带宽 / tune / best / trace 等命令仍可用",
+        "en": "status and entries; speed / band / tune / best / trace commands still work"
+      },
       "icon": "glyph:U+E8DE",
       "actions": [
-        {"id": "toggleEnabled", "title": {"zh": "开启 / 关闭回绕", "en": "Toggle wrapping"}, "key": "Enter"},
-        {"id": "cycleMode", "title": {"zh": "切换回绕模式", "en": "Cycle wrap mode"}, "key": "Ctrl+Enter"},
-        {"id": "copyDiagnostics", "title": {"zh": "复制诊断信息", "en": "Copy diagnostics"}, "key": "Shift+Enter"}
+        {
+          "id": "toggleEnabled",
+          "title": {
+            "zh": "开启 / 关闭回绕",
+            "en": "Toggle wrapping"
+          },
+          "key": "Enter"
+        },
+        {
+          "id": "cycleMode",
+          "title": {
+            "zh": "切换回绕模式",
+            "en": "Cycle wrap mode"
+          },
+          "key": "Ctrl+Enter"
+        },
+        {
+          "id": "copyDiagnostics",
+          "title": {
+            "zh": "复制诊断信息",
+            "en": "Copy diagnostics"
+          },
+          "key": "Shift+Enter"
+        }
       ],
       "ai": {
-        "description": "Show the cursor-wrap settings list: enabled state, impact mode and speed gate, wrap mode, activation, monitor count and outer-edge count, plus entries for the tuning overlay and the arrival trace. Read-only; nothing changes until a row's action runs."
+        "description": "Show the cursor-wrap home list: enabled state, wrap mode, impact mode, and entries for the tuning window and the data window. Value commands (speed, band, tune, reset, ...) preview the pending change and apply it only on Enter. Read-only until an action runs."
       }
     }
   ],
@@ -43,113 +79,114 @@
     {
       "key": "wrapMode",
       "type": "choice",
-      "title": {"zh": "回绕方向", "en": "Wrap direction"},
-      "hint": {"zh": "both：四个方向；vertical：仅上/下；horizontal：仅左/右", "en": "both: all four; vertical: top/bottom only; horizontal: left/right only"},
+      "title": {
+        "zh": "回绕方向",
+        "en": "Wrap direction"
+      },
+      "hint": {
+        "zh": "both：四个方向；vertical：仅上/下；horizontal：仅左/右",
+        "en": "both: all four; vertical: top/bottom only; horizontal: left/right only"
+      },
       "options": [
-        {"value": "both", "title": {"zh": "双向", "en": "Both"}},
-        {"value": "vertical", "title": {"zh": "仅上下", "en": "Vertical only"}},
-        {"value": "horizontal", "title": {"zh": "仅左右", "en": "Horizontal only"}}
+        {
+          "value": "both",
+          "title": {
+            "zh": "双向",
+            "en": "Both"
+          }
+        },
+        {
+          "value": "vertical",
+          "title": {
+            "zh": "仅上下",
+            "en": "Vertical only"
+          }
+        },
+        {
+          "value": "horizontal",
+          "title": {
+            "zh": "仅左右",
+            "en": "Horizontal only"
+          }
+        }
       ],
       "default": "both"
     },
     {
       "key": "activationMode",
       "type": "choice",
-      "title": {"zh": "激活方式", "en": "Activation"},
-      "hint": {"zh": "always 立即生效；ctrl / shift 需按住该键才回绕（Ctrl 单独滚轮留给任务栏音量插件，本插件只看移动）", "en": "always wraps immediately; ctrl / shift wrap only while the key is held (plain Ctrl stays with the taskbar volume plugin — this plugin only watches movement)"},
+      "title": {
+        "zh": "激活方式",
+        "en": "Activation"
+      },
+      "hint": {
+        "zh": "always 立即生效；ctrl / shift 需按住该键才回绕（Ctrl 单独滚轮留给任务栏音量插件，本插件只看移动）",
+        "en": "always wraps immediately; ctrl / shift wrap only while the key is held (plain Ctrl stays with the taskbar volume plugin — this plugin only watches movement)"
+      },
       "options": [
-        {"value": "always", "title": {"zh": "总是", "en": "Always"}},
-        {"value": "ctrl", "title": {"zh": "按住 Ctrl", "en": "While Ctrl is held"}},
-        {"value": "shift", "title": {"zh": "按住 Shift", "en": "While Shift is held"}}
+        {
+          "value": "always",
+          "title": {
+            "zh": "总是",
+            "en": "Always"
+          }
+        },
+        {
+          "value": "ctrl",
+          "title": {
+            "zh": "按住 Ctrl",
+            "en": "While Ctrl is held"
+          }
+        },
+        {
+          "value": "shift",
+          "title": {
+            "zh": "按住 Shift",
+            "en": "While Shift is held"
+          }
+        }
       ],
       "default": "always"
     },
     {
       "key": "disableDuringDrag",
       "type": "bool",
-      "title": {"zh": "拖拽时不回绕", "en": "No wrap while dragging"},
-      "hint": {"zh": "按住左键拖动窗口或选区时禁用，防止把窗口甩到对角", "en": "disables wrapping while the left button is held, so dragged windows stay put"},
+      "title": {
+        "zh": "拖拽时不回绕",
+        "en": "No wrap while dragging"
+      },
+      "hint": {
+        "zh": "按住左键拖动窗口或选区时禁用，防止把窗口甩到对角",
+        "en": "disables wrapping while the left button is held, so dragged windows stay put"
+      },
       "default": true
     },
     {
       "key": "disableOnSingleMonitor",
       "type": "bool",
-      "title": {"zh": "单屏时禁用", "en": "Disable on a single monitor"},
-      "hint": {"zh": "只接一块屏时也回绕到本屏对边（PowerToys 默认行为）；不想这样可关掉", "en": "on one display the cursor still wraps to the same display's opposite edge (PowerToys default); turn off to disable that"},
-      "default": false
-    },
-    {
-      "key": "edgeThresholdPx",
-      "type": "number",
-      "title": {"zh": "边缘判定距离（像素）", "en": "Edge threshold (px)"},
-      "hint": {"zh": "1–20，默认 1；离外边多近才算到了边上", "en": "1–20, default 1; how close to an outer edge counts as being on it"},
-      "default": 1
-    },
-    {
-      "key": "wrapGuardPx",
-      "type": "number",
-      "title": {"zh": "防震荡距离（像素）", "en": "Anti-oscillation guard (px)"},
-      "hint": {"zh": "10–200，默认 50；回绕后在这个范围内不再触发，防止来回弹", "en": "10–200, default 50; after a wrap, events within this range of the destination do not wrap again"},
-      "default": 50
-    },
-    {
-      "key": "adjacencyTolerancePx",
-      "type": "number",
-      "title": {"zh": "邻接容差（像素）", "en": "Adjacency tolerance (px)"},
-      "hint": {"zh": "10–200，默认 50；两条边差多少像素以内算相邻（内边不回绕）", "en": "10–200, default 50; edges closer than this count as adjacent (inner edges never wrap)"},
-      "default": 50
-    },
-    {
-      "key": "impactGate",
-      "type": "bool",
-      "title": {"zh": "撞击模式", "en": "Impact mode"},
-      "hint": {"zh": "开启后光标必须以足够速度撞到边缘才回绕；慢慢挪到边缘（比如去点任务栏）不会触发", "en": "when on, the cursor must hit the edge fast enough to wrap; drifting to the edge (say, toward the taskbar) does not trigger"},
-      "default": false
-    },
-    {
-      "key": "impactSpeedPps",
-      "type": "number",
-      "title": {"zh": "撞击速度门槛（像素/秒）", "en": "Impact speed gate (px/s)"},
-      "hint": {"zh": "500–20000，默认 2000；按最近一段朝向边缘的连续逼近测速，沿边缘平行滑动不算", "en": "500–20000, default 2000; judged over the last continuous stroke toward the edge — sliding along the edge does not count"},
-      "default": 2000
-    },
-    {
-      "key": "impactBandPx",
-      "type": "number",
-      "title": {"zh": "撞击测速区间（像素）", "en": "Impact measuring band (px)"},
-      "hint": {"zh": "50–500，默认 400；只在距边缘该范围内测速——远处冲刺不算，贴边抖动因位移过小也不算。加速度门槛有自己的 2000 px 回溯范围，不受此值限制", "en": "50–500, default 400; speed is measured only within this distance of the edge — distant sprints and edge jitter (too little travel) both fail. The acceleration floor reaches back 2000 px on its own and is not limited by this value"},
-      "default": 400
-    },
-    {
-      "key": "impactAccelPps2",
-      "type": "number",
-      "title": {"zh": "撞击加速度门槛（像素/秒²）", "en": "Impact acceleration gate (px/s²)"},
-      "hint": {"zh": "0 = 关闭（只看速度）；开启后必须「加速冲进边缘」才回绕——匀速滑到边缘再快也不回绕，到边缘已经减速的也不回绕。实测：匀速读数恒为 0，正常甩腕约 1600–3600，因此建议 500–2000（默认 500 已能区分，调高更严格）", "en": "0 = off (speed only); when on, the hand must be SPEEDING UP into the edge — a constant-speed sweep never wraps however fast, and neither does a hand that has already slowed at the edge. Measured: a steady hand reads 0 and a normal flick reads 1600–3600, so 500–2000 is the usable range (500 already separates them; higher is stricter)"},
-      "default": 0
-    },
-    {
-      "key": "tuningOverlay",
-      "type": "bool",
-      "title": {"zh": "调参可视化", "en": "Tuning overlay"},
-      "hint": {"zh": "在能回绕的外边缘画出测速区间与门槛线，并在撞到边缘时显示实测速度；内边不画。与搜索栏的 tune 是同一个开关", "en": "draws the measuring band and the wrap line on outer edges only, plus the measured speed when you hit one; same switch as tune in the search bar"},
-      "default": false
-    },
-    {
-      "key": "impactFlash",
-      "type": "bool",
-      "title": {"zh": "撞击穿越光效", "en": "Impact wrap glow"},
+      "title": {
+        "zh": "单屏时禁用",
+        "en": "Disable on a single monitor"
+      },
       "hint": {
-        "zh": "撞击模式成功穿越后，在被压的那条边上亮一道短暂的光（180 ms，沿边一小段）。纯装饰，默认关闭；不影响是否穿越，也不会拦截鼠标",
-        "en": "after a successful impact wrap, a short glow (180 ms, a fraction of the edge) along the edge you came through. Decoration only, off by default: it never affects whether a wrap happens and never intercepts the mouse"
+        "zh": "只接一块屏时也回绕到本屏对边（PowerToys 默认行为）；不想这样可关掉",
+        "en": "on one display the cursor still wraps to the same display's opposite edge (PowerToys default); turn off to disable that"
       },
       "default": false
     },
     {
-      "key": "dataWindow",
+      "key": "impactGate",
       "type": "bool",
-      "title": {"zh": "数据窗口", "en": "Data window"},
-      "hint": {"zh": "打开一个实时数据窗口：到达速度直方图、建议门槛、最近决策日志、按原因分类的跳过计数、钩子健康。不抢焦点，关掉窗口即停", "en": "opens a live data window: arrival-speed histogram, suggested gate, recent decisions, per-reason skip counts and hook health. Never takes focus; closing the window turns it off"},
+      "title": {
+        "zh": "撞击模式",
+        "en": "Impact mode"
+      },
+      "hint": {
+        "zh": "开启后光标必须以足够速度撞到边缘才回绕；慢慢挪到边缘（比如去点任务栏）不会触发",
+        "en": "when on, the cursor must hit the edge fast enough to wrap; drifting to the edge (say, toward the taskbar) does not trigger"
+      },
       "default": false
     }
-  ]
+  ],
+  "settingsWindow": true
 }

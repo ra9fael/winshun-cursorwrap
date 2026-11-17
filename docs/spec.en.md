@@ -23,43 +23,32 @@ Line-by-line comparison against the PowerToys original: [comparison.md](comparis
 
 ## 3 Command (`cursorwrap` / `wrap`)
 
-### Empty text: the settings list (multiple rows)
+### Empty text: the compact home list
 
-Empty text returns a **multi-row settings list**, one row per setting, where Enter
-is that row's main action — so every setting has its own key, free of the host's
-three-keys-per-row limit. **All twelve manifest settings are reachable here**; the
-protocol test checks each one, so the two surfaces cannot drift apart silently:
+Empty text returns a **compact home list**: the status, the direction, impact
+mode, the tuning-window and data-window entries, and the diagnostics row. The
+tuning numbers live in the tuning window; the correspondence between the
+manifest's five host-card keys and the list rows is checked by the protocol test,
+so the two surfaces cannot drift apart silently.
 
 | Row | Title | Enter | Manifest setting |
 |---|---|---|---|
 | 1 | `Cursor wrap: on/off` | turn wrapping on/off | — (runtime switch) |
-| 2 | `Impact mode: on/off` | toggle impact mode | `impactGate` |
-| 3 | `Impact speed: <n> px/s` | drill down to the speed submenu | `impactSpeedPps` |
-| 4 | `Impact band: <n> px` | drill down to the band submenu | `impactBandPx` |
-| 5 | `Wrap mode: <mode>` | cycle both → vertical → horizontal | `wrapMode` |
-| 6 | `Activation: <mode>` | drill down to the activation submenu | `activationMode` |
-| 7 | `Wrap guard: <n> px` | drill down to the radius submenu | `wrapGuardPx` |
-| 8 | `Edge threshold: <n> px` | drill down to the threshold submenu | `edgeThresholdPx` |
-| 9 | `Adjacency tolerance: <n> px` | drill down to the tolerance submenu | `adjacencyTolerancePx` |
-| 10 | `No wrap while dragging: on/off` | drill down to the on/off submenu | `disableDuringDrag` |
-| 11 | `Disable on one monitor: on/off` | drill down to the on/off submenu | `disableOnSingleMonitor` |
-| 12 | `Tuning overlay: on/off` | drill down to the tuning submenu | `tuningOverlay` |
-| 13 | `Data window: on/off` | drill down to the data-window submenu | `dataWindow` |
-| 14 | `Suggested gate: <n>/not enough data` | drill down to the suggestion submenu | a `impactSpeedPps` suggestion from the trace |
-| 15 | `Cursor wrap: arrival trace` | copy the trace CSV | — |
-| 16 | `Cursor wrap: diagnostics` | copy the full diagnostics | — |
-| 17 | `Restore host settings` | clear the search-bar overrides | — |
+| 2 | `Wrap mode: <mode>` | cycle both → vertical → horizontal | `wrapMode` |
+| 3 | `Impact mode: on/off` | toggle impact mode | `impactGate` |
+| 4 | `Tuning window` | open the tuning window (speed, acceleration, band, guard, thresholds, overlay, glow, suggestion) | `settingsWindow` |
+| 5 | `Data window: on/off` | drill down to the data-window submenu | (the plugin's own `dataWindow`) |
+| 6 | `Cursor wrap: diagnostics` | copy the full diagnostics | — |
 
-**The settings page and the search bar share one switch.** `tuningOverlay` and
-`dataWindow` are real manifest settings: the settings page's toggle, the search
-bar's `tune` / `data` submenus and the `settings.json` overrides file all write
-the same field, and both survive a restart. The tuning switch used to exist only
-in the search bar.
+**The two window entries.** The tuning window is declared with `settingsWindow`;
+the card's 设置 button and the search row take the same path (a `showSettings()`
+request). The data window is still a `Settings` field, started and stopped by
+`applyWindowSettings()`.
 
 Status-row subtitle: `mode <mode> · activation <mode> · impact on/off [gate] ·
-N display(s)`; when the search bar has overridden settings, ` · search-bar
-overrides active (reset to fall back)` is appended; when the hook failed to
-install, ` · hook failed, status only` is appended.
+N display(s)`; with saved tuning, ` — saved tuning active (reset returns to
+defaults)` is appended; when the hook failed to install, ` · hook failed, status
+only` is appended.
 
 ### Submenus (drill-down)
 
@@ -84,41 +73,48 @@ choice, and Enter applies it:
 | `data` / `window` | back · switch · skip reasons · hook health · copy the trace · suggested gate (see "Data window") |
 | `best` | back · suggested gate · apply · see the data (see "Arrival trace") |
 
-### With a number: set directly (skip the submenu)
+### With a number: preview first, Enter applies
 
-`cursorwrap <word> <number>` sets the value and shows the matching submenu with
-the new value marked "current":
+`cursorwrap <word> <number>` **no longer sets the value on the spot**: it returns
+one "pending" row (the target value + the current one + the apply action), and
+Enter on it applies. A query must have no side effects — typing must not
+reconfigure the running wrap.
 
-| Input | Effect |
+| Input | The action it previews |
 |---|---|
-| `impact on` / `impact off` | set the impact gate directly |
-| `speed 3000` | the impact gate (500–20000, clamped; setting a speed turns the gate on) |
+| `impact on` / `impact off` | the impact gate |
+| `speed 3000` | the impact gate (500–20000, clamped; applying turns impact mode on) |
 | `band 300` | the measuring band (50–500) |
-| `mode vertical` etc. | set the direction directly |
+| `accel 2000` | the acceleration floor (0 = off; a non-zero below 200 is raised to 200) |
+| `mode vertical` etc. | the direction |
 | `ctrl` / `shift` / `always` | the activation mode |
 | `guard 120` | the anti-oscillation radius (10–200) |
 | `edge 5` | the edge threshold (1–20) |
 | `tol 80` | the adjacency tolerance (10–200) |
 | `drag on` / `drag off` | whether dragging wraps |
 | `single on` / `single off` | whether one display disables wrapping |
-| `tune on` / `tune off` | the tuning overlay (with no value it opens the submenu) |
-| `data on` / `data off` | the data window (with no value it opens the submenu) |
-| `trace` | a trace row; Enter copies the CSV |
-| `best` | the suggestion submenu: see / apply / inspect |
+| `tune on` / `tune off` | the tuning overlay |
+| `data on` / `data off` | the data window |
+| `flash` / `glow` | previews the glow toggled to its other state |
+| `flash on` / `flash off` | the glow switch |
+| `trace` | a trace row; Enter copies the CSV (read-only anyway) |
+| `best` | the suggestion submenu (see / apply / inspect; applying was always an explicit action) |
 | `clear` | drop the recorded arrivals |
-| `reset` | clear the search-bar overrides; the host card applies again |
+| `reset` | reset the tuning to defaults (only the plugin's own keys; the host card stays untouched) |
 | `diag` | a diagnostics row; Enter copies the full text |
 | anything else | a `valid:false` hint row listing the words |
 
-**Persistence and precedence**: the host has no plugin→host settings channel (the
-protocol only accepts `winshun/log|notify|progress|refresh|hotkeys|tool`; unknown
-methods are dropped), and `WinShun.ini` is the host's file — the plugin does not
-touch it. Search-bar changes go to the plugin's own data directory,
-`WS_DATA_DIR/settings.json` (only keys that differ from the defaults), and are
-applied on top of the host's settings at startup and in `settingsChanged`; `reset`
-deletes the file. The host's settings card stays authoritative for **keys the search
-bar has not overridden** — both places work, and the status row says which source is
-active.
+**Persistence, split by owner.** The host card's five keys are saved by Win顺 —
+search-bar changes go through `updateSettings()`
+(`winshun/settings/update`), the host answers with a merged `settingsChanged`,
+and the plugin applies only the keys the host declares, never pushing back. The
+tuning keys are saved by the plugin in its own data directory
+(`WS_DATA_DIR/settings.json`, only keys that differ from the defaults), applied
+on top of the host's values at startup. The search, the tuning window and the
+suggestion all go through one commit path (`commitSettings()`): range-checked
+merge → engine/hook/windows → save the tuning keys → tell the host. `reset`
+returns only the tuning keys to their defaults; **the host card's keys belong to
+the host**, and host-card keys in an old override file are ignored and dropped.
 
 ## 4 Gesture (the plugin's only automatic behaviour)
 
@@ -162,30 +158,47 @@ and tests are reproducible.
 
 ## 7 Settings
 
+Settings are split by owner: the host card keeps the everyday switches, the
+tuning window keeps the plugin's own tuning keys. Every key has exactly one row
+in the `settingsFields()` table (with an owner); the reader, the writer and the
+host push all walk that table.
+
+**The host card** (declared in the manifest, saved by Win顺):
+
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `wrapMode` | choice | both | both / vertical / horizontal |
-| `activationMode` | choice | always | always / ctrl / shift (wrap only while held) |
+| `wrapMode` | choice | both | both / vertical (up–down only) / horizontal (left–right only) |
+| `activationMode` | choice | always | always / ctrl / shift (wrap only while the key is held) |
 | `disableDuringDrag` | bool | true | no wrapping while the left button is held |
-| `disableOnSingleMonitor` | bool | false | disable when only one display is attached |
-| `edgeThresholdPx` | number | 1 | 1–20, how close to an outer edge counts as on it |
+| `disableOnSingleMonitor` | bool | false | disable on a single display (PowerToys default wraps) |
+| `impactGate` | bool | false | impact mode: the cursor must hit the edge fast enough to wrap |
+
+**The tuning window** (the plugin's own `settings.json`, not declared in the
+manifest; opened from the card's 设置 button or the tuning-window row):
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `impactSpeedPps` | number | 2000 | 500–20000, the impact speed gate (px/s) |
+| `impactBandPx` | number | 400 | 50–500, the impact measuring band (speed is measured only this close to the edge) |
+| `impactAccelPps2` | number | 0 | 0 = off (speed only); when on the hand must still be speeding up at the edge, usable floor 200 |
 | `wrapGuardPx` | number | 50 | 10–200, anti-oscillation radius |
 | `adjacencyTolerancePx` | number | 50 | 10–200, inner-edge tolerance |
-| `impactGate` | bool | false | impact mode: the cursor must hit the edge fast enough to wrap |
-| `impactSpeedPps` | number | 2000 | 500–20000, the impact speed gate (px/s) |
-| `impactBandPx` | number | 150 | 50–500, the impact measuring band (how close to the edge counts as approach) |
-| `tuningOverlay` | bool | false | tuning overlay: draw the measuring band and the wrap line on outer edges, plus the measured speed |
-| `dataWindow` | bool | false | data window: live histogram, decision log, per-reason skip counts, hook health |
+| `edgeThresholdPx` | number | 1 | 1–20, how close to an outer edge counts as on it |
+| `tuningOverlay` | bool | false | the tuning overlay |
+| `impactFlash` | bool | false | the impact glow |
+| `dataWindow` | bool | false | the data window |
 
 `tuningOverlay` and `dataWindow` are **real settings**, not command-layer state:
-the settings page, the search bar (`tune` / `data`) and the `settings.json`
-overrides file write the same field, and both survive a restart. Opening and
-closing both windows goes through one place (`applyWindowSettings()`), called
-after every path that can change them.
+the settings page / tuning window, the search commands (`tune` / `data`) and
+`settings.json` all write the same fields, and both survive a restart. The
+windows' start/stop is handled by `applyWindowSettings()`; every path calls it
+after a change. Changing one setting never resets another.
 
-The wrap **landing is one pixel inside** the destination edge (`left+1` /
-`right-2` / `top+1` / `bottom-2`), not on its line — a landing inside the
-detection band would make the guard eat an immediate re-trigger.
+The numeric ranges live in one table (`settingRange()`): `applySettings` rejects
+out-of-range values with it (falling back to the default), and the parser and
+the tuning window clamp typed input with it. The tuning window expresses
+acceleration's 0 (off) as an explicit off-checkbox plus a numeric entry, never a
+slider that would step over the usable non-zero floors.
 
 ### Tuning overlay
 
@@ -474,11 +487,12 @@ close to the int64 ceiling. `freq <= 0` or a negative counter returns 0 (fail cl
 
 ## 11 Data
 
-Settings are managed by the host in `WinShun.ini`; search-bar changes go to
-`WS_DATA_DIR/settings.json` (only keys that differ from the defaults). Otherwise
-there is no log file and no cache. Diagnostics reach the clipboard only on
-`copyDiagnostics` and contain counters and geometry only (no window titles, file
-names or user text).
+Everyday settings live in the host's `WinShun.ini`. The tuning keys are kept by
+the plugin in its own data directory, `WS_DATA_DIR/settings.json` (only tuning
+keys that differ from the defaults; the host card's keys are not among them —
+they belong to the host). Otherwise there is no log file and no cache. The
+clipboard is touched only when diagnostics are copied, and only carries counts
+and geometry (no window titles, file names or user text).
 
 ## 12 Failure matrix
 

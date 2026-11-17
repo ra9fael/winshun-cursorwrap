@@ -125,12 +125,24 @@ def validate_manifest() -> dict:
             default = item.get("default")
             values = [o.get("value") if isinstance(o, dict) else o for o in item.get("options", [])]
             check(default in values, f"choice setting {key!r} default must be one of its options")
-    for required in ("wrapMode", "activationMode", "disableDuringDrag", "disableOnSingleMonitor",
-                     "edgeThresholdPx", "wrapGuardPx", "adjacencyTolerancePx"):
+    for required in ("wrapMode", "activationMode", "disableDuringDrag",
+                     "disableOnSingleMonitor", "impactGate"):
         check(required in seen, f"missing setting {required!r}")
+    # The tuning keys are the plugin's own (its settings window edits them and
+    # saves them in its data dir): the card must NOT re-declare them, or the
+    # host would persist a second copy the plugin cannot see move.
+    plugin_owned = ("edgeThresholdPx", "wrapGuardPx", "adjacencyTolerancePx",
+                    "impactSpeedPps", "impactBandPx", "impactAccelPps2",
+                    "tuningOverlay", "impactFlash", "dataWindow")
+    for key in plugin_owned:
+        check(key not in seen, f"setting {key!r} belongs to the plugin's own tuning window")
+    check(manifest.get("settingsWindow") is True,
+          "the manifest declares settingsWindow so the card opens the tuning window")
 
-    # Ranges documented in docs/spec.md and enforced by wrap_logic.cpp.
-    ranges = {"edgeThresholdPx": (1, 20), "wrapGuardPx": (10, 200), "adjacencyTolerancePx": (10, 200)}
+    # Ranges documented in docs/spec.md and enforced by wrap_logic.cpp. The
+    # card-declared settings have no numeric ranges; the tuning keys moved to
+    # the plugin's own window, so nothing to check here any more.
+    ranges: dict[str, tuple[int, int]] = {}
     for key, (lo, hi) in ranges.items():
         item = next((s for s in settings if s.get("key") == key), None)
         if item:

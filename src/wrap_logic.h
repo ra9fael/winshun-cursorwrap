@@ -105,6 +105,17 @@ struct RawSettings {
 // file must never break the plugin. Pure; unit-tested.
 void applySettings(const RawSettings& raw, Settings& out, bool merge);
 
+// The documented range of a numeric setting, by its JSON key
+// ("impactSpeedPps" -> 500..20000 and so on). False for keys without a range.
+// THE one source of the numbers: applySettings rejects outside values with
+// them, and the parser and the tuning window clamp typed input with them, so
+// a range can never drift between what is typed and what is accepted.
+struct SettingRange {
+    int lo = 0;
+    int hi = 0;
+};
+bool settingRange(const char* key, SettingRange& out);
+
 // One mouse-move sample in pointer space. tUs is the event timestamp in
 // microseconds (QueryPerformanceCounter at the hook). 0 means unknown: the
 // sample still drives the state machine, but the impact gate cannot measure

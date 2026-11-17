@@ -12,11 +12,11 @@ original: [tests.md](tests.md).
 | `permissions` is only `ui`; no `elevated` / `network` / `processes` | §11 | pass |
 | `runtime`: resident / eager / `idleExitSec 0` / `normal` / `timeoutMs 1500` / `memoryMB 64` | §8 | pass |
 | One command, three actions in order `toggleEnabled, cycleMode, copyDiagnostics` | §3 | pass (asserted in L3 too) |
-| Seven settings of allowed types; defaults inside the documented ranges | §7 | pass |
+| The host card's five settings of allowed types; defaults inside the documented ranges; the manifest no longer declares the tuning keys and declares `settingsWindow` | §7 | pass (`tests/validate.py`) |
 | Package contains `plugin.json` / `cursorwrap.exe` / `README.md` / `LICENSE`, no `build/`, `dist/`, `.git` | §8 | `tools/package.py` + `tools/ci_release.py` |
 | Bilingual anchors cross-link (`docs/spec*.md`, `docs/tests*.md`, README, CHANGELOG) | — | pass |
 
-## L1 — Pure logic unit tests (`cw_tests`, ctest target, 155 cases + 6 layout fixtures)
+## L1 — Pure logic unit tests (`cw_tests`, ctest target, 185 cases + 6 layout fixtures)
 
 No OS headers: runs anywhere. Commands:
 
@@ -95,31 +95,31 @@ The hook callback and settings delivery can be tested without a real hook:
 python tests/protocol_roundtrip.py
 ```
 
-Run on 2026-11-14: **147 checks passed**, process exit code 0.
+Run on 2026-11-18: **112 checks passed**, process exit code 0.
 
 | Check | Spec |
 |---|---|
 | `initialize` has no error and reports `protocolVersion == "1"` | §8 |
-| An empty query returns the **multi-row settings list** (≥5 rows), first row `id == cursorwrap.status` | §3 |
+| An empty query returns the **compact home list** (6 rows), first row `id == cursorwrap.status` | §3 |
 | The status row has only `toggleEnabled` (every other setting has its own row) | §3 |
-| **Every manifest setting has a row**: the test reads `plugin.json`'s `settings` and checks each key's row id is in the list | §3 §7 |
+| Every manifest key has a home row, and the tuning keys no longer appear there (they belong to the tuning window) | §3 §7 |
 | Drill-down rows (speed/band/activation/guard/edge/tol/drag/single/tuner/data) carry `setQuery` | §3 |
 | A query with text still returns one row (queries have no side effects) | §3 |
-| `impact` opens the submenu (first row `← Back`); `impact on/off` set the value directly | §3 |
-| `speed 3500` opens the speed submenu and the status row subtitle shows `3500` | §3 |
+| `impact` opens the submenu (first row `← Back`); `impact on/off` preview their apply actions | §3 |
+| A value command returns one "pending" row (target + current + apply action); a query changes nothing | §3 |
 | `drag` / `single` submenus toggle and the list row follows | §3 |
 | `tune` opens the tuning submenu (switch plus band / gate / guard / threshold drill-downs); `tune on/off` flips it directly | §7 |
 | `data` opens the data-window submenu (switch / skip reasons / hook health); `data on/off` flips it directly, the list row follows without another command, and `window` is an alias | §8 §9 |
 | The diagnostics carry the per-reason skip counters and the hook health (`skipped …` / `hook responsive`) | §9 |
 | `trace` returns the trace row whose `copy` field carries a CSV header | §7 |
 | `best` opens the suggestion submenu; with no trace it returns "not enough data" rather than inventing a gate | §7 |
-| `clear` is accepted and the next query still answers | §7 |
+| `clear` / `reset` preview too; tuning keys never reach `winshun/settings/update` and host-card keys never reach the plugin's `settings.json` | §3 §7 |
 | `cycleMode` reports three distinct modes, each with `replace` + `notify` | §3 |
 | `toggleEnabled` takes effect and the replaced row says the plugin is off | §3 |
 | `copyDiagnostics` emits one `copy` containing mode/activation/monitors/outer edges/wraps | §3 |
 | An unknown action returns a `valid: false` row rather than faking success | §10 |
 | `settingsChanged` with valid values shows up in the status row immediately | §7 |
-| `settingsChanged` with an out-of-range value does not break the next query | §7 |
+| `settingsChanged` with an out-of-range value does not break the next query; stale tuning keys in the payload are ignored (no host-side restore) | §7 |
 | A `cancel` for a queryId that was never issued does not break the next query | §8 |
 | `shutdown` has no error and the process exits 0 | §8 |
 
@@ -259,7 +259,7 @@ coordinates.
 
 - L1 green (currently 170 cases + 6 fixtures, all synthetic geometry;
   `live-single.json` is read by the probe only, not by L1)
-- L3 fully passing (currently 147/147)
+- L3 fully passing (currently 112/112)
 - L3.5 scenarios passing (currently 14, via `python tests/devshell_scenarios.py`)
 - L0 static validation passing
 - The single-display (including Remote Desktop) part of L4 has been measured and

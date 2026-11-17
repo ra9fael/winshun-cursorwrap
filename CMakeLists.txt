@@ -28,6 +28,7 @@ add_executable(WinShunCursorWrap WIN32
     src/arrival_hist.cpp
     src/query_parser.cpp
     src/settings_store.cpp
+    src/settings_window.cpp
     src/mouse_hook.cpp
     src/monitor_watcher.cpp
     src/overlay.cpp

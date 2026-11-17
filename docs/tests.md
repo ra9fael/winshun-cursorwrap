@@ -12,12 +12,12 @@
 | `runtime`：resident / eager / `idleExitSec 0` / `normal` / `timeoutMs 1500` / `memoryMB 64` | §8 | 通过 |
 | 一个命令、三个动作、顺序 `toggleEnabled, cycleMode, copyDiagnostics` | §3 | 通过（L3 也有断言） |
 | 七个设置项类型在白名单内、默认值在文档区间内 | §7 | 通过 |
-| 十二个设置项（含 `tuningOverlay` / `dataWindow`）类型在白名单内、默认值在文档区间内 | §7 | 通过 |
-| 搜索栏覆盖清单每一项（协议测试从 `plugin.json` 逐键核对） | §3 | 通过（L3） |
+| 宿主卡片 5 项类型在白名单内、默认值在文档区间内；清单**不再声明**调参键，并声明 `settingsWindow` | §7 | 通过（`tests/validate.py`） |
+| 清单 5 项在首页有对应行，调参键**不再**出现在首页（归属调参窗口） | §3 §7 | 通过（L3） |
 | 打包物含 `plugin.json` / `cursorwrap.exe` / `README.md` / `LICENSE`，无 `build/`、`dist/`、`.git` | §8 | `tools/package.py` + `tools/ci_release.py` |
 | 双语文档锚点互链（`docs/spec*.md`、`docs/tests*.md`、README、CHANGELOG） | — | 通过 |
 
-## L1 — 纯逻辑单测（`cw_tests`，ctest 目标，155 用例 + 6 布局 fixture）
+## L1 — 纯逻辑单测（`cw_tests`，ctest 目标，185 用例 + 6 布局 fixture）
 
 不引 OS 头文件，任何平台可跑。运行：
 
@@ -95,31 +95,31 @@ fixture 是**合成几何**，不是真机采集，因此可安全提交（不�
 python tests/protocol_roundtrip.py
 ```
 
-2026-11-14 实跑：**147 项检查全部通过**，进程退出码 0。
+2026-11-18 实跑：**112 项检查全部通过**，进程退出码 0。
 
 | 检查 | 对应 |
 |---|---|
 | `initialize` 无 error、`protocolVersion == "1"` | §8 |
-| 空查询返回**多行设置列表**（≥5 行），首行 `id == cursorwrap.status` | §3 |
+| 空查询返回**精简首页**（6 行），首行 `id == cursorwrap.status` | §3 |
 | 状态行只有 `toggleEnabled` 一个动作（其他设置各占一行） | §3 |
-| **清单 12 个设置逐项都有对应行**（读 `plugin.json` 的 `settings`，逐键核对列表里的行 id） | §3 §7 |
+| 清单 5 项在首页有对应行，调参键**不再**出现在首页（归属调参窗口） | §3 §7 |
 | 下钻行（speed/band/activation/guard/edge/tol/drag/single/tuner/data）带 `setQuery` | §3 |
 | 带文字查询仍只返回一行（查询无副作用） | §3 |
-| `impact` 打开子菜单（首行 `← 返回`），`impact on/off` 直接设值 | §3 |
-| `speed 3500` 打开速度子菜单，状态行副标题含 `3500` | §3 |
+| `impact` 打开子菜单（首行 `← 返回`），`impact on/off` 预览待应用动作 | §3 |
+| 取值命令返回一行"待应用"预览（目标值 + 当前值 + 应用动作）；查询不改状态 | §3 |
 | `drag` / `single` 子菜单可开可关，列表行跟着变 | §3 |
 | `tune` 打开调参子菜单（开关 + 区间 / 门槛 / 防震 / 阈值四个下钻），`tune on/off` 直接开关 | §7 |
 | `data` 打开数据窗口子菜单（开关 / 跳过计数 / 钩子健康），`data on/off` 直接开关，列表行与子菜单同步；`window` 是别名 | §8 §9 |
 | 诊断含按原因跳过计数与钩子健康（`skipped …` / `hook responsive`） | §9 |
 | `trace` 返回轨迹行，`copy` 字段带 CSV 表头 | §7 |
 | `best` 打开建议子菜单；没有轨迹时返回「数据不足」行而不是编造数字 | §7 |
-| `clear` 被接受且后续查询正常 | §7 |
+| `clear` / `reset` 也走预览；调参键不进 `winshun/settings/update`，宿主卡片键不进插件的 `settings.json` | §3 §7 |
 | `cycleMode` 三次报告三种不同模式，每次 `replace` + `notify` | §3 |
 | `toggleEnabled` 生效，替换后的状态行显示「已关闭」 | §3 |
 | `copyDiagnostics` 产出一条 `copy`，内容含 mode/activation/monitors/outer edges/wraps | §3 |
 | 未知动作返回 `valid: false` 的行，不假装成功 | §10 |
 | `settingsChanged` 合法值立即反映在状态行 | §7 |
-| `settingsChanged` 越界值不破坏后续查询 | §7 |
+| `settingsChanged` 越界值不破坏后续查询；载荷里残留的调参键被忽略（防止宿主旧值回灌） | §7 |
 | 无对应 queryId 的 `cancel` 不影响后续查询 | §8 |
 | `shutdown` 无 error，进程退出码 0 | §8 |
 

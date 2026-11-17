@@ -21,55 +21,50 @@ nothing flashes back.
 
 ## Usage
 
-Type `cursorwrap` (or `wrap`) to get a **multi-row settings list** — one row per
-setting, where Enter is that row's main action, so there are no chords to remember:
+Type `cursorwrap` (or `wrap`) to get a **compact home list**: the wrap state, the
+direction, impact mode, and the entries for the tuning window and the data
+window. The numbers live in the tuning window; the `speed`, `band`, `tune`
+commands still reach their submenus directly.
 
 | Row | Enter |
 |---|---|
 | `Cursor wrap: on/off` | turn wrapping on / off |
-| `Impact mode: on/off` | toggle impact mode |
-| `Impact speed: <n> px/s` | drill down to the speed submenu |
-| `Impact band: <n> px` | drill down to the band submenu |
 | `Wrap mode: <mode>` | cycle both → vertical → horizontal |
-| `Activation: <mode>` | drill down to the activation submenu |
-| `Wrap guard: <n> px` | drill down to the radius submenu |
-| `Edge threshold: <n> px` | drill down to the threshold submenu |
-| `Adjacency tolerance: <n> px` | drill down to the tolerance submenu |
-| `No wrap while dragging: on/off` | drill down to the on/off submenu |
-| `Disable on one monitor: on/off` | drill down to the on/off submenu |
-| `Tuning overlay: on/off` | drill down to the tuning submenu |
-| `Suggested gate: <n>/not enough data` | drill down to the suggestion submenu |
-| `Cursor wrap: arrival trace` | copy the trace CSV |
+| `Impact mode: on/off` | toggle impact mode |
+| `Tuning window` | open the tuning window (speed, acceleration, band, guard, thresholds, overlay, glow, suggestion) |
+| `Data window: on/off` | submenu: switch / skip reasons / hook health |
 | `Cursor wrap: diagnostics` | copy the full diagnostics |
-| `Restore host settings` | clear the search-bar overrides |
 
 **Submenus** (after drilling down, the first row is always `← Back`; every other
 row is one choice, and Enter applies it):
 
 | Input | Submenu |
 |---|---|
-| `cursorwrap impact` | back · impact toggle · impact speed · impact band |
-| `cursorwrap speed` | back · 500/1000/2000/3000/5000/8000/12000/20000 px/s |
-| `cursorwrap band` | back · 50/80/120/150/200/300/500 px |
-| `cursorwrap mode` | back · both · vertical only · horizontal only |
-| `cursorwrap activation` | back · always · while Ctrl · while Shift |
-| `cursorwrap guard` | back · 10/30/50/80/120/200 px |
-| `cursorwrap edge` | back · 1/2/5/10/20 px |
-| `cursorwrap tol` | back · 10/30/50/80/120/200 px |
-| `cursorwrap drag` | back · on · off |
-| `cursorwrap single` | back · on · off |
-| `cursorwrap tune` | back · switch · band · gate · guard · threshold |
-| `cursorwrap data` / `window` | back · switch · skip reasons · hook health · copy the trace · suggested gate |
-| `cursorwrap best` | back · suggested gate · apply · see the data |
+| `cursorwrap impact` | back → impact toggle → impact speed → impact band |
+| `cursorwrap speed` | back → 500/1000/2000/3000/5000/8000/12000/20000 px/s |
+| `cursorwrap band` | back → 50/80/120/150/200/300/500 px |
+| `cursorwrap accel` | back → off → 2000/5000/10000/20000/40000/80000 px/s² |
+| `cursorwrap mode` | back → both → vertical only → horizontal only |
+| `cursorwrap activation` | back → always → while Ctrl → while Shift |
+| `cursorwrap guard` | back → 10/30/50/80/120/200 px |
+| `cursorwrap edge` | back → 1/2/5/10/20 px |
+| `cursorwrap tol` | back → 10/30/50/80/120/200 px |
+| `cursorwrap drag` | back → on → off |
+| `cursorwrap single` | back → on → off |
+| `cursorwrap tune` | back → switch → band → gate → guard → threshold |
+| `cursorwrap data` / `window` | back → switch → skip reasons → hook health → copy the trace → suggested gate |
+| `cursorwrap best` | back → suggested gate → apply → see the data |
 
-**With a number, set directly** (skips the submenu):
+**Commands preview first; Enter applies.** A value command no longer changes
+anything by itself:
 
 | Input | Effect |
 |---|---|
-| `cursorwrap impact on` / `off` | set impact mode directly |
-| `cursorwrap speed 3000` | the impact gate (500–20000 px/s; setting a speed turns it on) |
+| `cursorwrap impact on` / `off` | "Impact mode: on (pending)" — Enter applies |
+| `cursorwrap speed 3000` | the pending gate (500–20000 px/s; applying turns impact mode on) |
 | `cursorwrap band 300` | the measuring band (50–500 px) |
-| `cursorwrap mode vertical` | set the direction directly |
+| `cursorwrap accel 2000` | the acceleration floor (0 = off) |
+| `cursorwrap mode vertical` | the direction |
 | `cursorwrap ctrl` / `shift` / `always` | the activation mode |
 | `cursorwrap guard 120` | the anti-oscillation radius (10–200 px) |
 | `cursorwrap edge 5` | the edge threshold (1–20 px) |
@@ -78,16 +73,29 @@ row is one choice, and Enter applies it):
 | `cursorwrap single on` / `off` | whether one display disables wrapping |
 | `cursorwrap tune on` / `off` | the tuning overlay |
 | `cursorwrap data on` / `off` | the data window |
+| `cursorwrap flash` | previews the glow toggled to its other state |
 | `cursorwrap trace` | a trace row; Enter copies the CSV |
 | `cursorwrap best` | the suggestion: see / apply / inspect |
-| `cursorwrap clear` | drop the recorded arrivals |
-| `cursorwrap reset` | clear the search-bar overrides; the host card applies again |
+| `cursorwrap clear` | previews clearing the recorded arrivals |
+| `cursorwrap reset` | previews "reset the tuning to defaults" (the host card's keys stay untouched) |
 | `cursorwrap diag` | a diagnostics row; Enter copies the full text |
 
-Changes **apply immediately** and persist in the plugin's data directory
-(`settings.json`, only keys that differ from the defaults); the host's settings card
-stays authoritative for keys not overridden, and the status row says when overrides
-are active.
+## Who owns which setting
+
+- **The host card** (Win顺 › Plugins › Cursor wrap, saved by Win顺 itself):
+  wrap direction, activation, no-wrap-while-dragging, disable on one monitor,
+  impact mode.
+- **The tuning window** (the 设置 button on the card, or the tuning-window row in
+  the search): impact speed, acceleration, measuring band, guard radius,
+  adjacency tolerance, edge threshold, tuning overlay, impact glow, the data
+  window and the suggested gate. These are the plugin's own settings, saved in
+  its data directory (`settings.json`, only keys that differ from the defaults).
+  The search commands, the window's controls and the suggestion all go through
+  the same commit path; changing one setting never resets another.
+
+Ranges and algorithm meaning are unchanged; an out-of-range value falls back to
+the default. On the first start after the upgrade, the tuning values the host
+still held are carried over into the plugin's own file.
 
 ## Tuning overlay
 
@@ -192,24 +200,36 @@ the clamped samples at the edge — pushing against the edge used to dilute a re
 
 ## Settings
 
+These settings sit on the **host card** (Win顺 › Plugins › Cursor wrap) and are
+saved by Win顺 itself:
+
 | Key | Default | Meaning |
 |---|---|---|
 | `wrapMode` | both | both / vertical only / horizontal only |
 | `activationMode` | always | always wrap / while Ctrl is held / while Shift is held |
 | `disableDuringDrag` | true | no wrapping while the left button is held |
 | `disableOnSingleMonitor` | false | disable on a single display (default still wraps to its opposite edge) |
-| `edgeThresholdPx` | 1 | 1–20, how close to an outer edge counts as on it |
+| `impactGate` | false | impact mode: the cursor must hit the edge fast enough to wrap; drifting there does not trigger |
+
+These sit in the **tuning window** (the 设置 button on the card, or the
+tuning-window row in the search) and are saved by the plugin in its own data
+directory (`settings.json`, only keys that differ from the defaults):
+
+| Key | Default | Meaning |
+|---|---|---|
+| `impactSpeedPps` | 2000 | 500–20000, the impact speed gate (px/s, over the last in-band approach stroke) |
+| `impactBandPx` | 400 | 50–500, the impact measuring band: speed is measured only this close to the edge; distant sprints and edge jitter both fail |
+| `impactAccelPps2` | 0 | 0 = off (speed only); when on, the hand must still be speeding up at the edge (usable floor 200) |
 | `wrapGuardPx` | 50 | 10–200, anti-oscillation radius around the landing point |
 | `adjacencyTolerancePx` | 50 | 10–200, how close two edges must be to count as adjacent (inner) |
-| `impactGate` | false | impact mode: the cursor must hit the edge fast enough to wrap; drifting there does not trigger |
-| `impactSpeedPps` | 2000 | 500–20000, the impact speed gate (px/s, over the last in-band approach stroke) |
-| `impactBandPx` | 150 | 50–500, the impact measuring band: speed is measured only this close to the edge; distant sprints and edge jitter both fail |
+| `edgeThresholdPx` | 1 | 1–20, how close to an outer edge counts as on it |
 | `tuningOverlay` | false | tuning overlay: draw the measuring band and the wrap line on outer edges, plus the measured speed |
+| `impactFlash` | false | impact glow: a short light along the edge after a successful impact wrap |
 | `dataWindow` | false | data window: live histogram, decision log, per-reason skip counts, hook health |
 
-The last two are **real settings**, not command-layer switches: the settings page,
-the search bar (`tune` / `data`) and the `settings.json` overrides file write the
-same field, and both survive a restart.
+Both window switches stop when closed. The settings page, the search commands and
+the tuning window write **the same fields** — every surface goes through one
+commit path, and changing one setting never resets another.
 
 An invalid value always falls back to the default; nothing throws.
 

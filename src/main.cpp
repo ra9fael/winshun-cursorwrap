@@ -21,6 +21,7 @@
 #include "overlay.h"
 #include "query_parser.h"
 #include "settings_store.h"
+#include "settings_window.h"
 #include "wrap_logic.h"
 
 #include <algorithm>
@@ -135,45 +136,9 @@ void markOverride(cw::RawSettings& raw, const cw::SettingsField& field,
 
 cw::RawSettings rawFromJson(const Json& s)
 {
-    cw::RawSettings raw;
-    if (!s.isObject())
-        return raw;
-    auto stringField = [&s](const char* key, std::string& out, bool& has) {
-        const Json& v = s[key];
-        if (v.isString()) {
-            out = v.toString();
-            has = true;
-        }
-    };
-    auto boolField = [&s](const char* key, bool& out, bool& has) {
-        const Json& v = s[key];
-        if (v.isBool()) {
-            out = v.toBool();
-            has = true;
-        }
-    };
-    auto numberField = [&s](const char* key, double& out, bool& has) {
-        const Json& v = s[key];
-        if (v.isNumber()) {
-            out = v.toNumber();
-            has = true;
-        }
-    };
-    stringField("wrapMode", raw.wrapMode, raw.hasWrapMode);
-    stringField("activationMode", raw.activationMode, raw.hasActivation);
-    boolField("disableDuringDrag", raw.disableDuringDrag, raw.hasDrag);
-    boolField("disableOnSingleMonitor", raw.disableOnSingleMonitor, raw.hasSingle);
-    numberField("edgeThresholdPx", raw.edgeThresholdPx, raw.hasEdgeThreshold);
-    numberField("wrapGuardPx", raw.wrapGuardPx, raw.hasWrapGuard);
-    numberField("adjacencyTolerancePx", raw.adjacencyTolerancePx, raw.hasAdjacency);
-    boolField("impactGate", raw.impactGate, raw.hasImpactGate);
-    numberField("impactSpeedPps", raw.impactSpeedPps, raw.hasImpactSpeed);
-    numberField("impactBandPx", raw.impactBandPx, raw.hasImpactBand);
-    numberField("impactAccelPps2", raw.impactAccelPps2, raw.hasImpactAccel);
-    boolField("tuningOverlay", raw.tuningOverlay, raw.hasTuningOverlay);
-    boolField("dataWindow", raw.dataWindow, raw.hasDataWindow);
-    boolField("impactFlash", raw.impactFlash, raw.hasImpactFlash);
-    return raw;
+    // Full-table read, for initialize: an older host may still carry pre-split
+    // values, and the tuning file loads on top of whatever arrives here.
+    return cw::rawOverridesFromJson(s, false);
 }
 
 // True when this process runs inside a Remote Desktop session. The session
@@ -292,11 +257,13 @@ public:
 protected:
     void initialized() override
     {
-        // Start from the host's persisted values. Legacy local overrides must
-        // not silently restore a different speed or acceleration condition.
-        applySettings(rawFromJson(settings()), m_settings, false);
-        deleteFile(overridePath(dataDir()));
-        m_overrides = false;
+        // The host card's keys come from WinShun.ini; the plugin's tuning keys
+        // come from its own settings.json, applied on top. An initialize from
+        // an older version may still carry pre-split tuning values (the host
+        // keeps stored values it was once sent); the tuning file below wins,
+        // and seeding it here is what transfers those values across the split.
+        applySettings(cw::rawOverridesFromJson(settings(), false), m_settings, false);
+        loadPluginSettings();
         m_engine = std::make_unique<cw::WrapEngine>(m_settings);
         m_engine->rebuild(enumerateMonitors());
 
@@ -333,7 +300,7 @@ protected:
                 + ", watcher " + (m_watcherOk ? "started" : "FAILED")
                 + ", " + intText(static_cast<long long>(m_engine->monitorCount()))
                 + " monitor(s)"
-                + (m_overrides ? ", overrides loaded" : ""));
+                + (m_pluginSaved ? ", tuning loaded" : ""));
     }
 
     Items query(const Query& q) override
@@ -361,11 +328,6 @@ protected:
             // returns a diagnostics row: its copy field carries the text,
             // and Enter on it runs the plugin's copyDiag action.
             return { diagnosticsRow() };
-        case cw::CommandKind::ToggleTuner: {
-            // Toggle the overlay and refresh the list (the row shows on/off).
-            setWindowFlag(&cw::Settings::tuningOverlay, !m_settings.tuningOverlay);
-            return settingsList();
-        }
         case cw::CommandKind::MenuImpact:
             return impactMenu();
         case cw::CommandKind::MenuSpeed:
@@ -405,23 +367,11 @@ protected:
             // Like the diagnostics row: the text rides in the copy field, and
             // Enter runs the plugin action that flashes "copied".
             return { traceRow() };
-        default: {
-            // A setting change: apply it, persist it, show the new state.
-            applyCommand(cmd);
-            // For numeric settings, show the submenu with the new value
-            // marked current — the user just picked it, so the submenu is
-            // the natural next view.
-            switch (cmd.kind) {
-            case cw::CommandKind::SetImpactSpeed: return speedMenu();
-            case cw::CommandKind::SetBand: return bandMenu();
-            case cw::CommandKind::SetAccel: return accelMenu();
-            case cw::CommandKind::SetGuard: return guardMenu();
-            case cw::CommandKind::SetEdge: return edgeMenu();
-            case cw::CommandKind::SetTolerance: return toleranceMenu();
-            default: break;
-            }
-            return settingsList();
-        }
+        default:
+            // A value, reset or clear command: SHOW the pending change and let
+            // Enter apply it. A query never changes state — typing in the
+            // search box must not reconfigure the running wrap.
+            return { applyCommandRow(cmd) };
         }
     }
 
@@ -431,128 +381,108 @@ protected:
         if (a.action == "toggleEnabled") {
             const bool on = !m_hookEnabled;
             setEnabled(on);
-            return listEffects(effect::notify(on ? (chinese ? "光标回绕已开启" : "Cursor wrap on")
-                                                 : (chinese ? "光标回绕已关闭" : "Cursor wrap off")));
+            return listEffects(effect::notify(on ? (chinese ? "回绕功能已开启" : "Cursor wrap on")
+                                                 : (chinese ? "回绕功能已关闭" : "Cursor wrap off")));
+        }
+        if (a.action == "openSettings") {
+            openTuningWindow();
+            return listEffects(effect::notify(chinese ? "调参窗口已打开"
+                                                      : "The tuning window is open"));
+        }
+        if (a.action == "clearTrace") {
+            if (m_engine)
+                m_engine->clearArrivals();
+            return listEffects(effect::notify(chinese ? "已清空到达轨迹"
+                                                      : "The arrival trace is cleared"));
         }
         if (a.action == "cycleMode") {
-            cycleMode();
-            persistOverrides();
-            pushSettings();
+            cw::RawSettings raw;
+            raw.wrapMode = m_settings.wrapMode == cw::WrapMode::Both ? "vertical"
+                : m_settings.wrapMode == cw::WrapMode::VerticalOnly  ? "horizontal"
+                                                                     : "both";
+            raw.hasWrapMode = true;
+            commitSettings(raw);
             return listEffects(effect::notify(std::string(chinese ? "回绕模式：" : "Wrap mode: ")
                                               + modeLabel(m_settings.wrapMode, chinese)));
         }
         if (a.action == "toggleImpact") {
-            m_settings.impactGate = !m_settings.impactGate;
-            persistOverrides();
-            pushSettings();
+            cw::RawSettings raw;
+            raw.impactGate = !m_settings.impactGate;
+            raw.hasImpactGate = true;
+            commitSettings(raw);
             return listEffects(effect::notify(impactNotifyText()));
         }
         if (a.action == "setActivationCtrl" || a.action == "setActivationShift"
             || a.action == "setActivationAlways") {
-            m_settings.activation = a.action == "setActivationCtrl"   ? cw::ActivationMode::WhileCtrl
-                : a.action == "setActivationShift"                    ? cw::ActivationMode::WhileShift
-                                                                      : cw::ActivationMode::Always;
-            persistOverrides();
-            pushSettings();
+            cw::RawSettings raw;
+            raw.activationMode = a.action == "setActivationCtrl" ? "ctrl"
+                : a.action == "setActivationShift"               ? "shift"
+                                                                 : "always";
+            raw.hasActivation = true;
+            commitSettings(raw);
             return listEffects(effect::notify(std::string(chinese ? "激活方式：" : "Activation: ")
                                               + activationLabel(m_settings.activation, chinese)));
         }
         if (a.action == "resetDefaults") {
+            // The host card's keys are the host's: reset only what this plugin
+            // saves. The card keeps whatever it says.
             const cw::Settings defaults;
-            m_settings.wrapMode = defaults.wrapMode;
-            m_settings.activation = defaults.activation;
-            m_settings.impactGate = defaults.impactGate;
-            m_settings.impactSpeedPps = defaults.impactSpeedPps;
-            m_settings.impactBandPx = defaults.impactBandPx;
-            m_settings.impactAccelPps2 = defaults.impactAccelPps2;
-            m_settings.wrapGuardPx = defaults.wrapGuardPx;
-            m_settings.edgeThresholdPx = defaults.edgeThresholdPx;
-            m_settings.adjacencyTolerancePx = defaults.adjacencyTolerancePx;
-            m_settings.tuningOverlay = defaults.tuningOverlay;
-            m_settings.dataWindow = defaults.dataWindow;
-            m_settings.impactFlash = defaults.impactFlash;
-            persistOverrides();
-            pushSettings();
-            return listEffects(effect::notify(chinese ? "已恢复宿主设置卡" : "Host settings restored"));
+            cw::RawSettings raw;
+            raw.impactSpeedPps = defaults.impactSpeedPps;
+            raw.hasImpactSpeed = true;
+            raw.impactBandPx = defaults.impactBandPx;
+            raw.hasImpactBand = true;
+            raw.impactAccelPps2 = defaults.impactAccelPps2;
+            raw.hasImpactAccel = true;
+            raw.wrapGuardPx = defaults.wrapGuardPx;
+            raw.hasWrapGuard = true;
+            raw.edgeThresholdPx = defaults.edgeThresholdPx;
+            raw.hasEdgeThreshold = true;
+            raw.adjacencyTolerancePx = defaults.adjacencyTolerancePx;
+            raw.hasAdjacency = true;
+            raw.tuningOverlay = defaults.tuningOverlay;
+            raw.hasTuningOverlay = true;
+            raw.dataWindow = defaults.dataWindow;
+            raw.hasDataWindow = true;
+            raw.impactFlash = defaults.impactFlash;
+            raw.hasImpactFlash = true;
+            commitSettings(raw);
+            return listEffects(effect::notify(chinese ? "已恢复默认调参"
+                                                      : "The tuning is back at its defaults"));
         }
-        // Numeric value rows: "set:<field>:<value>".
+        // Value rows: "set:<field>:<value>" — the one form every picker and
+        // every pending change shares.
         if (a.action.rfind("set:", 0) == 0) {
             const size_t f1 = a.action.find(':', 4);
             if (f1 != std::string::npos) {
                 const std::string field = a.action.substr(4, f1 - 4);
                 const long long value = std::atoll(a.action.c_str() + f1 + 1);
-                Items after;
-                if (field == "speed") {
-                    m_settings.impactGate = true;
-                    m_settings.impactSpeedPps = static_cast<int>(value);
-                    after = speedMenu();
-                } else if (field == "band") {
-                    m_settings.impactBandPx = static_cast<int>(value);
-                    after = bandMenu();
-                } else if (field == "accel") {
-                    m_settings.impactAccelPps2 = static_cast<int>(value);
-                    after = accelMenu();
-                } else if (field == "guard") {
-                    m_settings.wrapGuardPx = static_cast<int>(value);
-                    after = guardMenu();
-                } else if (field == "edge") {
-                    m_settings.edgeThresholdPx = static_cast<int>(value);
-                    after = edgeMenu();
-                } else if (field == "tol") {
-                    m_settings.adjacencyTolerancePx = static_cast<int>(value);
-                    after = toleranceMenu();
-                } else if (field == "drag") {
-                    m_settings.disableDuringDrag = value != 0;
-                    after = boolMenu("cursorwrap.row.drag",
-                                     chinese ? "拖拽时不回绕" : "No wrap while dragging",
-                                     chinese ? "按住左键拖动窗口时禁用回绕，防止把窗口甩到对角"
-                                             : "disables wrapping while the left button is held",
-                                     m_settings.disableDuringDrag, "drag");
-                } else if (field == "single") {
-                    m_settings.disableOnSingleMonitor = value != 0;
-                    after = boolMenu("cursorwrap.row.single",
-                                     chinese ? "单屏时禁用" : "Disable on a single monitor",
-                                     chinese ? "只接一块屏时也回绕到本屏对边；不想这样可打开此项"
-                                             : "on one display the cursor still wraps to the same display's opposite edge",
-                                     m_settings.disableOnSingleMonitor, "single");
-                } else if (field == "mode") {
-                    m_settings.wrapMode = static_cast<cw::WrapMode>(value);
-                    after = modeMenu();
-                } else if (field == "impact") {
-                    m_settings.impactGate = value != 0;
-                    after = impactMenu();
-                } else if (field == "tuner") {
-                    m_settings.tuningOverlay = value != 0;
-                    after = tunerMenu();
-                } else if (field == "flash") {
-                    m_settings.impactFlash = value != 0;
-                    after = settingsList(); // the flash row toggles in place; no submenu of its own
-                } else if (field == "data") {
-                    m_settings.dataWindow = value != 0;
-                    after = dataMenu();
-                }
-                if (!after.empty()) {
-                    persistOverrides();
-                    pushSettings();
-                    return { effect::replace(after), effect::keep() };
+                cw::RawSettings raw;
+                if (fillSetRaw(field, value, raw)) {
+                    commitSettings(raw);
+                    return { effect::replace(afterMenu(field)), effect::keep() };
                 }
             }
         }
         if (a.action == "toggleTuner") {
-            setWindowFlag(&cw::Settings::tuningOverlay, !m_settings.tuningOverlay);
-            const bool chinese = winshun::Plugin::chinese();
+            cw::RawSettings raw;
+            raw.tuningOverlay = !m_settings.tuningOverlay;
+            raw.hasTuningOverlay = true;
+            commitSettings(raw);
             return listEffects(effect::notify(
                 m_settings.tuningOverlay
-                    ? (chinese ? "调参可视化已开启：甩到边缘看速度读数"
+                    ? (chinese ? "调参可视化已开启：甩向边缘看速度读数"
                                : "Tuning overlay on: push to an edge and watch the readout")
                     : (chinese ? "调参可视化已关闭" : "Tuning overlay off")));
         }
         if (a.action == "toggleDataWindow") {
-            setWindowFlag(&cw::Settings::dataWindow, !m_settings.dataWindow);
-            const bool chinese = winshun::Plugin::chinese();
+            cw::RawSettings raw;
+            raw.dataWindow = !m_settings.dataWindow;
+            raw.hasDataWindow = true;
+            commitSettings(raw);
             return listEffects(effect::notify(
                 m_settings.dataWindow
-                    ? (chinese ? "数据窗口已打开：实时显示速度分布与决策原因"
+                    ? (chinese ? "数据窗口已打开：实时显示速度分布和拒绝原因"
                                : "Data window open: live speeds, histogram and skip reasons")
                     : (chinese ? "数据窗口已关闭" : "Data window closed")));
         }
@@ -575,27 +505,32 @@ protected:
 
     void settingsChanged(const Json& settings) override
     {
-        const cw::RawSettings cardRaw = rawFromJson(settings);
+        // The host card's keys only. The payload may still carry pre-split
+        // tuning values the host once stored (pluginSettings keeps stored user
+        // values even after their key left the manifest); honoring them here
+        // would let that stale copy restore itself over the user's newer
+        // tuning, so the filter drops them.
+        const cw::RawSettings cardRaw = cw::rawOverridesFromJson(settings, true);
+        const int toleranceBefore = m_settings.adjacencyTolerancePx;
         applySettings(cardRaw, m_settings, true);
-        // Host notifications are authoritative, including values equal to
-        // defaults. Never put the legacy search-bar file back on top.
-        deleteFile(overridePath(dataDir()));
-        m_overrides = false;
         if (m_engine) {
             m_engine->setSettings(m_settings);
             // The adjacency tolerance changes the topology itself.
-            m_engine->rebuild(enumerateMonitors());
+            if (m_settings.adjacencyTolerancePx != toleranceBefore)
+                m_engine->rebuild(enumerateMonitors());
         }
         if (m_hook)
             m_hook->updateSettings(m_settings);
         // The two windows are settings now, so the settings page drives them.
         applyWindowSettings();
+        m_settingsWindow.settingsUpdated();
         refresh();
     }
 
     void shuttingDown() override
     {
         stopCoalescer();
+        m_settingsWindow.stop();
         m_dataWindow.stop();
         m_overlay.stop();
         if (m_hook) {
@@ -673,9 +608,10 @@ private:
                 if (m_dataWindow.takeCloseRequest()) {
                     std::lock_guard lock(m_persistMutex);
                     if (m_settings.dataWindow) {
-                        m_settings.dataWindow = false;
-                        persistOverrides();
-                        pushSettings();
+                        cw::RawSettings raw;
+                        raw.dataWindow = false;
+                        raw.hasDataWindow = true;
+                        commitSettings(raw);
                     }
                 }
             }
@@ -708,14 +644,6 @@ private:
             m_dataWindow.start([this] { return dataSnapshot(); });
         else if (!m_settings.dataWindow && m_dataWindow.active())
             m_dataWindow.stop();
-    }
-
-    void setWindowFlag(bool cw::Settings::*field, bool on)
-    {
-        m_settings.*field = on;
-        persistOverrides();
-        pushSettings();
-        applyWindowSettings();
     }
 
     cw::DataSnapshot dataSnapshot()
@@ -756,11 +684,15 @@ private:
 
     // --- persistence ---------------------------------------------------------
 
-    void loadOverridesFromDisk()
+    void loadPluginSettings()
     {
         const std::string text = readFileText(overridePath(dataDir()));
         if (text.empty()) {
-            m_overrides = false;
+            // First start with the split storage: seed the file with the
+            // values in effect now, which is what carries an upgrade's tuning
+            // (the host still holds it) across to the plugin's own file. After
+            // this, the plugin's keys live here and the host's keys there.
+            persistPluginSettings();
             return;
         }
         bool valid = false;
@@ -768,142 +700,218 @@ private:
         const cw::Settings overrides = cw::loadOverrides(text, valid, problem);
         if (!valid) {
             log("warn", "cursorwrap: ignoring settings.json: " + problem);
-            m_overrides = false;
             return;
         }
-        // Merge: only the keys the file carries were clamped into overrides;
-        // the rest keep the host's values.
-        //
-        // This used to be a hand-written list of every field, and the list fell
-        // behind the dumper: 13 keys were written and 9 were read, so
-        // "accel 2000" survived in settings.json and was silently dropped on the
-        // next start. cw::settingsFields() is now the single source of truth and
-        // this loop derives everything from it, so a setting cannot be persisted
-        // by one side and forgotten by the other.
+        // Merge the plugin's keys on top of the host's values. loadOverrides
+        // already restricted the file to plugin-owned keys, so a stale
+        // host-card key in a pre-split file cannot win over the host.
         cw::RawSettings raw;
         for (const cw::SettingsField& field : cw::settingsFields()) {
-            // Only the keys the FILE carries become overrides. Without this guard
-            // every field is marked, so one saved key would pin all thirteen and
-            // the host card could never change anything again.
             if (!field.isSet(overrides))
                 continue;
             markOverride(raw, field, overrides);
         }
         applySettings(raw, m_settings, true);
-        m_overrides = raw.hasWrapMode || raw.hasActivation || raw.hasImpactGate
-            || raw.hasImpactSpeed || raw.hasImpactBand || raw.hasImpactAccel
-            || raw.hasWrapGuard || raw.hasEdgeThreshold || raw.hasAdjacency || raw.hasDrag
-            || raw.hasSingle || raw.hasTuningOverlay || raw.hasDataWindow || raw.hasImpactFlash;
+        m_pluginSaved = raw.hasImpactSpeed || raw.hasImpactBand || raw.hasImpactAccel
+            || raw.hasWrapGuard || raw.hasEdgeThreshold || raw.hasAdjacency
+            || raw.hasTuningOverlay || raw.hasDataWindow || raw.hasImpactFlash;
+        // A pre-split file also carried host keys; rewrite without them so the
+        // file holds exactly what this plugin owns.
+        persistPluginSettings();
     }
 
-    void persistOverrides()
+    void persistPluginSettings()
     {
         const std::string json = cw::dumpOverrides(m_settings);
         if (json.find("\"settings\":{}") != std::string::npos) {
-            // Everything back at the defaults: the host card is authoritative.
+            // Every tuning key back at the default: no file to keep.
             deleteFile(overridePath(dataDir()));
-            m_overrides = false;
+            m_pluginSaved = false;
             return;
         }
-        m_overrides = writeFileText(overridePath(dataDir()), json);
-        if (!m_overrides)
+        m_pluginSaved = writeFileText(overridePath(dataDir()), json);
+        if (!m_pluginSaved)
             log("warn", "cursorwrap: could not write settings.json");
     }
 
-    // --- search-bar commands --------------------------------------------------
+    // --- the one settings commit path ------------------------------------------
+    //
+    // Every change a surface can make — a search-bar action, the tuning
+    // window's controls — comes through here: range-checked merge, the engine,
+    // the hook and the windows follow, the plugin's keys are saved, and the
+    // host hears of the host-card keys it declares (it stores them and answers
+    // with settingsChanged, which applies and never pushes back).
 
-    void applyCommand(const cw::ParsedCommand& cmd)
+    void commitSettings(const cw::RawSettings& raw)
     {
-        switch (cmd.kind) {
-        case cw::CommandKind::SetImpact:
-            m_settings.impactGate = cmd.value != 0;
-            break;
-        case cw::CommandKind::SetImpactSpeed:
-            m_settings.impactGate = true; // setting a speed implies wanting the gate
-            m_settings.impactSpeedPps = static_cast<int>(cmd.value);
-            break;
-        case cw::CommandKind::SetBand:
-            m_settings.impactBandPx = static_cast<int>(cmd.value);
-            break;
-        case cw::CommandKind::SetAccel:
-            m_settings.impactAccelPps2 = static_cast<int>(cmd.value);
-            break;
-        case cw::CommandKind::SetMode:
-            m_settings.wrapMode = static_cast<cw::WrapMode>(cmd.value);
-            break;
-        case cw::CommandKind::SetActivation:
-            m_settings.activation = static_cast<cw::ActivationMode>(cmd.value);
-            break;
-        case cw::CommandKind::SetGuard:
-            m_settings.wrapGuardPx = static_cast<int>(cmd.value);
-            break;
-        case cw::CommandKind::SetEdge:
-            m_settings.edgeThresholdPx = static_cast<int>(cmd.value);
-            break;
-        case cw::CommandKind::SetTolerance:
-            m_settings.adjacencyTolerancePx = static_cast<int>(cmd.value);
-            break;
-        case cw::CommandKind::SetDrag:
-            m_settings.disableDuringDrag = cmd.value != 0;
-            break;
-        case cw::CommandKind::SetSingle:
-            m_settings.disableOnSingleMonitor = cmd.value != 0;
-            break;
-        case cw::CommandKind::SetOverlay:
-            m_settings.tuningOverlay = cmd.value != 0;
-            break;
-        case cw::CommandKind::SetData:
-            m_settings.dataWindow = cmd.value != 0;
-            break;
-        case cw::CommandKind::SetImpactFlash:
-            m_settings.impactFlash = cmd.value < 0 ? !m_settings.impactFlash : cmd.value != 0;
-            break;
-        case cw::CommandKind::ClearTrace:
-            if (m_engine)
-                m_engine->clearArrivals();
-            break;
-        case cw::CommandKind::CopyDiagnostics:
-            // The copy effect only runs on action responses, so this query
-            // returns a diagnostics row: its copy field carries the text,
-            // and Enter on it runs the plugin's copyDiag action.
-            break;
-        case cw::CommandKind::ResetToDefaults: {
-            const cw::Settings defaults;
-            m_settings.wrapMode = defaults.wrapMode;
-            m_settings.activation = defaults.activation;
-            m_settings.impactGate = defaults.impactGate;
-            m_settings.impactSpeedPps = defaults.impactSpeedPps;
-            m_settings.impactBandPx = defaults.impactBandPx;
-            m_settings.impactAccelPps2 = defaults.impactAccelPps2;
-            m_settings.wrapGuardPx = defaults.wrapGuardPx;
-            m_settings.edgeThresholdPx = defaults.edgeThresholdPx;
-            m_settings.adjacencyTolerancePx = defaults.adjacencyTolerancePx;
-            m_settings.tuningOverlay = defaults.tuningOverlay;
-            m_settings.dataWindow = defaults.dataWindow;
-            m_settings.impactFlash = defaults.impactFlash;
-            break;
+        // Setting a speed implies wanting the gate on (the search bar's old
+        // rule, kept so both surfaces behave the same).
+        cw::RawSettings merged = raw;
+        if (merged.hasImpactSpeed && !merged.hasImpactGate && !m_settings.impactGate) {
+            merged.impactGate = true;
+            merged.hasImpactGate = true;
         }
-        default:
-            break;
+        const int toleranceBefore = m_settings.adjacencyTolerancePx;
+        applySettings(merged, m_settings, true);
+        if (m_engine) {
+            m_engine->setSettings(m_settings);
+            if (m_settings.adjacencyTolerancePx != toleranceBefore)
+                m_engine->rebuild(enumerateMonitors());
         }
-        persistOverrides();
-        pushSettings();
+        if (m_hook)
+            m_hook->updateSettings(m_settings);
+        persistPluginSettings();
+        pushHostSettings(merged);
         applyWindowSettings();
+        m_settingsWindow.settingsUpdated();
     }
 
-    void cycleMode()
+    // "set:<field>:<value>" -> a partial RawSettings. False for a field this
+    // plugin does not know, so an unknown action stays an honest error.
+    bool fillSetRaw(const std::string& field, long long value, cw::RawSettings& raw) const
     {
-        switch (m_settings.wrapMode) {
-        case cw::WrapMode::Both:
-            m_settings.wrapMode = cw::WrapMode::VerticalOnly;
-            break;
-        case cw::WrapMode::VerticalOnly:
-            m_settings.wrapMode = cw::WrapMode::HorizontalOnly;
-            break;
-        case cw::WrapMode::HorizontalOnly:
-            m_settings.wrapMode = cw::WrapMode::Both;
-            break;
+        if (field == "speed") {
+            raw.impactSpeedPps = static_cast<double>(value);
+            raw.hasImpactSpeed = true;
+        } else if (field == "band") {
+            raw.impactBandPx = static_cast<double>(value);
+            raw.hasImpactBand = true;
+        } else if (field == "accel") {
+            raw.impactAccelPps2 = static_cast<double>(value);
+            raw.hasImpactAccel = true;
+        } else if (field == "guard") {
+            raw.wrapGuardPx = static_cast<double>(value);
+            raw.hasWrapGuard = true;
+        } else if (field == "edge") {
+            raw.edgeThresholdPx = static_cast<double>(value);
+            raw.hasEdgeThreshold = true;
+        } else if (field == "tol") {
+            raw.adjacencyTolerancePx = static_cast<double>(value);
+            raw.hasAdjacency = true;
+        } else if (field == "drag") {
+            raw.disableDuringDrag = value != 0;
+            raw.hasDrag = true;
+        } else if (field == "single") {
+            raw.disableOnSingleMonitor = value != 0;
+            raw.hasSingle = true;
+        } else if (field == "mode") {
+            raw.wrapMode = cw::modeText(static_cast<cw::WrapMode>(value));
+            raw.hasWrapMode = true;
+        } else if (field == "impact") {
+            raw.impactGate = value != 0;
+            raw.hasImpactGate = true;
+        } else if (field == "tuner") {
+            raw.tuningOverlay = value != 0;
+            raw.hasTuningOverlay = true;
+        } else if (field == "flash") {
+            raw.impactFlash = value != 0;
+            raw.hasImpactFlash = true;
+        } else if (field == "data") {
+            raw.dataWindow = value != 0;
+            raw.hasDataWindow = true;
+        } else {
+            return false;
         }
+        return true;
+    }
+
+    // The submenu a picked value naturally shows next.
+    Items afterMenu(const std::string& field)
+    {
+        const bool chinese = winshun::Plugin::chinese();
+        if (field == "speed")
+            return speedMenu();
+        if (field == "band")
+            return bandMenu();
+        if (field == "accel")
+            return accelMenu();
+        if (field == "guard")
+            return guardMenu();
+        if (field == "edge")
+            return edgeMenu();
+        if (field == "tol")
+            return toleranceMenu();
+        if (field == "mode")
+            return modeMenu();
+        if (field == "impact")
+            return impactMenu();
+        if (field == "tuner")
+            return tunerMenu();
+        if (field == "data")
+            return dataMenu();
+        if (field == "drag")
+            return boolMenu("cursorwrap.row.drag", chinese ? "拖拽时禁用" : "No wrap while dragging",
+                            chinese ? "按住左键拖动时暂不回绕，防止窗口被甩到另一屏"
+                                    : "disables wrapping while the left button is held",
+                            m_settings.disableDuringDrag, "drag");
+        if (field == "single")
+            return boolMenu("cursorwrap.row.single",
+                            chinese ? "单屏时禁用" : "Disable on a single monitor",
+                            chinese ? "只有一个屏时也回绕到同一屏的对边，可在这里关闭"
+                                    : "on one display the cursor still wraps to the same display's opposite edge",
+                            m_settings.disableOnSingleMonitor, "single");
+        return settingsList(); // flash toggles in place; no submenu of its own
+    }
+
+    void pushHostSettings(const cw::RawSettings& raw)
+    {
+        // Only the keys the host card declares, and only the ones this change
+        // touched: the host stores them and answers with settingsChanged,
+        // which must never be provoked by a value that did not move.
+        Json::Object values;
+        for (const auto& f : cw::settingsFields()) {
+            if (f.owner != cw::FieldOwner::Host)
+                continue;
+            if (!rawHasKey(raw, f))
+                continue;
+            switch (f.kind) {
+            case cw::FieldKind::Bool: values[f.key] = f.boolean(m_settings); break;
+            case cw::FieldKind::Number:
+                values[f.key] = static_cast<double>(f.number(m_settings));
+                break;
+            case cw::FieldKind::Text: values[f.key] = f.text(m_settings); break;
+            }
+        }
+        if (values.empty())
+            return;
+        updateSettings(Json(std::move(values)));
+    }
+
+    void setWindowFlag(bool cw::Settings::*field, bool on)
+    {
+        cw::RawSettings raw;
+        if (field == &cw::Settings::tuningOverlay) {
+            raw.tuningOverlay = on;
+            raw.hasTuningOverlay = true;
+        } else if (field == &cw::Settings::dataWindow) {
+            raw.dataWindow = on;
+            raw.hasDataWindow = true;
+        } else {
+            return;
+        }
+        commitSettings(raw);
+    }
+
+    // True when the RawSettings names this field (the has* flag the table's
+    // key maps to). markOverride's mirror.
+    bool rawHasKey(const cw::RawSettings& raw, const cw::SettingsField& f) const
+    {
+        const std::string key = f.key;
+        if (key == "wrapMode") return raw.hasWrapMode;
+        if (key == "activationMode") return raw.hasActivation;
+        if (key == "disableDuringDrag") return raw.hasDrag;
+        if (key == "disableOnSingleMonitor") return raw.hasSingle;
+        if (key == "edgeThresholdPx") return raw.hasEdgeThreshold;
+        if (key == "wrapGuardPx") return raw.hasWrapGuard;
+        if (key == "adjacencyTolerancePx") return raw.hasAdjacency;
+        if (key == "impactGate") return raw.hasImpactGate;
+        if (key == "impactSpeedPps") return raw.hasImpactSpeed;
+        if (key == "impactBandPx") return raw.hasImpactBand;
+        if (key == "impactAccelPps2") return raw.hasImpactAccel;
+        if (key == "tuningOverlay") return raw.hasTuningOverlay;
+        if (key == "dataWindow") return raw.hasDataWindow;
+        if (key == "impactFlash") return raw.hasImpactFlash;
+        return false;
     }
 
     std::string impactNotifyText() const
@@ -919,6 +927,169 @@ private:
         return text;
     }
 
+    // The row a value command shows instead of acting: what will change, and
+    // the action that applies it. A query never reconfigures the wrap.
+    Item applyCommandRow(const cw::ParsedCommand& cmd)
+    {
+        const bool chinese = winshun::Plugin::chinese();
+        const char* pending = chinese ? "（待应用）" : " (pending)";
+        const char* apply = chinese ? "应用" : "Apply";
+        auto row = [this, &apply](const std::string& action, std::string title,
+                                  std::string subtitle) {
+            Item r("cursorwrap.apply", std::move(title), std::move(subtitle));
+            r.withActions({ { action, apply, "Enter" } });
+            return r;
+        };
+        switch (cmd.kind) {
+        case cw::CommandKind::SetImpact:
+            return row("set:impact:" + intText(cmd.value),
+                       std::string(chinese ? "撞击模式：" : "Impact mode: ")
+                           + (cmd.value ? (chinese ? "开" : "on") : (chinese ? "关" : "off"))
+                           + pending,
+                       std::string(chinese ? "Enter 应用" : "Enter to apply"));
+        case cw::CommandKind::SetImpactSpeed:
+            return row("set:speed:" + intText(cmd.value),
+                       std::string(chinese ? "撞击速度：" : "Impact speed: ")
+                           + intText(cmd.value) + " px/s" + pending,
+                       std::string(chinese ? "Enter 应用（当前 " : "Enter to apply (current ")
+                           + intText(m_settings.impactSpeedPps)
+                           + (chinese ? " px/s；会一并打开撞击模式）" : " px/s; turns the gate on)"));
+        case cw::CommandKind::SetBand:
+            return row("set:band:" + intText(cmd.value),
+                       std::string(chinese ? "测量带宽：" : "Measuring band: ")
+                           + intText(cmd.value) + " px" + pending,
+                       std::string(chinese ? "Enter 应用（当前 " : "Enter to apply (current ")
+                           + intText(m_settings.impactBandPx) + " px）");
+        case cw::CommandKind::SetAccel:
+            return row("set:accel:" + intText(cmd.value),
+                       cmd.value == 0
+                           ? std::string(chinese ? "关闭加速度条件" : "Acceleration off") + pending
+                           : std::string(chinese ? "撞击加速度：" : "Impact acceleration: ")
+                                 + intText(cmd.value) + " px/s²" + pending,
+                       std::string(chinese ? "Enter 应用（当前 " : "Enter to apply (current ")
+                           + (m_settings.impactAccelPps2 == 0
+                                  ? std::string(chinese ? "关" : "off")
+                                  : intText(m_settings.impactAccelPps2) + " px/s²")
+                           + (chinese ? "）" : ")"));
+        case cw::CommandKind::SetGuard:
+            return row("set:guard:" + intText(cmd.value),
+                       std::string(chinese ? "防震半径：" : "Wrap guard: ")
+                           + intText(cmd.value) + " px" + pending,
+                       std::string(chinese ? "Enter 应用（当前 " : "Enter to apply (current ")
+                           + intText(m_settings.wrapGuardPx) + (chinese ? " px）" : " px)"));
+        case cw::CommandKind::SetEdge:
+            return row("set:edge:" + intText(cmd.value),
+                       std::string(chinese ? "边缘阈值：" : "Edge threshold: ")
+                           + intText(cmd.value) + " px" + pending,
+                       std::string(chinese ? "Enter 应用（当前 " : "Enter to apply (current ")
+                           + intText(m_settings.edgeThresholdPx) + (chinese ? " px）" : " px)"));
+        case cw::CommandKind::SetTolerance:
+            return row("set:tol:" + intText(cmd.value),
+                       std::string(chinese ? "邻接容差：" : "Adjacency tolerance: ")
+                           + intText(cmd.value) + " px" + pending,
+                       std::string(chinese ? "Enter 应用（当前 " : "Enter to apply (current ")
+                           + intText(m_settings.adjacencyTolerancePx)
+                           + (chinese ? " px）" : " px)"));
+        case cw::CommandKind::SetMode:
+            return row("set:mode:" + intText(cmd.value),
+                       std::string(chinese ? "回绕模式：" : "Wrap mode: ")
+                           + modeLabel(static_cast<cw::WrapMode>(cmd.value), chinese) + pending,
+                       std::string(chinese ? "Enter 应用" : "Enter to apply"));
+        case cw::CommandKind::SetActivation: {
+            const auto mode = static_cast<cw::ActivationMode>(cmd.value);
+            const char* action = mode == cw::ActivationMode::WhileCtrl   ? "setActivationCtrl"
+                : mode == cw::ActivationMode::WhileShift                 ? "setActivationShift"
+                                                                         : "setActivationAlways";
+            return row(action,
+                       std::string(chinese ? "激活方式：" : "Activation: ")
+                           + activationLabel(mode, chinese) + pending,
+                       std::string(chinese ? "Enter 应用" : "Enter to apply"));
+        }
+        case cw::CommandKind::SetDrag:
+            return row("set:drag:" + intText(cmd.value),
+                       std::string(chinese ? "拖拽时禁用：" : "No wrap while dragging: ")
+                           + (cmd.value ? (chinese ? "开" : "on") : (chinese ? "关" : "off"))
+                           + pending,
+                       std::string(chinese ? "Enter 应用" : "Enter to apply"));
+        case cw::CommandKind::SetSingle:
+            return row("set:single:" + intText(cmd.value),
+                       std::string(chinese ? "单屏时禁用：" : "Disable on one monitor: ")
+                           + (cmd.value ? (chinese ? "开" : "on") : (chinese ? "关" : "off"))
+                           + pending,
+                       std::string(chinese ? "Enter 应用" : "Enter to apply"));
+        case cw::CommandKind::SetOverlay:
+            return row("set:tuner:" + intText(cmd.value),
+                       std::string(chinese ? "调参可视化：" : "Tuning overlay: ")
+                           + (cmd.value ? (chinese ? "开" : "on") : (chinese ? "关" : "off"))
+                           + pending,
+                       std::string(chinese ? "Enter 应用" : "Enter to apply"));
+        case cw::CommandKind::SetData:
+            return row("set:data:" + intText(cmd.value),
+                       std::string(chinese ? "数据窗口：" : "Data window: ")
+                           + (cmd.value ? (chinese ? "开" : "on") : (chinese ? "关" : "off"))
+                           + pending,
+                       std::string(chinese ? "Enter 应用" : "Enter to apply"));
+        case cw::CommandKind::SetImpactFlash: {
+            const long long target = cmd.value < 0 ? (m_settings.impactFlash ? 0LL : 1LL) : cmd.value;
+            return row("set:flash:" + intText(target),
+                       std::string(chinese ? "撞击光效：" : "Impact glow: ")
+                           + (target ? (chinese ? "开" : "on") : (chinese ? "关" : "off")) + pending,
+                       std::string(chinese ? "Enter 应用" : "Enter to apply"));
+        }
+        case cw::CommandKind::ResetToDefaults:
+            return row("resetDefaults",
+                       std::string(chinese ? "恢复默认调参" : "Reset tuning to defaults") + pending,
+                       std::string(chinese ? "Enter 应用：速度、带宽、加速度、防震、阈值与两个窗口回到默认"
+                                           : "Enter to apply: speed, band, acceleration, guard, thresholds and both windows"));
+        case cw::CommandKind::ClearTrace:
+            return row("clearTrace",
+                       std::string(chinese ? "清空到达轨迹" : "Clear the arrival trace") + pending,
+                       std::string(chinese ? "Enter 应用" : "Enter to apply"));
+        default:
+            return unknownRow(cmd.word);
+        }
+    }
+
+    // --- the tuning window -----------------------------------------------------
+
+    void openTuningWindow()
+    {
+        m_settingsWindow.start(
+            [this] { return tuningSnapshot(); },
+            [this](const cw::RawSettings& raw) {
+                // The window's thread. The same mutex the coalescer's data-
+                // window close uses; commitSettings is the one update path.
+                std::lock_guard lock(m_persistMutex);
+                commitSettings(raw);
+            });
+    }
+
+    cw::SettingsUiState tuningSnapshot()
+    {
+        cw::SettingsUiState s;
+        s.settings = m_settings;
+        s.chinese = winshun::Plugin::chinese();
+        const std::vector<cw::Arrival> trace = m_engine ? m_engine->arrivals()
+                                                        : std::vector<cw::Arrival> {};
+        s.advice = cw::adviseGate(trace, m_settings.impactSpeedPps);
+        s.arrivals = trace.size();
+        s.summary = std::string(chineseLabel()
+                                ? "宿主卡片：方向 "
+                                : "Host card: mode ")
+            + modeLabel(m_settings.wrapMode, chineseLabel())
+            + (chineseLabel() ? " · 激活 " : " · activation ")
+            + activationLabel(m_settings.activation, chineseLabel())
+            + (chineseLabel() ? " · 撞击 " : " · impact ")
+            + (m_settings.impactGate
+                   ? (chineseLabel() ? "开 " : "on ") + intText(m_settings.impactSpeedPps)
+                                                     + " px/s"
+                   : (chineseLabel() ? "关" : "off"));
+        return s;
+    }
+
+    bool chineseLabel() const { return winshun::Plugin::chinese(); }
+
+    void showSettings() override { openTuningWindow(); }
     Item unknownRow(const std::string& text)
     {
         const bool chinese = winshun::Plugin::chinese();
@@ -962,30 +1133,20 @@ private:
 
     void pushSettings()
     {
-        Json::Object values;
-        for (const auto& field : cw::settingsFields()) {
-            switch (field.kind) {
-            case cw::FieldKind::Bool: values[field.key] = field.boolean(m_settings); break;
-            case cw::FieldKind::Number: values[field.key] = static_cast<double>(field.number(m_settings)); break;
-            case cw::FieldKind::Text: values[field.key] = field.text(m_settings); break;
-            }
-        }
-        updateHostSettings(std::move(values));
-        if (m_engine)
-            m_engine->setSettings(m_settings);
-        if (m_hook)
-            m_hook->updateSettings(m_settings);
+        // Superseded: pushHostSettings(raw) pushes only the touched host-card
+        // keys through the commit path. A whole-table push would also send the
+        // plugin-owned keys the host no longer declares.
     }
 
     std::string sourceNote(bool chinese) const
     {
-        if (!m_overrides)
+        if (!m_pluginSaved)
             return {};
-        return chinese ? " · 搜索栏覆盖中（reset 恢复宿主设置）"
-                       : " · search-bar overrides active (reset to fall back)";
+        return chinese ? "　高级调参已保存（reset 恢复默认）"
+                       : "— saved tuning active (reset returns to defaults)";
     }
 
-    Item statusRow()
+Item statusRow()
     {
         const bool chinese = winshun::Plugin::chinese();
         const cw::Diagnostics d = m_engine ? m_engine->diagnostics(m_hookOk)
@@ -1070,43 +1231,12 @@ private:
 
     Items settingsList()
     {
+        // The home list: the everyday state and the two window entries. The
+        // numbers live in the tuning window, the rest on the host card; the
+        // direct commands (speed, band, tune, reset, ...) still answer.
         const bool chinese = winshun::Plugin::chinese();
         Items rows;
         rows.push_back(statusRow());
-
-        rows.push_back(Item("cursorwrap.row.impact",
-                            std::string(chinese ? "撞击模式：" : "Impact mode: ")
-                                + (m_settings.impactGate
-                                       ? (chinese ? "开" : "on")
-                                       : (chinese ? "关" : "off")),
-                            chinese ? "Enter 切换 · 右键菜单可直接选开或关"
-                                    : "Enter to toggle · the context menu picks on or off"));
-        rows.back().withActions({ { "toggleImpact", chinese ? "切换" : "Toggle", "Enter" },
-            { "set:impact:1", chinese ? "开" : "On", "Ctrl+Enter" },
-            { "set:impact:0", chinese ? "关" : "Off", "Shift+Enter" } });
-
-        rows.push_back(drillRow("cursorwrap.row.speed",
-                                std::string(chinese ? "撞击速度：" : "Impact speed: ")
-                                    + intText(m_settings.impactSpeedPps) + " px/s",
-                                chinese ? "Enter 选择门槛值" : "Enter to pick a threshold",
-                                "cursorwrap speed "));
-
-        rows.push_back(drillRow("cursorwrap.row.band",
-                                std::string(chinese ? "撞击测速区间：" : "Impact band: ")
-                                    + intText(m_settings.impactBandPx) + " px",
-                                chinese ? "Enter 选择区间" : "Enter to pick a band",
-                                "cursorwrap band "));
-
-        // The acceleration floor: "the hand must be speeding up at the edge",
-        // not merely fast. 0 (off) keeps the old speed-only behaviour.
-        rows.push_back(drillRow("cursorwrap.row.accel",
-                                std::string(chinese ? "撞击加速度：" : "Impact acceleration: ")
-                                    + (m_settings.impactAccelPps2 == 0
-                                           ? (chinese ? "关（只看速度）" : "off (speed only)")
-                                           : intText(m_settings.impactAccelPps2) + " px/s²"),
-                                chinese ? "Enter 选择加速度门槛；开启后必须「加速冲进边缘」才回绕"
-                                        : "Enter to pick an acceleration floor · when on, the hand must speed up into the edge",
-                                "cursorwrap accel "));
 
         rows.push_back(Item("cursorwrap.row.mode",
                             std::string(chinese ? "回绕模式：" : "Wrap mode: ")
@@ -1115,103 +1245,36 @@ private:
                                     : "Enter to cycle both→vertical→horizontal"));
         rows.back().withActions({ {"cycleMode", chinese ? "切换" : "Cycle", "Enter"} });
 
-        rows.push_back(drillRow("cursorwrap.row.activation",
-                                std::string(chinese ? "激活方式：" : "Activation: ")
-                                    + activationLabel(m_settings.activation, chinese),
-                                chinese ? "Enter 选择激活方式" : "Enter to pick one",
-                                "cursorwrap activation "));
+        rows.push_back(Item("cursorwrap.row.impact",
+                            std::string(chinese ? "撞击模式：" : "Impact mode: ")
+                                + (m_settings.impactGate
+                                       ? (chinese ? "开" : "on")
+                                       : (chinese ? "关" : "off")),
+                            chinese ? "Enter 切换 — 需要足够速度撞上边缘才回绕"
+                                    : "Enter to toggle — the cursor must hit the edge fast enough"));
+        rows.back().withActions({ { "toggleImpact", chinese ? "切换" : "Toggle", "Enter" },
+            { "set:impact:1", chinese ? "开" : "On", "Ctrl+Enter" },
+            { "set:impact:0", chinese ? "关" : "Off", "Shift+Enter" } });
 
-        rows.push_back(drillRow("cursorwrap.row.guard",
-                                std::string(chinese ? "防震半径：" : "Wrap guard: ")
-                                    + intText(m_settings.wrapGuardPx) + " px",
-                                chinese ? "Enter 选择半径" : "Enter to pick a radius",
-                                "cursorwrap guard "));
-
-        rows.push_back(drillRow("cursorwrap.row.edge",
-                                std::string(chinese ? "边缘阈值：" : "Edge threshold: ")
-                                    + intText(m_settings.edgeThresholdPx) + " px",
-                                chinese ? "Enter 选择阈值" : "Enter to pick one",
-                                "cursorwrap edge "));
-
-        rows.push_back(drillRow("cursorwrap.row.tol",
-                                std::string(chinese ? "内边容差：" : "Adjacency tolerance: ")
-                                    + intText(m_settings.adjacencyTolerancePx) + " px",
-                                chinese ? "Enter 选择容差" : "Enter to pick one",
-                                "cursorwrap tol "));
-
-        rows.push_back(drillRow("cursorwrap.row.drag",
-                                std::string(chinese ? "拖拽时不回绕：" : "No wrap while dragging: ")
-                                    + (m_settings.disableDuringDrag ? (chinese ? "开" : "on")
-                                                                    : (chinese ? "关" : "off")),
-                                chinese ? "Enter 选择开关 · 右键菜单可直接选开或关"
-                                        : "Enter to pick on or off · the context menu too",
-                                "cursorwrap drag "));
-        rows.back().withActions({ { "enterDrill", chinese ? "切换" : "Toggle", "Enter" },
-            { "set:drag:1", chinese ? "开" : "On", "Ctrl+Enter" },
-            { "set:drag:0", chinese ? "关" : "Off", "Shift+Enter" } });
-
-        rows.push_back(drillRow("cursorwrap.row.single",
-                                std::string(chinese ? "单屏时禁用：" : "Disable on one monitor: ")
-                                    + (m_settings.disableOnSingleMonitor ? (chinese ? "开" : "on")
-                                                                         : (chinese ? "关" : "off")),
-                                chinese ? "Enter 选择开关 · 右键菜单可直接选开或关"
-                                        : "Enter to pick on or off · the context menu too",
-                                "cursorwrap single "));
-        // The drill wins Enter (performPlugin prefers setQuery at index 0), so
-        // the row's own actions sit at Ctrl+Enter/Shift+Enter and the context
-        // menu; the first entry names what Enter honestly does.
-        rows.back().withActions({ { "enterDrill", chinese ? "切换" : "Toggle", "Enter" },
-            { "set:single:1", chinese ? "开" : "On", "Ctrl+Enter" },
-            { "set:single:0", chinese ? "关" : "Off", "Shift+Enter" } });
-
-        rows.push_back(drillRow("cursorwrap.row.tuner",
-                                std::string(chinese ? "调参可视化：" : "Tuning overlay: ")
-                                    + (m_settings.tuningOverlay ? (chinese ? "开" : "on")
-                                                                : (chinese ? "关" : "off")),
-                                chinese ? "Enter 打开子菜单（开关 / 区间 / 门槛 / 防震 / 阈值）· 右键菜单可直接选开或关"
-                                        : "Enter for the submenu (switch, band, gate, guard, threshold) · the context menu picks on or off",                                "cursorwrap tune "));
-        rows.back().withActions({ { "enterDrill", chinese ? "打开子菜单" : "Submenu", "Enter" },
-            { "set:tuner:1", chinese ? "开" : "On", "Ctrl+Enter" },
-            { "set:tuner:0", chinese ? "关" : "Off", "Shift+Enter" } });
-
-        rows.push_back(drillRow("cursorwrap.row.flash",
-                                std::string(chinese ? "撞击穿越光效：" : "Impact glow: ")
-                                    + (m_settings.impactFlash ? (chinese ? "开" : "on")
-                                                              : (chinese ? "关" : "off")),
-                                chinese ? "Enter 切换；成功撞击穿越时沿边亮一下，纯装饰 · 右键菜单可直接选开或关"
-                                        : "Enter to toggle; a short glow along the edge after a successful impact wrap, decoration only · the context menu picks on or off",
-                                "cursorwrap flash "));
-        rows.back().withActions({ { "enterDrill", chinese ? "切换" : "Toggle", "Enter" },
-            { "set:flash:1", chinese ? "开" : "On", "Ctrl+Enter" },
-            { "set:flash:0", chinese ? "关" : "Off", "Shift+Enter" } });
+        Item tuneWindow("cursorwrap.row.window",
+                        chinese ? "调参窗口" : "Tuning window",
+                        chinese ? "Enter 打开：速度、加速度、测量带宽、防震、阈值与建议值"
+                                : "Enter to open: speed, acceleration, band, guard, thresholds, suggestion");
+        tuneWindow.withActions({ {"openSettings", chinese ? "打开" : "Open", "Enter"} });
+        rows.push_back(std::move(tuneWindow));
 
         rows.push_back(drillRow("cursorwrap.row.data",
                                 std::string(chinese ? "数据窗口：" : "Data window: ")
                                     + (m_settings.dataWindow ? (chinese ? "开" : "on")
                                                              : (chinese ? "关" : "off")),
-                                chinese ? "Enter 打开子菜单（开关 / 决策日志 / 原因计数）· 右键菜单可直接选开或关"
-                                        : "Enter for the submenu (switch, decision log, skip reasons) · the context menu picks on or off",
+                                chinese ? "Enter 子菜单（开关 / 拒绝原因 / 钩子健康）"
+                                        : "Enter for the submenu (switch, skip reasons, hook health)",
                                 "cursorwrap data "));
-        rows.back().withActions({ { "enterDrill", chinese ? "打开子菜单" : "Submenu", "Enter" },
+        rows.back().withActions({ { "enterDrill", chinese ? "子菜单" : "Submenu", "Enter" },
             { "set:data:1", chinese ? "开" : "On", "Ctrl+Enter" },
             { "set:data:0", chinese ? "关" : "Off", "Shift+Enter" } });
 
-        rows.push_back(drillRow("cursorwrap.row.best",
-                                std::string(chinese ? "建议门槛：" : "Suggested gate: ")
-                                    + bestSummary(chinese),
-                                chinese ? "Enter 看建议（由到达速度分布算出）"
-                                        : "Enter to see the suggestion (derived from the arrival speeds)",
-                                "cursorwrap best "));
-
-        rows.push_back(traceRow());
-
         rows.push_back(diagnosticsRow());
-
-        Item reset("cursorwrap.row.reset",
-                   chinese ? "恢复宿主设置卡" : "Restore host settings",
-                   chinese ? "Enter 清除搜索栏覆盖" : "Enter to clear search-bar overrides");
-        reset.withActions({ {"resetDefaults", chinese ? "恢复" : "Reset", "Enter"} });
-        rows.push_back(std::move(reset));
         return rows;
     }
 
@@ -1631,7 +1694,7 @@ private:
         text += "enabled: " + std::string(m_hookEnabled ? "true" : "false") + "\n";
         text += "hook installed: " + std::string(d.hookOk ? "true" : "false") + "\n";
         text += "watcher started: " + std::string(m_watcherOk ? "true" : "false") + "\n";
-        text += "search-bar overrides: " + std::string(m_overrides ? "true" : "false") + "\n";
+        text += "search-bar overrides: " + std::string(m_pluginSaved ? "true" : "false") + "\n";
         text += "wrap mode: " + modeLabel(m_settings.wrapMode, false) + "\n";
         text += "activation: " + activationLabel(m_settings.activation, false) + "\n";
         text += "monitors: " + intText(d.monitors) + "\n";
@@ -1692,6 +1755,7 @@ private:
     std::unique_ptr<cw::MonitorWatcher> m_watcher;
     cw::Overlay m_overlay;       // edge bands + readout (settings.tuningOverlay)
     cw::DataWindow m_dataWindow; // the live data window (settings.dataWindow)
+    cw::SettingsWindow m_settingsWindow; // the tuning window (showSettings)
     // Set from inside the hook callback; drained by the coalescing timer so
     // the hook path never does I/O.
     std::atomic<bool> m_refreshPending { false };
@@ -1703,7 +1767,7 @@ private:
     bool m_hookOk = false;
     bool m_watcherOk = false;
     bool m_hookEnabled = true;
-    bool m_overrides = false;
+    bool m_pluginSaved = false;
 };
 
 int main()

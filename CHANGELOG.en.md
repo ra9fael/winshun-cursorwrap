@@ -9,6 +9,47 @@ single source of truth; release tags are `v<version>`.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-18
+
+### Changed
+
+- **Queries preview; Enter applies.** The search bar's value commands (`speed 3500`,
+  `impact on`, `tune on`, `reset`, `clear`, bare `flash`, ...) no longer change
+  state as they are typed: they show the pending target, and Enter on the row
+  applies it. Overlay toggles, reset, trace clearing and adopting the suggestion
+  all run as actions.
+- **Settings split by owner.** The host card keeps the five everyday switches
+  (wrap mode, activation, no-wrap-while-dragging, single-monitor disable, impact
+  mode), saved by Win顺; the tuning keys (speed, acceleration, band, guard,
+  tolerance, edge threshold, overlay, glow, data window) moved to the plugin's
+  tuning window and are saved in the plugin's own `settings.json`.
+  `settingsChanged` applies only the keys the host declares, so a stale tuning
+  value left in the host's storage can no longer restore itself over the
+  plugin's newer tuning.
+- **Compact home list.** An empty query returns the status, direction, impact
+  mode, the tuning-window and data-window entries, and the diagnostics row; the
+  value submenus still answer their commands.
+
+### Added
+
+- **The tuning window** (`settingsWindow`; the card's 设置 button or the
+  tuning-window row): one native window for every tuning number and switch, with
+  the measurement summary and the suggested gate; adopting the suggestion is an
+  explicit button. Acceleration uses an explicit off-checkbox plus a numeric
+  entry, so a slider never steps over the usable non-zero floors.
+- One range table (`settingRange()`) now feeds the parser, the file reader and
+  the tuning window.
+- Migration: the first start carries the tuning the host still held into the
+  plugin's own file; host-card keys in an old override file are ignored and
+  dropped, so the old override priority does not come back.
+
+### Fixed
+
+- Changing the adjacency tolerance rebuilds the topology immediately (previously
+  only a host-card change did).
+
+- **BREAKING CHANGE:** the manifest drops its 9 tuning keys (speed, acceleration, band, guard, tolerance, edge threshold, overlay, glow, data window); the host no longer stores them, and the first start carries the values it still held into the plugin's own file.
+
 ## [0.10.2] - 2026-11-15
 
 ### Fixed

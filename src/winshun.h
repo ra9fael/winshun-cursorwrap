@@ -23,7 +23,10 @@
 
 #include <windows.h>
 
+#include <atomic>
+#include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -34,6 +37,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -595,7 +599,12 @@ struct Item {
     int score = -1; // 0–100; -1: not given
     std::string match;
     std::string autocomplete;
-    std::string setQuery; // Enter puts this text in the search box (drill-down)
+    // Enter puts this text in the search box (drill-down). Local addition kept
+    // on top of the SDK copy: Win˝ parses and honors a row's setQuery
+    // (plugin/Items.cpp, Launcher drills with it), but the SDK header does not
+    // carry the field yet — sync this file from src/plugins-sdk/winshun.h and
+    // re-apply this member (and withSetQuery below) after such a sync.
+    std::string setQuery;
     std::string copy;
     std::string preview;
     Json open; // {"path": …} or {"url": …}
@@ -706,6 +715,10 @@ struct Query {
     std::string keyword; // the one typed, in keyword mode
     std::string text; // after the keyword; the whole input otherwise
     std::string raw; // the whole input
+    // "command": asked for by an AI assistant or the ws command line, not typed
+    // by the user in Win顺's box (empty). What is the user's own to see (a
+    // history, say) is left out of such an answer.
+    std::string source;
     std::vector<std::string> match; // a regex trigger's groups
     int limit = 200;
     Json filters = Json::Object {}; // search-panel bounds; absent fields mean no restriction
@@ -844,16 +857,21 @@ public:
     // comes. The process's exit code.
     int serve()
     {
+        m_serveThread = std::this_thread::get_id();
         std::string line;
         for (;;) {
             if (!m_queued.empty()) {
                 line = std::move(m_queued.front());
                 m_queued.pop_front();
             } else if (!m_reader.next(line))
-                return 0;
+                break;
+            if (toolAnswer(line))
+                continue;
             if (handle(line))
-                return 0;
+                break;
         }
+        endToolCalls(); // no answer comes any more: threads waiting for one go on
+        return 0;
     }
     // The same over the given ends instead of stdin and stdout (a plugin
     // that Win顺 runs inside its plugin host).
@@ -872,14 +890,6 @@ public:
     // "ui": themeSetting, corners, uiStyle, uiSize, transparency, renderer, and
     // nativeLook (the style's colours "#AARRGGBB" and radii; docs/plugins.md, 外观)
     const Json& appearance() const { return m_appearance; }
-    // initialize.capabilities: what this host offers a plugin. `hostHotkeys`
-    // (0.22.0+) means register_hotkeys replaces this plugin's global keys and
-    // a press arrives as the `hotkey` notification.
-    const Json& capabilities() const { return m_capabilities; }
-    bool hostHotkeys() const
-    {
-        return m_capabilities.isObject() && m_capabilities["hostHotkeys"].toBool(false);
-    }
     const std::string& pluginDir() const { return m_pluginDir; }
     const std::string& dataDir() const { return m_dataDir; }
     bool chinese() const { return m_locale != "en"; }
@@ -918,7 +928,9 @@ public:
     // shows it, Win顺 asks again now instead of when `rerun` is up. Call it
     // after the state the next query reads is written. Otherwise nothing.
     void refresh() { notify("winshun/refresh", Json::Object {}); }
-    void updateHostSettings(Json values)
+    // Updates values declared in the plugin manifest. Win顺 validates,
+    // persists and sends the merged result back through settingsChanged.
+    void updateSettings(Json values)
     {
         notify("winshun/settings/update", Json::Object {{"settings", std::move(values)}});
     }
@@ -927,19 +939,47 @@ public:
     // open_item, show_in_folder, clipboard_history, clipboard_get,
     // index_status), as the manifest's permissions allow. The result, or an
     // object with "error" {code, message}. Lines meanwhile are kept for after.
-    // Only from the thread in serve() (it reads the answer itself).
-    Json tool(const std::string& name, Json arguments)
+    // From the thread in serve() (it reads the answer itself), or from another
+    // thread while serve() runs (a worker: serve() hands it the answer). A
+    // worker gives `canceled` when the plugin may have to stop it (shutdown
+    // waits for the worker, and no answer is read meanwhile): set, the call
+    // returns an error at once.
+    Json tool(const std::string& name, Json arguments, const std::atomic_bool* canceled = nullptr)
     {
         const long long id = m_nextId++;
-        send(Json::Object {{"id", id}, {"method", "winshun/tool"}, {"params", Json::Object {{"name", name}, {"arguments", std::move(arguments)}}}});
+        const Json request = Json::Object {{"id", id}, {"method", "winshun/tool"}, {"params", Json::Object {{"name", name}, {"arguments", std::move(arguments)}}}};
+        const auto gone = [] { return Json(Json::Object {{"error", Json::Object {{"code", -32000}, {"message", "Win顺 went away"}}}}); };
+        if (std::this_thread::get_id() != m_serveThread) {
+            std::unique_lock lock(m_toolMutex);
+            if (m_toolsEnded)
+                return gone();
+            m_toolAnswers[id]; // waited for
+            lock.unlock();
+            send(request);
+            lock.lock();
+            for (;;) {
+                if (auto found = m_toolAnswers.find(id); found != m_toolAnswers.end() && found->second) {
+                    Json answer = std::move(*found->second);
+                    m_toolAnswers.erase(found);
+                    return answer;
+                }
+                if (m_toolsEnded || (canceled && canceled->load())) {
+                    m_toolAnswers.erase(id);
+                    return gone();
+                }
+                m_toolCv.wait_for(lock, std::chrono::milliseconds(50));
+            }
+        }
+        send(request);
         std::string line;
         while (m_reader.next(line)) {
             const auto message = Json::parse(line);
             if (message && message->isObject() && !message->has("method") && (*message)["id"].isNumber() && (*message)["id"].toInt() == id)
                 return message->has("error") ? Json(Json::Object {{"error", (*message)["error"]}}) : (*message)["result"];
-            m_queued.push_back(line);
+            if (!toolAnswer(line))
+                m_queued.push_back(line);
         }
-        return Json(Json::Object {{"error", Json::Object {{"code", -32000}, {"message", "Win顺 went away"}}}});
+        return gone();
     }
 
 protected:
@@ -953,6 +993,9 @@ protected:
         return {effect::copy(text), effect::notify(chinese() ? "已复制" : "Copied"), effect::hide()};
     }
     virtual void settingsChanged(const Json& settings) { (void)settings; }
+    // The host asks the plugin to open its own settings window. The request is
+    // answered immediately; a plugin may hand window creation to its GUI thread.
+    virtual void showSettings() {}
     // An item made withDetails() shown in the content pane or the preview
     // (GitHub #202): Json::Object {{"text", …}} or {{"file", a file in
     // dataDir()}}. Without it (nullopt): "method not found", and the pane
@@ -976,10 +1019,6 @@ protected:
     // about 2 seconds for the answer.
     virtual void shuttingDown() {}
     virtual void cancel(long long queryId) { (void)queryId; }
-    // One of this plugin's host-registered hotkeys was pressed (the `hotkey`
-    // notification, docs/plugins.md 快捷键): `key` is the spelling that was
-    // registered ("Ctrl+Alt+F1"). Only sent when capabilities().hostHotkeys.
-    virtual void hotkey(const std::string& key) { (void)key; }
     virtual std::string name() const { return "plugin"; }
     // A query's whole answer, when `rerun` (seconds) or `cache` (seconds)
     // are wanted too: override queryResult instead of query.
@@ -1003,6 +1042,32 @@ private:
     void fail(const Json& id, int code, const std::string& text)
     {
         send(Json::Object {{"id", id}, {"error", Json::Object {{"code", code}, {"message", text}}}});
+    }
+
+    // An answer to a tool call another thread waits for: handed to it.
+    bool toolAnswer(const std::string& line)
+    {
+        {
+            const std::lock_guard lock(m_toolMutex);
+            if (m_toolAnswers.empty())
+                return false;
+        }
+        const auto message = Json::parse(line);
+        if (!message || !message->isObject() || message->has("method") || !(*message)["id"].isNumber())
+            return false;
+        const std::lock_guard lock(m_toolMutex);
+        const auto found = m_toolAnswers.find((*message)["id"].toInt());
+        if (found == m_toolAnswers.end())
+            return false;
+        found->second = message->has("error") ? Json(Json::Object {{"error", (*message)["error"]}}) : (*message)["result"];
+        m_toolCv.notify_all();
+        return true;
+    }
+    void endToolCalls()
+    {
+        const std::lock_guard lock(m_toolMutex);
+        m_toolsEnded = true;
+        m_toolCv.notify_all();
     }
 
     // One line; true when the loop is to end. What the plugin throws (no
@@ -1054,7 +1119,6 @@ private:
             m_locale = params["locale"].toString();
             m_theme = params["theme"].toString();
             m_appearance = params["appearance"];
-            m_capabilities = params["capabilities"];
             m_pluginDir = params["pluginDir"].toString();
             m_dataDir = params["dataDir"].toString();
             answer(Json::Object {{"protocolVersion", "1"}, {"name", name()}});
@@ -1067,6 +1131,7 @@ private:
             q.keyword = params["keyword"].toString();
             q.text = params["text"].toString();
             q.raw = params["raw"].toString();
+            q.source = params["source"].toString();
             if (params["filters"].isObject()) q.filters = params["filters"];
             q.limit = static_cast<int>(params["limit"].toInt(200));
             for (const Json& group : params["match"].toArray())
@@ -1098,8 +1163,6 @@ private:
         } else if (method == "settingsChanged") {
             m_settings = params["settings"];
             settingsChanged(m_settings);
-        } else if (method == "hotkey") {
-            hotkey(params["key"].toString());
         } else if (method == "appearance") {
             if (params["locale"].isString())
                 m_locale = params["locale"].toString();
@@ -1107,6 +1170,9 @@ private:
                 m_theme = params["theme"].toString();
             m_appearance = params;
             appearanceChanged();
+        } else if (method == "showSettings") {
+            showSettings();
+            answer(Json::Object {});
         } else if (method == "shutdown") {
             shuttingDown();
             answer(Json::Object {});
@@ -1122,12 +1188,16 @@ private:
     HANDLE m_out = ::GetStdHandle(STD_OUTPUT_HANDLE);
     std::mutex m_sendMutex;
     std::deque<std::string> m_queued; // lines that came while a tool call waited
-    long long m_nextId = 1;
+    std::atomic<long long> m_nextId = 1;
+    std::thread::id m_serveThread = std::this_thread::get_id(); // until serve(): whoever made the plugin
+    std::mutex m_toolMutex; // tool calls of other threads: id -> the answer once it came
+    std::condition_variable m_toolCv;
+    std::map<long long, std::optional<Json>> m_toolAnswers;
+    bool m_toolsEnded = false;
     Json m_settings;
     std::string m_locale = "zh";
     std::string m_theme = "light";
     Json m_appearance;
-    Json m_capabilities;
     std::string m_pluginDir;
     std::string m_dataDir;
 };

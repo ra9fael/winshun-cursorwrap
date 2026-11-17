@@ -15,9 +15,16 @@
 // only place a new setting has to be registered. `kFieldCount` is compared
 // against the table's own size, so forgetting to add a field to the table shows
 // up as a failing test rather than a silent gap.
+//
+// Since the ownership split the round trip has TWO shapes, and the test walks
+// both: a plugin-owned key survives its own settings.json
+// (dumpOverrides/loadOverrides); a host-card key travels as a JSON value
+// through updateSettings() and comes back as settingsChanged, which the plugin
+// must read with the host-only filter (rawOverridesFromJson(json, true)).
 #include "settings_store.h"
 #include "test_harness.h"
 #include "wrap_logic.h"
+#include "winshun.h"
 
 #include <string>
 #include <vector>
@@ -88,6 +95,18 @@ const std::vector<Field>& fields()
 // new field makes the exhaustive test fail until it is listed above.
 constexpr size_t kFieldCount = 14;
 
+// The owner of a field, by name — so a key moved between owners changes the
+// shape of its round trip, and the exhaustive test follows it automatically.
+cw::FieldOwner ownerOf(const char* name)
+{
+    for (const cw::SettingsField& sf : cw::settingsFields()) {
+        if (sf.key == std::string(name))
+            return sf.owner;
+    }
+    // A field missing from the table: the completeness test names it.
+    return cw::FieldOwner::Plugin;
+}
+
 } // namespace
 
 CW_TEST(settings_field_table_is_complete)
@@ -102,22 +121,49 @@ CW_TEST(settings_every_field_round_trips)
     for (const Field& f : fields()) {
         cw::Settings settings;
         f.mutate(settings);
-        const std::string json = cw::dumpOverrides(settings);
+        bool differs = false;
 
-        bool valid = false;
-        std::string problem;
-        const cw::Settings read = cw::loadOverrides(json, valid, problem);
-        if (!valid) {
-            ++cwtest::failures();
-            std::printf("  field %s: dump produced an unreadable file: %s\n", f.name,
-                        problem.c_str());
-            continue;
+        if (ownerOf(f.name) == cw::FieldOwner::Plugin) {
+            // The plugin's tuning file is the storage for its own keys.
+            const std::string json = cw::dumpOverrides(settings);
+            bool valid = false;
+            std::string problem;
+            const cw::Settings read = cw::loadOverrides(json, valid, problem);
+            if (!valid) {
+                ++cwtest::failures();
+                std::printf("  field %s: dump produced an unreadable file: %s\n", f.name,
+                            problem.c_str());
+                continue;
+            }
+            differs = f.differs(read);
+            if (!differs)
+                std::printf("  field %s did NOT survive the file round trip; json was %s\n",
+                            f.name, json.c_str());
+        } else {
+            // The host card's keys travel as JSON values through
+            // updateSettings(); the host answers with the merged settings and
+            // the plugin rebuilds a RawSettings from the declared keys only.
+            winshun::Json::Object values;
+            for (const cw::SettingsField& sf : cw::settingsFields()) {
+                if (sf.key != std::string(f.name))
+                    continue;
+                if (sf.kind == cw::FieldKind::Bool)
+                    values[sf.key] = sf.boolean(settings);
+                else if (sf.kind == cw::FieldKind::Number)
+                    values[sf.key] = static_cast<double>(sf.number(settings));
+                else
+                    values[sf.key] = sf.text(settings);
+            }
+            const cw::RawSettings raw = cw::rawOverridesFromJson(
+                winshun::Json(std::move(values)), true);
+            cw::Settings read;
+            cw::applySettings(raw, read, false);
+            differs = f.differs(read);
+            if (!differs)
+                std::printf("  field %s did NOT survive the host round trip\n", f.name);
         }
-        if (!f.differs(read)) {
+        if (!differs)
             ++cwtest::failures();
-            std::printf("  field %s did NOT survive the round trip; json was %s\n", f.name,
-                        json.c_str());
-        }
     }
 }
 

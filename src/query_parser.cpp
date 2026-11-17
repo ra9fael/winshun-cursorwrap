@@ -135,9 +135,12 @@ std::optional<long long> trailingNumber(const std::string& rest)
     return value;
 }
 
-long long clampTo(long long v, long long lo, long long hi)
+long long clampToRange(long long v, const char* key)
 {
-    return v < lo ? lo : (v > hi ? hi : v);
+    SettingRange range;
+    if (!settingRange(key, range))
+        return v;
+    return v < range.lo ? range.lo : (v > range.hi ? range.hi : v);
 }
 
 } // namespace
@@ -194,13 +197,13 @@ ParsedCommand parseCommand(const std::string& rawText)
         case CommandKind::MenuSpeed:
             if (n) {
                 cmd.kind = CommandKind::SetImpactSpeed;
-                cmd.value = clampTo(*n, 500, 20000);
+                cmd.value = clampToRange(*n, "impactSpeedPps");
             }
             break;
         case CommandKind::MenuBand:
             if (n) {
                 cmd.kind = CommandKind::SetBand;
-                cmd.value = clampTo(*n, 50, 500);
+                cmd.value = clampToRange(*n, "impactBandPx");
             }
             break;
         case CommandKind::MenuAccel:
@@ -208,7 +211,7 @@ ParsedCommand parseCommand(const std::string& rawText)
                 cmd.kind = CommandKind::SetAccel;
                 // 0 is meaningful: it turns the acceleration condition off. Any
                 // non-zero value below 200 is noise, so it clamps up to 200.
-                long long v = clampTo(*n, 0, 200000);
+                long long v = clampToRange(*n, "impactAccelPps2");
                 if (v != 0 && v < 200)
                     v = 200;
                 cmd.value = v;
@@ -217,19 +220,19 @@ ParsedCommand parseCommand(const std::string& rawText)
         case CommandKind::MenuGuard:
             if (n) {
                 cmd.kind = CommandKind::SetGuard;
-                cmd.value = clampTo(*n, 10, 200);
+                cmd.value = clampToRange(*n, "wrapGuardPx");
             }
             break;
         case CommandKind::MenuEdge:
             if (n) {
                 cmd.kind = CommandKind::SetEdge;
-                cmd.value = clampTo(*n, 1, 20);
+                cmd.value = clampToRange(*n, "edgeThresholdPx");
             }
             break;
         case CommandKind::MenuTolerance:
             if (n) {
                 cmd.kind = CommandKind::SetTolerance;
-                cmd.value = clampTo(*n, 10, 200);
+                cmd.value = clampToRange(*n, "adjacencyTolerancePx");
             }
             break;
         case CommandKind::MenuDrag:

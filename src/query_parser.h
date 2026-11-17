@@ -32,7 +32,8 @@
 //   tune on|off | 调参 开|关    -> Set overlayOn (turn the overlay on or off)
 //   trace | 轨迹                -> Copy the arrival trace as CSV (CopyTrace)
 //   clear | 清除轨迹            -> Drop the recorded arrivals (ClearTrace)
-//   best | 最优                 -> MenuBest (the suggested gate, and apply it)
+//   best | 最优                 -> MenuBest (the suggested gate; applying it is
+//                                  an explicit action, never a side effect)
 //   data | window | 数据 | 窗口 -> MenuData (the live data window's submenu)
 //   data on|off | 数据 开|关    -> SetDataWindow (open or close the window)
 //   diag | 诊断                 -> Copy diagnostics (CopyDiagnostics)
@@ -61,7 +62,7 @@ enum class CommandKind {
     MenuDrag,       // "no wrap while dragging" submenu
     MenuSingle,     // "disable on a single monitor" submenu
     MenuTuner,      // tuning-overlay submenu
-    MenuBest,       // the suggested gate: show it, apply it, explain it
+    MenuBest,       // the suggested gate: show it; applying it is an action
     MenuData,       // the live data window's submenu
     ToggleImpact,
     SetImpact,      // value: 0 = off, 1 = on

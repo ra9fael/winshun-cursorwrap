@@ -426,6 +426,22 @@ have no real-machine wrap confirmation.
 by reading code plus one capture, not by a passing real-machine wrap); the watchdog's
 reinstall path has never fired on hardware; the data window on a mixed-DPI layout.
 
+### Automated evidence for this round (query/action split + the tuning window)
+
+| Item | Result |
+|---|---|
+| `cw_tests` | **185 cases + 6 layout fixtures all pass** (new ownership/migration cases: host keys stay out of the tuning file, host keys in an old file are ignored, `rawOverridesFromJson`'s hostOnly filter, every field round-trips along its owner's path) |
+| `protocol_roundtrip.py` | **112/112 checks passed**, exit code 0 (new semantics: value commands return a "pending" preview and change nothing; the action applies and the status row/submenus follow; tuning keys never reach `winshun/settings/update`, host-card keys never reach the plugin's `settings.json`; acceleration is still 2000 after a restart; stale tuning keys in settingsChanged are ignored) |
+| `tests/validate.py` | static validation passes (five manifest settings + `settingsWindow: true`; the tuning keys must not come back to the manifest) |
+| `tests/devshell_scenarios.py` | all 16 scenarios pass |
+| Packaging | `python tools/package.py` produced the `.wsplugin` + `.sha256` (2,488,673 bytes, 105 files) |
+
+**Not verified** (needs the user's consent per repo convention): real interaction
+with the tuning window's controls (only the protocol-level `openSettings`
+semantics and the window code compiling/linking are proven), the settings taking
+effect under the real hook, and real-mouse feel — consistent with the rest of
+this file's not-tested list.
+
 ## Not tested
 
 - **Every real multi-display behaviour is unverified**: this machine has one display.

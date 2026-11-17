@@ -975,6 +975,21 @@ size_t WrapEngine::outerEdgeCount() const
     return m_topology.outerEdges().size();
 }
 
+bool settingRange(const char* key, SettingRange& out)
+{
+    // THE one range table. applySettings rejects values outside these with
+    // the same numbers; the parser and the tuning window clamp typed input
+    // with them.
+    const std::string k = key;
+    if (k == "edgeThresholdPx") { out = { 1, 20 }; return true; }
+    if (k == "wrapGuardPx") { out = { 10, 200 }; return true; }
+    if (k == "adjacencyTolerancePx") { out = { 10, 200 }; return true; }
+    if (k == "impactSpeedPps") { out = { 500, 20000 }; return true; }
+    if (k == "impactBandPx") { out = { 50, 500 }; return true; }
+    if (k == "impactAccelPps2") { out = { 0, 200000 }; return true; }
+    return false;
+}
+
 void applySettings(const RawSettings& raw, Settings& out, bool merge)
 {
     const Settings fallback; // the manifest defaults
@@ -1009,34 +1024,36 @@ void applySettings(const RawSettings& raw, Settings& out, bool merge)
     if (raw.hasImpactFlash)
         out.impactFlash = raw.impactFlash;
 
-    auto applyNumber = [](double v, bool has, int lo, int hi, int def, int prev) {
+    auto applyNumber = [&](double v, bool has, const char* key, int def, int prev) {
         if (!has)
             return prev;
-        if (!std::isfinite(v) || v < lo || v > hi)
+        SettingRange range;
+        if (!std::isfinite(v) || !settingRange(key, range) || v < range.lo || v > range.hi)
             return def;
         return static_cast<int>(v);
     };
-    out.edgeThresholdPx = applyNumber(raw.edgeThresholdPx, raw.hasEdgeThreshold, 1, 20,
+    out.edgeThresholdPx = applyNumber(raw.edgeThresholdPx, raw.hasEdgeThreshold, "edgeThresholdPx",
                                       fallback.edgeThresholdPx, previous.edgeThresholdPx);
-    out.wrapGuardPx = applyNumber(raw.wrapGuardPx, raw.hasWrapGuard, 10, 200,
+    out.wrapGuardPx = applyNumber(raw.wrapGuardPx, raw.hasWrapGuard, "wrapGuardPx",
                                   fallback.wrapGuardPx, previous.wrapGuardPx);
-    out.adjacencyTolerancePx = applyNumber(raw.adjacencyTolerancePx, raw.hasAdjacency, 10, 200,
+    out.adjacencyTolerancePx = applyNumber(raw.adjacencyTolerancePx, raw.hasAdjacency,
+                                           "adjacencyTolerancePx",
                                            fallback.adjacencyTolerancePx,
                                            previous.adjacencyTolerancePx);
-    out.impactSpeedPps = applyNumber(raw.impactSpeedPps, raw.hasImpactSpeed, 500, 20000,
+    out.impactSpeedPps = applyNumber(raw.impactSpeedPps, raw.hasImpactSpeed, "impactSpeedPps",
                                      fallback.impactSpeedPps, previous.impactSpeedPps);
-    out.impactBandPx = applyNumber(raw.impactBandPx, raw.hasImpactBand, 50, 500,
+    out.impactBandPx = applyNumber(raw.impactBandPx, raw.hasImpactBand, "impactBandPx",
                                    fallback.impactBandPx, previous.impactBandPx);
     // 0 is meaningful here (acceleration condition off), so it must survive the
     // clamp: the range is 0..200000 rather than 200..200000.
     //
-    // The credible floor is 200 px/s², not the old 2000+: measured, a hand
+    // The credible floor is 200 px/s2, not the old 2000+: measured, a hand
     // holding a constant speed reads 0 at 125, 500 and 1000 Hz (the least-squares
     // half slopes cancel exactly), while a firm flick reads 1600-2000. So anything
     // in the low hundreds already separates "speeding up" from "steady", and a
     // higher floor would refuse normal flicks — which is what "the numbers are not
     // usable" meant.
-    out.impactAccelPps2 = applyNumber(raw.impactAccelPps2, raw.hasImpactAccel, 0, 200000,
+    out.impactAccelPps2 = applyNumber(raw.impactAccelPps2, raw.hasImpactAccel, "impactAccelPps2",
                                       fallback.impactAccelPps2, previous.impactAccelPps2);
     if (out.impactAccelPps2 != 0 && out.impactAccelPps2 < 200)
         out.impactAccelPps2 = 200; // below this is noise, not a usable floor
