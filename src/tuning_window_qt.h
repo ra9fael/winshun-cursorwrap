@@ -3,6 +3,7 @@
 #include "settings_store.h"
 #include "theme_bridge.h"
 
+#include <QElapsedTimer>
 #include <QTimer>
 #include <QVariantMap>
 
@@ -63,6 +64,11 @@ private:
     ThemeBridge m_theme;
     QVariantMap m_snapshot;
     QTimer m_timer;
+    // The frame's dark mode as the theme asks for it, put back while Qt's own
+    // light one is on its way (see applyTheme).
+    QTimer m_darkFrameGuard;
+    QElapsedTimer m_darkFrameWatch;
+    bool m_dark = false;
     bool m_backdrop = false;
     QQuickWindow* m_window = nullptr;
     std::unique_ptr<ws::WindowFrame> m_frame;

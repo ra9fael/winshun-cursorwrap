@@ -18,6 +18,21 @@ TuningWindowQml::TuningWindowQml(Provider provider, Apply apply)
 {
     m_timer.setInterval(250);
     connect(&m_timer, &QTimer::timeout, this, &TuningWindowQml::settingsUpdated);
+    // Qt sets a frameless window's frame back to light a few milliseconds after
+    // a colour-scheme change (shouldApplyDarkFrame), and DWM keeps Mica in the
+    // old tint when both reach it within one composed frame. Put the theme's
+    // dark mode back for the next second, as the host does.
+    m_darkFrameGuard.setInterval(10);
+    connect(&m_darkFrameGuard, &QTimer::timeout, this, [this] {
+        if (!m_window || !m_window->handle())
+            return;
+        if (m_darkFrameWatch.elapsed() < 50) // Qt's own, after some 5 ms, first
+            return;
+        if (ws::win::isDarkFrame(m_window) != m_dark)
+            ws::win::setDarkFrame(m_window, m_dark);
+        if (m_darkFrameWatch.elapsed() > 1000)
+            m_darkFrameGuard.stop();
+    });
 }
 
 TuningWindowQml::~TuningWindowQml()
@@ -82,6 +97,7 @@ void TuningWindowQml::show()
 void TuningWindowQml::shutdown()
 {
     m_timer.stop();
+    m_darkFrameGuard.stop();
     m_engine.reset();
     m_frame.reset();
     m_window = nullptr;
@@ -96,6 +112,11 @@ void TuningWindowQml::applyTheme(const QString& theme, const QVariantMap& appear
     ws::SystemTheme::setBackdropAvailable(QGuiApplication::platformName() == QStringLiteral("windows"));
     ws::SystemTheme::setBackdropOn(m_theme.backdropOn());
     updateFrame();
+    m_dark = m_theme.dark();
+    if (m_window && QGuiApplication::platformName() == QStringLiteral("windows")) {
+        m_darkFrameWatch.start();
+        m_darkFrameGuard.start();
+    }
 }
 
 void TuningWindowQml::updateFrame()
@@ -108,9 +129,9 @@ void TuningWindowQml::updateFrame()
     // and Mica behind the content. Its frame extension stays at the window's
     // border; extended over the whole window, DWM would draw its own caption
     // buttons over TitleBar.qml's.
-    ws::win::styleFramelessWindow(m_window, m_theme.backdropOn());
     const bool backdrop = m_theme.backdropOn() && ws::win::backdropSupported()
         && ws::win::materialsEnabled();
+    ws::win::styleFramelessWindow(m_window, backdrop);
     if (m_backdrop != backdrop) {
         m_backdrop = backdrop;
         emit backdropChanged();
