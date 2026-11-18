@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>回绕调参窗口 · Fluent 化视觉稿</title>
+<style>
+  :root {
+    --page-font: "Segoe UI Variable Text", "Segoe UI", "PuHuiTi", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  }
+
+  /* ===== Fluent token 表（对应 fluent/Look.qml） ===== */
+  .mock {
+    /* 几何 */
+    --win-radius: 8px;
+    --card-radius: 6px;
+    --ctrl-radius: 4px;
+    --hairline: 1px;
+
+    /* 明暗两套色板，跟随 .dark 类切换 */
+    --bg: #F9F9F9;
+    --layer: rgba(255, 255, 255, 0.70);
+    --layer-strong: rgba(255, 255, 255, 0.88);
+    --card: rgba(255, 255, 255, 0.55);
+    --text: #1B1B1B;
+    --subtext: #5D5D5D;
+    --stroke: rgba(0, 0, 0, 0.09);
+    --stroke-strong: rgba(0, 0, 0, 0.18);
+    --hover: rgba(0, 0, 0, 0.045);
+    --press: rgba(0, 0, 0, 0.08);
+
+    --accent: #0078D4;
+    --accent-text: #FFFFFF;
+    --accent-hover: rgba(0, 120, 212, 0.90);
+    --accent-soft: rgba(0, 120, 212, 0.10);
+    --success: #0F7B0F;
+    --warn: #9D5D00;
+  }
+  .mock.dark {
+    --bg: #202020;
+    --layer: rgba(32, 32, 32, 0.55);
+    --layer-strong: rgba(43, 43, 43, 0.85);
+    --card: rgba(255, 255, 255, 0.052);
+    --text: #F3F3F3;
+    --subtext: #C5C5C5;
+    --stroke: rgba(255, 255, 255, 0.08);
+    --stroke-strong: rgba(255, 255, 255, 0.16);
+    --hover: rgba(255, 255, 255, 0.06);
+    --press: rgba(255, 255, 255, 0.10);
+    /* Look.qml: accent: dark ? Qt.lighter(accent, 1.55) */
+    --accent: var(--accent-dark, #3399DD);
+    --accent-text: #0B0B0B;
+    --accent-soft: rgba(51, 153, 221, 0.16);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: var(--page-font);
+    background: #141414;
+    color: #DDD;
+    min-height: 100vh;
+  }
+
+  /* ===== 稿件工具栏 ===== */
+  .toolbar {
+    display: flex; flex-wrap: wrap; gap: 20px; align-items: center;
+    padding: 14px 24px;
+    background: #1D1D1D;
+    border-bottom: 1px solid #333;
+    position: sticky; top: 0; z-index: 10;
+    font-size: 13px;
+  }
+  .toolbar .group { display: flex; align-items: center; gap: 8px; }
+  .toolbar .group-title { color: #888; letter-spacing: 0.05em; }
+  .toolbar button {
+    font: inherit; color: #CCC;
+    background: #2A2A2A; border: 1px solid #3A3A3A; border-radius: 4px;
+    padding: 5px 12px; cursor: pointer;
+  }
+  .toolbar button:hover { background: #333; }
+  .toolbar button.on { border-color: var(--accent); color: #FFF; background: #173d57; }
+  .swatch {
+    width: 22px; height: 22px; border-radius: 50%; cursor: pointer;
+    border: 2px solid transparent; padding: 0;
+  }
+  .swatch.on { border-color: #FFF; }
+  .toolbar .hint { color: #777; margin-left: auto; }
+
+  /* ===== 桌面壁纸（模拟 Mica 取样的桌面） ===== */
+  .desktop {
+    display: grid; place-items: center;
+    padding: 48px 24px 72px;
+  }
+  .wallpaper {
+    position: relative;
+    border-radius: 12px;
+    padding: 56px 64px;
+    background:
+      radial-gradient(900px 500px at 18% 22%, #1e5a8a 0%, transparent 55%),
+      radial-gradient(800px 600px at 82% 78%, #6d3a8e 0%, transparent 55%),
+      radial-gradient(700px 400px at 60% 12%, #1b7d6c 0%, transparent 50%),
+      linear-gradient(135deg, #10233b, #241a35);
+    box-shadow: 0 30px 80px rgba(0,0,0,.5);
+  }
+  .wallpaper .wp-note {
+    position: absolute; left: 14px; bottom: 10px;
+    color: rgba(255,255,255,.35); font-size: 11px; letter-spacing: .08em;
+  }
+
+  /* ===== 窗口本体 ===== */
+  .mock {
+    width: 460px;
+    border-radius: var(--win-radius);
+    color: var(--text);
+    font-size: 13px;
+    overflow: hidden;
+    box-shadow: 0 18px 60px rgba(0,0,0,.55), 0 0 0 1px var(--stroke-strong);
+    transition: background .25s, color .25s;
+  }
+  /* 材质层：Mica = 极轻模糊+低透明；Acrylic = 强模糊+噪声；无 = 实色 */
+  .mock.mica { background: var(--layer); backdrop-filter: blur(30px) saturate(1.15); }
+  .mock.acrylic { background: var(--layer); backdrop-filter: blur(60px) saturate(1.3); }
+  .mock.opaque { background: var(--bg); }
+  .mock.acrylic::before {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='64' height='64'><filter id='n'><feTurbulence baseFrequency='0.9' numOctaves='2'/></filter><rect width='64' height='64' filter='url(%23n)' opacity='0.05'/></svg>");
+  }
+
+  /* 标题栏（真机为 DWM 暗色标题栏 + 自绘文字，此处按视觉呈现） */
+  .caption {
+    display: flex; align-items: center; gap: 8px;
+    padding: 0 0 0 14px; height: 36px;
+    -webkit-app-region: none;
+  }
+  .caption .glyph {
+    width: 16px; height: 16px; border-radius: 4px; flex: none;
+    background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #ffffff00));
+  }
+  .caption .title { font-size: 12px; color: var(--subtext); }
+  .caption .title b { color: var(--text); font-weight: 600; margin-right: 6px; }
+  .caption .winbtns { margin-left: auto; display: flex; height: 100%; }
+  .caption .winbtn {
+    width: 44px; display: grid; place-items: center; cursor: default;
+    color: var(--text); font-size: 10px;
+  }
+  .caption .winbtn:hover { background: var(--hover); }
+  .caption .winbtn.close:hover { background: #C42B1C; color: #FFF; }
+
+  .content { padding: 2px 14px 16px; }
+
+  /* 宿主卡片摘要条 */
+  .host-banner {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--card);
+    border: var(--hairline) solid var(--stroke);
+    border-radius: var(--card-radius);
+    padding: 8px 12px;
+    margin-bottom: 14px;
+    color: var(--subtext);
+  }
+  .host-banner .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); flex: none; }
+  .host-banner b { color: var(--text); font-weight: 600; }
+  .host-banner .sep { opacity: .4; margin: 0 2px; }
+
+  /* 分区标题 */
+  .section-title {
+    font-size: 11px; letter-spacing: .08em; color: var(--subtext);
+    margin: 14px 2px 6px; font-weight: 600;
+  }
+
+  /* 设置行卡片 */
+  .group-card {
+    background: var(--card);
+    border: var(--hairline) solid var(--stroke);
+    border-radius: var(--card-radius);
+    overflow: hidden;
+  }
+  .row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 12px;
+    min-height: 52px;
+    position: relative;
+  }
+  .row + .row::before {
+    content: ""; position: absolute; left: 12px; right: 12px; top: 0;
+    border-top: var(--hairline) solid var(--stroke);
+  }
+  .row .texts { flex: 1 1 auto; min-width: 0; }
+  .row .label { font-weight: 600; }
+  .row .sub { font-size: 11px; color: var(--subtext); margin-top: 1px; }
+  .row .unit { font-size: 11px; color: var(--subtext); width: 34px; flex: none; }
+
+  /* Fluent 文本框：下缘强调线 */
+  .field {
+    flex: none; width: 76px;
+    background: var(--layer-strong);
+    border: var(--hairline) solid var(--stroke-strong);
+    border-bottom-color: var(--subtext);
+    border-radius: var(--ctrl-radius) var(--ctrl-radius) 0 0;
+    border-bottom-width: 2px;
+    padding: 5px 8px;
+    font: inherit; color: var(--text);
+    text-align: right;
+    transition: border-color .12s, background .12s;
+  }
+  .field:focus { outline: none; border-bottom-color: var(--accent); }
+  .field:disabled { opacity: .35; }
+  .field::-webkit-outer-spin-button, .field::-webkit-inner-spin-button { -webkit-appearance: none; }
+
+  /* 按钮：accent 实心 / 次级描边 / 行内小型 */
+  .btn {
+    font: inherit; cursor: pointer;
+    border-radius: var(--ctrl-radius);
+    padding: 6px 14px;
+    border: var(--hairline) solid transparent;
+    transition: background .12s, border-color .12s;
+  }
+  .btn.accent { background: var(--accent); color: var(--accent-text); font-weight: 600; }
+  .btn.accent:hover { background: var(--accent-hover); }
+  .btn.accent:active { filter: brightness(.92); }
+  .btn.secondary { background: var(--layer-strong); color: var(--text); border-color: var(--stroke-strong); }
+  .btn.secondary:hover { background: var(--hover); }
+  .btn:disabled { opacity: .38; cursor: default; }
+  .btn.small { padding: 4px 12px; font-size: 12px; }
+  .btn:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
+
+  /* 行内应用按钮：次级弱化 */
+  .row .btn.small { flex: none; }
+  .row .btn.small.applied { border-color: var(--success); color: var(--success); }
+
+  /* Fluent 开关（真机 owner-draw，圆角胶囊 + 滑块） */
+  .toggle { position: relative; flex: none; width: 40px; height: 20px; }
+  .toggle input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
+  .toggle .track {
+    position: absolute; inset: 0;
+    border-radius: 10px;
+    background: transparent;
+    border: var(--hairline) solid var(--stroke-strong);
+    transition: background .15s, border-color .15s;
+  }
+  .toggle .thumb {
+    position: absolute; top: 50%; left: 4px;
+    width: 12px; height: 12px; border-radius: 50%;
+    transform: translateY(-50%);
+    background: var(--subtext);
+    transition: left .15s, background .15s, width .15s, height .15s;
+  }
+  .toggle input:checked + .track { background: var(--accent); border-color: var(--accent); }
+  .toggle input:checked + .track .thumb { left: 24px; width: 12px; height: 12px; background: var(--accent-text); }
+  .toggle input:checked:hover + .track .thumb { left: 23px; }
+  .toggle:hover .thumb { width: 14px; height: 14px; }
+  .toggle input:checked:hover + .track .thumb { width: 14px; height: 14px; }
+  .toggle input:focus-visible + .track { outline: 2px solid var(--text); outline-offset: 2px; }
+  .toggle input:disabled + .track { opacity: .35; }
+
+  /* 加速度行：关闭态的视觉（数值输入禁用 + 值显示 0） */
+  .row.off .field { opacity: .35; }
+  .off-note { font-size: 11px; color: var(--warn); margin-top: 2px; }
+
+  /* 建议卡片 */
+  .advice-card {
+    margin-top: 14px;
+    background: var(--card);
+    border: var(--hairline) solid var(--stroke);
+    border-left: 3px solid var(--warn);
+    border-radius: var(--card-radius);
+    padding: 10px 12px;
+  }
+  .advice-card.ok { border-left-color: var(--success); }
+  .advice-card .head { font-weight: 600; display: flex; align-items: center; gap: 6px; }
+  .advice-card .body { color: var(--subtext); margin-top: 3px; line-height: 1.5; }
+  .advice-card .actions { display: flex; gap: 8px; margin-top: 10px; }
+
+  /* 底部注记 */
+  .footnote {
+    max-width: 900px; margin: 0 auto; padding: 0 24px 60px;
+    color: #999; font-size: 12.5px; line-height: 1.8;
+  }
+  .footnote h2 { color: #DDD; font-size: 15px; margin: 26px 0 8px; }
+  .footnote code { background: #242424; border: 1px solid #3a3a3a; border-radius: 3px; padding: 1px 6px; font-size: 12px; }
+  .footnote table { border-collapse: collapse; font-size: 12.5px; margin-top: 8px; }
+  .footnote th, .footnote td { border: 1px solid #3a3a3a; padding: 5px 12px; text-align: left; }
+  .footnote th { color: #BBB; font-weight: 600; background: #202020; }
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <div class="group">
+    <span class="group-title">明暗</span>
+    <button id="btn-dark" class="on">暗色</button>
+    <button id="btn-light">浅色</button>
+  </div>
+  <div class="group">
+    <span class="group-title">背景材质</span>
+    <button id="mat-mica" class="on">Mica</button>
+    <button id="mat-acrylic">Acrylic</button>
+    <button id="mat-opaque">实色</button>
+  </div>
+  <div class="group">
+    <span class="group-title">系统强调色</span>
+    <button class="swatch on" data-accent="#0078D4" data-dark="#3399DD" style="background:#0078D4" title="默认蓝"></button>
+    <button class="swatch" data-accent="#C42B1C" data-dark="#E08A7D" style="background:#C42B1C" title="红"></button>
+    <button class="swatch" data-accent="#0F7B0F" data-dark="#5BA35B" style="background:#0F7B0F" title="绿"></button>
+    <button class="swatch" data-accent="#8E5AAB" data-dark="#C79FDB" style="background:#8E5AAB" title="紫"></button>
+  </div>
+  <div class="group">
+    <span class="group-title">建议状态</span>
+    <button id="advice-demo">模拟：测出建议门槛</button>
+  </div>
+  <span class="hint">开关与输入框可直接操作 · 行内「应用」点击后有已应用反馈</span>
+</div>
+
+<div class="desktop">
+  <div class="wallpaper">
+    <div class="mock dark mica" id="win">
+      <div class="caption">
+        <div class="glyph"></div>
+        <div class="title"><b>回绕调参</b>Cursor wrap tuning</div>
+        <div class="winbtns">
+          <div class="winbtn">━</div>
+          <div class="winbtn">☐</div>
+          <div class="winbtn close">✕</div>
+        </div>
+      </div>
+
+      <div class="content">
+        <div class="host-banner">
+          <span class="dot"></span>
+          <span><b>宿主卡片</b><span class="sep">·</span>方向 仅左右<span class="sep">·</span>激活 总是<span class="sep">·</span>撞击 关</span>
+        </div>
+
+        <div class="section-title">测量</div>
+        <div class="group-card">
+          <div class="row">
+            <div class="texts">
+              <div class="label">撞击速度</div>
+              <div class="sub">Impact speed · 到达边缘那一刻的门槛</div>
+            </div>
+            <input class="field" type="number" value="2000">
+            <span class="unit">px/s</span>
+            <button class="btn secondary small">应用</button>
+          </div>
+          <div class="row">
+            <div class="texts">
+              <div class="label">测量带宽</div>
+              <div class="sub">Measuring band · 参与测速的边缘区间</div>
+            </div>
+            <input class="field" type="number" value="200">
+            <span class="unit">px</span>
+            <button class="btn secondary small">应用</button>
+          </div>
+        </div>
+
+        <div class="section-title">门槛与判定</div>
+        <div class="group-card">
+          <div class="row">
+            <div class="texts">
+              <div class="label">防震半径</div>
+              <div class="sub">Wrap guard · 落点附近的防护圈</div>
+            </div>
+            <input class="field" type="number" value="50">
+            <span class="unit">px</span>
+            <button class="btn secondary small">应用</button>
+          </div>
+          <div class="row">
+            <div class="texts">
+              <div class="label">边缘阈值</div>
+              <div class="sub">Edge threshold · 算作到边的距离</div>
+            </div>
+            <input class="field" type="number" value="1">
+            <span class="unit">px</span>
+            <button class="btn secondary small">应用</button>
+          </div>
+          <div class="row">
+            <div class="texts">
+              <div class="label">邻接容差</div>
+              <div class="sub">Adjacency tolerance · 相邻屏判定</div>
+            </div>
+            <input class="field" type="number" value="10">
+            <span class="unit">px</span>
+            <button class="btn secondary small">应用</button>
+          </div>
+        </div>
+
+        <div class="section-title">加速度</div>
+        <div class="group-card">
+          <div class="row off" id="accel-row">
+            <div class="texts">
+              <div class="label">撞击加速度</div>
+              <div class="sub">Acceleration · 0 = 关闭；开关即关闭</div>
+              <div class="off-note" id="off-note">已关闭：到达时只看速度，不看是否加速</div>
+            </div>
+            <input class="field" type="number" value="1600" id="accel-input" disabled>
+            <span class="unit">px/s²</span>
+            <label class="toggle" title="关闭加速度">
+              <input type="checkbox" id="accel-off" checked>
+              <span class="track"><span class="thumb"></span></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="section-title">可视化</div>
+        <div class="group-card">
+          <div class="row">
+            <div class="texts">
+              <div class="label">调参可视化</div>
+              <div class="sub">边缘带的实时叠层</div>
+            </div>
+            <label class="toggle"><input type="checkbox"><span class="track"><span class="thumb"></span></span></label>
+          </div>
+          <div class="row">
+            <div class="texts">
+              <div class="label">撞击光效</div>
+              <div class="sub">回绕发生时的辉光</div>
+            </div>
+            <label class="toggle"><input type="checkbox" checked><span class="track"><span class="thumb"></span></span></label>
+          </div>
+          <div class="row">
+            <div class="texts">
+              <div class="label">数据窗口</div>
+              <div class="sub">到达记录、跳过计数与钩子健康</div>
+            </div>
+            <label class="toggle"><input type="checkbox"><span class="track"><span class="thumb"></span></span></label>
+          </div>
+        </div>
+
+        <div class="advice-card" id="advice">
+          <div class="head">建议门槛</div>
+          <div class="body" id="advice-body">还没有足够的数据：向边缘甩几次，再慢移几次。</div>
+          <div class="actions">
+            <button class="btn accent" id="advice-apply" disabled>采用建议值</button>
+            <button class="btn secondary">恢复默认调参</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="wp-note">MOCK · 桌面壁纸仅用于呈现 Mica / Acrylic 取样效果</div>
+  </div>
+</div>
+
+<div class="footnote">
+  <h2>与 Win32 实现的对应关系</h2>
+  <p>真机不引 Qt，窗口仍是纯 Win32，本稿所有效果均按「能落地的 Win32 等价物」设计：</p>
+  <table>
+    <tr><th>稿件元素</th><th>实现</th></tr>
+    <tr><td>窗口圆角 8px</td><td><code>DWMWA_WINDOW_CORNER_PREFERENCE</code> = <code>DWMWCP_ROUND</code></td></tr>
+    <tr><td>Mica / Acrylic 背景</td><td><code>DWMWA_SYSTEMBACKDROP_TYPE</code> = <code>DWMSBT_MAINWINDOW</code> / <code>DWMSBT_TRANSIENTWINDOW</code>（与宿主 <code>WindowEffects.cpp</code> 同一 API）</td></tr>
+    <tr><td>暗色标题栏 / 文字</td><td><code>DWMWA_USE_IMMERSIVE_DARK_MODE</code>，跟随系统 <code>AppsUseLightTheme</code></td></tr>
+    <tr><td>系统强调色</td><td>读 <code>HKCU\...\Themes\Personalize</code> 的 AccentColor（与宿主 <code>SystemTheme</code> 同源），暗色下按 1.55 提亮（对齐 <code>Look.qml</code>）</td></tr>
+    <tr><td>行卡片 / 分区</td><td>owner-draw 静态区：<code>card</code> 底色 = 层色叠 Mica，发丝线 = 1px <code>stroke</code> 色</td></tr>
+    <tr><td>数值输入框</td><td>owner-draw EDIT：去边框、上圆角、2px 下缘线，聚焦变 accent——Fluent 文本框特征</td></tr>
+    <tr><td>开关（toggle）</td><td>owner-draw BUTTON：胶囊轨道 + 圆形滑块，开态填 accent；替代原 BS_AUTOCHECKBOX</td></tr>
+    <tr><td>accent 按钮 / 次级按钮</td><td>owner-draw：实心 accent / 层底 + 发丝描边，hover/press 两态</td></tr>
+    <tr><td>加速度「关闭」</td><td>开关即 0：开关关闭时数值输入禁用，语义与 1.0.0 的「关闭」勾选一致</td></tr>
+  </table>
+
+  <h2>交互语义（不变的部分）</h2>
+  <p>逐行「应用」保留：数值仍是显式应用而非输入即生效；「采用建议值」必须按按钮；「恢复默认调参」恢复 6 个数值与加速度开关。宿主卡片摘要条只读，入口在设置卡。</p>
+
+  <h2>布局变化</h2>
+  <p>从 6 行平铺改为 4 个分区卡片（测量 / 门槛与判定 / 加速度 / 可视化），窗口更窄更高（460px），与 Win顺 设置页的分组样式一致；三个可视化开关从勾选框改为 Fluent 开关。</p>
+</div>
+
+<script>
+  // 明暗
+  const win = document.getElementById('win');
+  const btnDark = document.getElementById('btn-dark');
+  const btnLight = document.getElementById('btn-light');
+  function setTheme(dark) {
+    win.classList.toggle('dark', dark);
+    btnDark.classList.toggle('on', dark);
+    btnLight.classList.toggle('on', !dark);
+  }
+  btnDark.onclick = () => setTheme(true);
+  btnLight.onclick = () => setTheme(false);
+
+  // 材质
+  const mats = { 'mat-mica': 'mica', 'mat-acrylic': 'acrylic', 'mat-opaque': 'opaque' };
+  for (const [id, cls] of Object.entries(mats)) {
+    document.getElementById(id).onclick = () => {
+      Object.values(mats).forEach(c => win.classList.remove(c));
+      win.classList.add(cls);
+      Object.keys(mats).forEach(k => document.getElementById(k).classList.toggle('on', k === id));
+    };
+  }
+
+  // 强调色
+  document.querySelectorAll('.swatch').forEach(s => {
+    s.onclick = () => {
+      document.querySelectorAll('.swatch').forEach(x => x.classList.remove('on'));
+      s.classList.add('on');
+      win.style.setProperty('--accent', s.dataset.accent);
+      win.style.setProperty('--accent-dark', s.dataset.dark);
+      win.style.setProperty('--accent-hover', s.dataset.accent + 'E6');
+      win.style.setProperty('--accent-soft', s.dataset.accent + '1F');
+    };
+  });
+
+  // 加速度开关：关闭时禁用输入，展示 off-note
+  const accelOff = document.getElementById('accel-off');
+  const accelInput = document.getElementById('accel-input');
+  const accelRow = document.getElementById('accel-row');
+  const offNote = document.getElementById('off-note');
+  accelOff.onchange = () => {
+    const off = accelOff.checked;
+    accelInput.disabled = off;
+    accelRow.classList.toggle('off', off);
+    offNote.textContent = off
+      ? '已关闭：到达时只看速度，不看是否加速'
+      : '开启：到达时还必须正在加速，才回绕';
+  };
+
+  // 建议状态演示
+  const advice = document.getElementById('advice');
+  const adviceBody = document.getElementById('advice-body');
+  const adviceApply = document.getElementById('advice-apply');
+  document.getElementById('advice-demo').onclick = () => {
+    advice.classList.add('ok');
+    adviceBody.textContent = '建议门槛 3450 px/s（当前 2000），来自 12 条到达记录：慢移被拦住，快甩能越过。';
+    adviceApply.disabled = false;
+  };
+  adviceApply.onclick = () => {
+    adviceApply.classList.add('applied');
+    adviceApply.textContent = '已采用 ✓';
+    adviceApply.disabled = true;
+    setTimeout(() => { adviceApply.classList.remove('applied'); adviceApply.textContent = '采用建议值'; }, 1400);
+  };
+
+  // 行内应用按钮的已应用反馈
+  document.querySelectorAll('.row .btn.small').forEach(b => {
+    b.onclick = () => {
+      b.classList.add('applied');
+      const t = b.textContent;
+      b.textContent = '已应用 ✓';
+      setTimeout(() => { b.classList.remove('applied'); b.textContent = t; }, 1200);
+    };
+  });
+</script>
+</body>
+</html>
