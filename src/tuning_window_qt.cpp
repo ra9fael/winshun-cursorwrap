@@ -7,6 +7,7 @@
 #include <QQmlApplicationEngine>
 #include <QQuickWindow>
 #include <QStyleHints>
+#include <QSurfaceFormat>
 
 #include <utility>
 
@@ -43,6 +44,18 @@ void TuningWindowQml::show()
             m_frame.reset();
             return;
         }
+        // Transparent window colour needs an alpha channel in the swap chain:
+        // without one Direct3D renders it black. The host keeps one on its own
+        // windows the same way, and for the same reason.
+        const auto keepAlpha = [window = m_window] {
+            QSurfaceFormat format = window->requestedFormat();
+            if (format.alphaBufferSize() < 8) {
+                format.setAlphaBufferSize(8);
+                window->setFormat(format);
+            }
+        };
+        keepAlpha();
+        connect(m_window, &QQuickWindow::colorChanged, m_window, keepAlpha);
         if (QGuiApplication::platformName() == QStringLiteral("windows")) {
             m_frame->setWindow(m_window);
             updateFrame();
