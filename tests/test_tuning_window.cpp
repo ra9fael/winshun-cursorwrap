@@ -1,5 +1,7 @@
 #include "tuning_window_qt.h"
 
+#include "Phosphor.h"
+
 #include <QDir>
 #include <QGuiApplication>
 #include <QQmlComponent>
@@ -126,6 +128,9 @@ int main(int argc, char** argv)
     QQuickWindow::setGraphicsApi(QSGRendererInterface::Software);
     QGuiApplication app(argc, argv);
     app.setQuitOnLastWindowClosed(false);
+    // As the plugin's own startup does: the window's title bar draws a
+    // Phosphor glyph, and Glyph.qml draws nothing for an unknown name.
+    ws::phosphor::loadFonts();
     TuningWindowTest test;
     return QTest::qExec(&test, argc, argv);
 }

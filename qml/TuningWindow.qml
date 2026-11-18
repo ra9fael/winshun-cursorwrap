@@ -29,6 +29,16 @@ Window {
         width: parent.width
         frame: window.windowFrame
         title: window.title
+
+        // Where Windows puts an app's icon: the glyph this plugin gives
+        // WinShun in plugin.json, the one its settings page shows.
+        Glyph {
+            glyph: "\uE8DE"
+            size: 16
+            color: titleBar.ink
+            x: titleBar.iconX
+            y: Math.round((titleBar.height - size) / 2)
+        }
     }
 
     function tr(zh: string, en: string): string {

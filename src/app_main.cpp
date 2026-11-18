@@ -7,6 +7,8 @@
 #include <QGuiApplication>
 #include <QQuickWindow>
 
+#include "Phosphor.h"
+
 #include <atomic>
 #include <cstdio>
 #include <thread>
@@ -72,6 +74,10 @@ extern "C" __declspec(dllexport) int winshunCursorWrapMain(const wchar_t* appDir
     QGuiApplication app(argc, argv);
     app.setQuitOnLastWindowClosed(false);
     loadUiFont(appDir);
+    // The icons: Glyph.qml draws a Phosphor name with these, and refuses to
+    // fall back to the system font for one (the two share the private use
+    // area). The host's own plugins load them at startup too.
+    ws::phosphor::loadFonts();
     const auto plugin = cw::makePlugin();
     qInfo("CursorWrap Qt %s", qVersion());
     plugin->receiveLine(first);
