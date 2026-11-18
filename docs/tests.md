@@ -14,7 +14,7 @@
 | 七个设置项类型在白名单内、默认值在文档区间内 | §7 | 通过 |
 | 宿主卡片 5 项类型在白名单内、默认值在文档区间内；清单**不再声明**调参键，并声明 `settingsWindow` | §7 | 通过（`tests/validate.py`） |
 | 清单 5 项在首页有对应行，调参键**不再**出现在首页（归属调参窗口） | §3 §7 | 通过（L3） |
-| 打包物含 `plugin.json` / `cursorwrap.exe` / `README.md` / `LICENSE`，无 `build/`、`dist/`、`.git` | §8 | `tools/package.py` + `tools/ci_release.py` |
+| 打包物含 `plugin.json` / `cursorwrap.exe` / `CursorWrapApp.dll` / `README.md` / `LICENSE`，无 `build/`、`dist/`、`.git` | §8 | `tools/package.py` + `tools/ci_release.py` |
 | 双语文档锚点互链（`docs/spec*.md`、`docs/tests*.md`、README、CHANGELOG） | — | 通过 |
 
 ## L1 — 纯逻辑单测（`cw_tests`，ctest 目标，185 用例 + 6 布局 fixture）
@@ -22,7 +22,7 @@
 不引 OS 头文件，任何平台可跑。运行：
 
 ```powershell
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCW_BUILD_PLUGIN=OFF
 cmake --build build
 ctest --test-dir build --output-on-failure
 # 或直接跑，带 fixture 目录：
@@ -92,7 +92,7 @@ fixture 是**合成几何**，不是真机采集，因此可安全提交（不�
 `tests/protocol_roundtrip.py` 用真实 `cursorwrap.exe` 走 stdio JSON-RPC。
 
 ```powershell
-python tests/protocol_roundtrip.py
+python tests/protocol_roundtrip.py --exe build/local/plugin/Release/cursorwrap.exe --app-dir 'C:/Program Files/WinShun'
 ```
 
 2026-11-18 实跑：**112 项检查全部通过**，进程退出码 0。
@@ -221,7 +221,7 @@ build\cw_devshell.exe gui                     # 真窗口，键盘 1/2/3 驱动�
 | 项 | 内容 |
 |---|---|
 | 阈值标定 | 用 `tools/capture_layout.ps1` 采集真机布局 → 加进 `tests/layouts/` 回归；据此确认 50px 邻接容差与 50px 防震ign半径在目标布局上合适 |
-| 打包 | `python tools/package.py` 产出 `.wsplugin` + `.sha256` + `release-notes.md`；`--tag` 校验版本 |
+| 打包 | `python tools/package.py --bin-dir build/local/plugin/Release` 产出 `.wsplugin` + `.sha256` + `release-notes.md`；`--tag` 校验版本 |
 | 发布校验 | `python tools/ci_release.py dist`（本地）与 CI 的 verify → build → publish |
 | 文档 | README 双语、CHANGELOG `[0.2.0]`、`docs/spec*`、`docs/tests*` 互链校验 |
 | 图标 | `winshun-plugin-icons` 生成 `app.ico` 与 `.rc`，登记 `plugins.json` |

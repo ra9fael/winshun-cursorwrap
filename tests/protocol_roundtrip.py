@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -21,6 +22,29 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_EXE = ROOT / "cursorwrap.exe"
+# The Qt DLLs come from Win顺's own folder (the "qt": "host" contract): the
+# starter finds them via --app-dir / WS_APP_DIR. A deployed Win顺 (the setup
+# installs there) has Qt at its root, flattened; a dev machine can point
+# --app-dir at its Qt kit's bin, or CW_TEST_APP_DIR at the same.
+DEFAULT_APP_DIRS = [
+    Path("C:/Program Files/WinShun"),
+    Path("D:/tools/Qt/6.12.0/msvc2022_64/bin"),
+    Path("C:/Qt/6.12.0/msvc2022_64/bin"),
+]
+
+
+def find_app_dir(explicit: str | None) -> str:
+    if explicit:
+        return explicit
+    env = os.environ.get("CW_TEST_APP_DIR")
+    if env:
+        return env
+    for candidate in DEFAULT_APP_DIRS:
+        if (candidate / "Qt6Core.dll").is_file():
+            return str(candidate)
+    raise SystemExit(
+        "no Win顺/Qt folder found for --app-dir: pass one (a deployed Win顺, "
+        "or a Qt msvc2022_64/bin), or set CW_TEST_APP_DIR")
 
 failures: list[str] = []
 checks = 0
@@ -37,9 +61,9 @@ def check(cond: bool, label: str, extra: str = "") -> None:
 
 
 class Driver:
-    def __init__(self, exe: Path, data_dir: Path):
+    def __init__(self, exe: Path, data_dir: Path, app_dir: str):
         self.proc = subprocess.Popen(
-            [str(exe)],
+            [str(exe), "--app-dir", app_dir],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -171,14 +195,14 @@ def items_of(response: dict) -> list[dict]:
     return result.get("items") or []
 
 
-def run(exe: Path) -> int:
+def run(exe: Path, app_dir: str) -> int:
     if not exe.is_file():
         print(f"error: {exe} not found; build first", file=sys.stderr)
         return 2
     with tempfile.TemporaryDirectory(prefix="cw-l3-") as tmp:
         data_dir = Path(tmp) / "cursorwrap.data"
         data_dir.mkdir()
-        drv = Driver(exe, data_dir)
+        drv = Driver(exe, data_dir, app_dir)
 
         print("initialize")
         init = drv.initialize()
@@ -310,7 +334,7 @@ def run(exe: Path) -> int:
             return [i.get("title") for i in items_of(driver.query("accel"))
                     if i.get("id") == "cursorwrap.accel" and i.get("subtitle")]
 
-        restarted = Driver(exe, data_dir)
+        restarted = Driver(exe, data_dir, app_dir)
         restarted.host_settings = drv.host_settings.copy()
         restarted.initialize()
         check(current_accel(restarted) == ["2000 px/s\u00b2"],
@@ -328,7 +352,7 @@ def run(exe: Path) -> int:
         # The remaining checks assume defaults, so start from a clean data dir.
         data_dir2 = Path(tmp) / "cursorwrap2.data"
         data_dir2.mkdir()
-        drv = Driver(exe, data_dir2)
+        drv = Driver(exe, data_dir2, app_dir)
         drv.initialize()
 
         print("every numeric submenu shows the value in effect")
@@ -538,8 +562,9 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--exe", default=str(DEFAULT_EXE), help="path to cursorwrap.exe")
+    ap.add_argument("--app-dir", default=None, help="WinShun (or Qt bin) folder: where the Qt DLLs live")
     args = ap.parse_args()
-    return run(Path(args.exe))
+    return run(Path(args.exe), find_app_dir(args.app_dir))
 
 
 if __name__ == "__main__":

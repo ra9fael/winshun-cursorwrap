@@ -1,0 +1,120 @@
+pragma ComponentBehavior: Bound
+import QtQuick
+import WinShun
+
+// An icon by its Phosphor name (iconName), or by its legacy Segoe Fluent /
+// MDL2 code point (glyph), drawn with Phosphor (see phosphor::resolve); or
+// the name of one drawn here (see `drawn`).
+Item {
+    id: icon
+
+    property string glyph
+    // A Phosphor icon by name, e.g. "heart"; filled picks the Fill weight.
+    // Prefer this for new icons: the name is stable, a Segoe code is not.
+    property string iconName
+    property bool filled: false
+    // A second font glyph drawn over the first, as MDL2 fills pair with their
+    // outlines: PinnedFill is only the head, the needle is in Pin. Not for a
+    // Phosphor icon, whole in one glyph.
+    property string overlay
+    property real size: 16
+    property color color: Theme.subtext
+    // A pressed key's icon, a little smaller (KeySurface's contentScale): the
+    // box stays, so nothing beside it moves; a Phosphor icon is drawn afresh
+    // at the smaller size (PhosphorGlyph.inkScale), never a scaled picture.
+    property real inkScale: 1
+    // A window's caption button: Windows' own glyph, as its own windows have.
+    property bool caption: false
+
+    // The custom copy-path icon shares Phosphor Regular's 256-unit grid,
+    // 16-unit stroke and optical scale. SVG source: resources/icons/copy-path.svg.
+    readonly property bool drawn: false
+
+    // {text, family}, or undefined: the system icon font draws it. The custom
+    // path uses terminal-window's matching frame to resolve the same font em.
+    readonly property string spec: iconName.length > 0
+                                   ? (filled ? "ph-fill:" : "ph:") + iconName
+                                   : glyph
+    readonly property var phosphor: caption ? undefined : SystemTheme.phosphorIcon(drawn ? "\uE756" : spec)
+    // Not in the system icon font (an older Windows 10; seen 2026-10-29):
+    // nothing, never the character some other font has there (see
+    // SystemTheme.hasGlyph). An unknown name stays empty too: a "ph:..." spec
+    // must never reach the system font, as Phosphor and Segoe share the PUA.
+    readonly property string shown: drawn ? glyph
+                                  : phosphor ? phosphor.text
+                                  : iconName.length > 0 ? ""
+                                  : SystemTheme.hasGlyph(glyph) ? glyph : ""
+    readonly property bool missing: shown.length === 0 && (glyph.length > 0 || iconName.length > 0) // keeps its room
+
+    // The icon fonts' line box is exactly their em square, so drawn icons
+    // line up with the glyphs. A Phosphor icon, drawn larger, stays in its box.
+    implicitWidth: drawn || phosphor || missing ? size : label.implicitWidth
+    implicitHeight: drawn || phosphor || missing ? size : label.implicitHeight
+
+    // A Phosphor icon: drawn by PhosphorGlyph, the em's centre on a pixel
+    // centre or edge, the same across and down. As text it came out warped:
+    // native text puts the baseline on a whole pixel, 15/16 em below the
+    // em's top, so an x or a chevron sat a fraction of a pixel lower than
+    // across, its axis between pixels.
+    // Where a Phosphor icon's ink starts, left of the box when the icon fills the em (0 for the others):
+    // what to shift a row of icon and words by to put the ink on the edge the words below start at.
+    readonly property real inkLeft: phosphorItem.used ? phosphorItem.inkLeft : 0
+
+    PhosphorGlyph {
+        id: phosphorItem
+        readonly property bool used: !icon.drawn && !!icon.phosphor
+        visible: used
+        text: used ? icon.phosphor.text : ""
+        family: used ? icon.phosphor.family : ""
+        color: icon.color
+        em: label.fontInfo.pixelSize // the font's own rounding of the size, as before
+        inkScale: icon.inkScale
+        box: Qt.size(icon.width, icon.height)
+    }
+
+    // The system icon font's glyphs, and the font metrics for the others
+    // (its text stays: fontInfo is resolved only by laying some out).
+    Text {
+        id: label
+        anchors.centerIn: parent
+        visible: !icon.drawn && !icon.phosphor
+        text: icon.drawn ? icon.phosphor.text : icon.shown
+        // In points: font.pixelSize is a whole number of logical pixels, which
+        // would round a size like 64/3 (32 device pixels at 150%) down.
+        // Never merged with other fonts (SystemTheme.glyphFont).
+        font: SystemTheme.glyphFont(icon.phosphor ? icon.phosphor.family : Theme.iconFont,
+                                    icon.size * (icon.phosphor ? SystemTheme.iconScale : 1) * 72 / 96)
+        scale: icon.inkScale // the system font's (an older Windows 10)
+        color: icon.color
+        horizontalAlignment: Text.AlignHCenter
+        verticalAlignment: Text.AlignVCenter
+    }
+
+    // Made only where wanted (a settings window has over a thousand icons,
+    // nearly all one Phosphor glyph): the overlay, or the drawn icon.
+    readonly property bool overlaid: !drawn && !phosphor && overlay.length > 0 && SystemTheme.hasGlyph(overlay)
+    // A shared button's (RowAction.shared) drawn icon stays once made, hidden
+    // while it shows another glyph: the next row it is lent to may want it.
+    property bool keep: false
+    property bool drawnKept: false
+    Loader {
+        anchors.centerIn: parent
+        active: icon.overlaid
+        visible: icon.overlaid
+        sourceComponent: overlayGlyph
+        onLoaded: if (icon.keep && icon.drawn) icon.drawnKept = true
+    }
+
+    Component {
+        id: overlayGlyph
+        Text {
+            text: icon.overlay
+            font: label.font
+            scale: icon.inkScale
+            color: icon.color
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+        }
+    }
+
+}

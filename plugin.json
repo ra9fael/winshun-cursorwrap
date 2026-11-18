@@ -6,7 +6,7 @@
     "zh": "光标回绕",
     "en": "Cursor wrap"
   },
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": {
     "zh": "光标到达屏幕外边时从对边进入（多显示器边缘拓扑，支持仅纵向/仅横向与按住 Ctrl/Shift 激活）；cursorwrap 关键字查看状态与开关",
     "en": "The cursor re-enters from the opposite edge when it reaches an outer edge (multi-monitor edge topology; vertical/horizontal-only modes and Ctrl/Shift activation); the cursorwrap keyword shows status and toggles it"
@@ -24,8 +24,10 @@
     "sandbox": "normal",
     "start": "eager",
     "idleExitSec": 0,
-    "timeoutMs": 1500,
-    "memoryMB": 64
+    "timeoutMs": 10000,
+    "memoryMB": 1024,
+    "qt": "host",
+    "qtVersion": "6.12"
   },
   "commands": [
     {

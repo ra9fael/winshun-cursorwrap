@@ -300,21 +300,23 @@ without that line the host asks for confirmation when you enable the plugin.
 ## Build from source
 
 ```powershell
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build
-ctest --test-dir build --output-on-failure
+$qtKit = 'C:/Qt/6.12.0/msvc2022_64'
+cmake -S . -B build/local -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_PREFIX_PATH=$qtKit"
+cmake --build build/local
+$env:PATH = "$qtKit/bin;$env:PATH"
+ctest --test-dir build/local --output-on-failure
 ```
 
-Requires CMake 3.16+ and a C++17 compiler (MinGW-w64 or MSVC). `cursorwrap.exe` lands
-at the repository root next to `plugin.json` (`runtime.program` is a relative path).
-The GNU branch links the C++ runtime statically, so the target machine needs no
-MinGW. MSVC builds use the static runtime (`/MT`) and likewise ship no external DLL.
+Building the plugin requires CMake 3.21+, x64 MSVC and the **Qt 6.12.0 MSVC SDK** (Qt Quick and Qt Test).
+Both `cursorwrap.exe` and `CursorWrapApp.dll` are emitted to `build/local/plugin/Release`.
+Install in a WinShun version that bundles Qt 6.12, as declared by `qt: host` / `qtVersion: 6.12`.
+Use `-DCW_BUILD_PLUGIN=OFF` for a Qt-free engine and devshell build (MinGW-w64 is supported).
 
 ## Tests
 
 ```powershell
-ctest --test-dir build --output-on-failure       # L1: 140 cases + 6 layout fixtures
-python tests/protocol_roundtrip.py               # L3: 119 protocol round-trip checks
+ctest --test-dir build/local --output-on-failure       # L1: 140 cases + 6 layout fixtures
+python tests/protocol_roundtrip.py --exe build/local/plugin/Release/cursorwrap.exe --app-dir 'C:/Program Files/WinShun'               # L3: 119 protocol round-trip checks
 python tests/devshell_scenarios.py               # L3.5: GUI + logic scenarios without the host
 python tests/repeat_push_probe.py                # L4 single display / RDP: multi-round real SetCursorPos pushes
 python tests/injected_wrap_probe.py              # L4: injected input (LLMHF_INJECTED) still wraps
@@ -350,11 +352,11 @@ This round's validation evidence: [docs/validation.en.md](docs/validation.en.md)
 ## Packaging
 
 ```powershell
-python tools/package.py            # dist/<id>-<version>.wsplugin + .sha256 + release-notes.md
-python tools/package.py --tag v0.1.0   # also checks the tag matches plugin.json and the CHANGELOG section exists
+python tools/package.py --bin-dir build/local/plugin/Release # dist/<id>-<version>.wsplugin + .sha256 + release-notes.md
+python tools/package.py --bin-dir build/local/plugin/Release --tag v1.1.0   # also checks the tag matches plugin.json and the CHANGELOG section exists
 ```
 
-The package contains every git-tracked file plus `cursorwrap.exe`, as a deterministic
+The package contains Git-tracked files plus `cursorwrap.exe` and `CursorWrapApp.dll`, as a deterministic
 zip (fixed timestamps, stored uncompressed): the same inputs always produce the same
 SHA-256. The release flow (tag → CI verify/build/publish) lives in
 [.github/workflows/release.yml](.github/workflows/release.yml) and [AGENTS.md](AGENTS.md).

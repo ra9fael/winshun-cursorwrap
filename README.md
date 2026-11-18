@@ -259,20 +259,23 @@ Confirmed=ui
 ## 从源码构建
 
 ```powershell
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build
-ctest --test-dir build --output-on-failure
+$qtKit = 'C:/Qt/6.12.0/msvc2022_64'
+cmake -S . -B build/local -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_PREFIX_PATH=$qtKit"
+cmake --build build/local
+$env:PATH = "$qtKit/bin;$env:PATH"
+ctest --test-dir build/local --output-on-failure
 ```
 
-需要 CMake 3.16+、C++17 编译器（MinGW-w64 或 MSVC）。产物 `cursorwrap.exe` 落在
-仓库根，与 `plugin.json` 同级（`runtime.program` 是相对路径）。GNU 分支会静态链接
-C++ 运行时，目标机器不需要 MinGW。MSVC 构建用静态运行库（`/MT`），同样无外部 DLL。
+需要 CMake 3.21+、x64 MSVC 和 **Qt 6.12.0 MSVC 开发套件**（含 Qt Quick 和 Qt Test）。
+构建生成 `build/local/plugin/Release/cursorwrap.exe` 与同目录下的 `CursorWrapApp.dll`。
+安装需使用内置 Qt 6.12 的 Win顺，插件通过清单的 `qt: host` / `qtVersion: 6.12` 契约共享运行时。
+只构建引擎和 devshell 时可配置 `-DCW_BUILD_PLUGIN=OFF`（支持 MinGW-w64）。
 
 ## 测试
 
 ```powershell
-ctest --test-dir build --output-on-failure       # L1：140 用例 + 6 布局 fixture
-python tests/protocol_roundtrip.py               # L3：119 项协议往返检查
+ctest --test-dir build/local --output-on-failure       # L1：140 用例 + 6 布局 fixture
+python tests/protocol_roundtrip.py --exe build/local/plugin/Release/cursorwrap.exe --app-dir 'C:/Program Files/WinShun'               # L3：119 项协议往返检查
 python tests/devshell_scenarios.py               # L3.5：免宿主 GUI + 逻辑场景
 python tests/repeat_push_probe.py                # L4 单屏 / 远程桌面：真实 SetCursorPos 多轮推送
 python tests/injected_wrap_probe.py              # L4：注入事件（LLMHF_INJECTED）仍能回绕
@@ -305,11 +308,11 @@ tools\devshell\capture.ps1 -Scenario tests\scenarios\visual-demo.txt -Out shot.p
 ## 打包
 
 ```powershell
-python tools/package.py            # dist/<id>-<version>.wsplugin + .sha256 + release-notes.md
-python tools/package.py --tag v0.1.0   # 校验 tag 与 plugin.json 版本一致、CHANGELOG 有对应 section
+python tools/package.py --bin-dir build/local/plugin/Release # dist/<id>-<version>.wsplugin + .sha256 + release-notes.md
+python tools/package.py --bin-dir build/local/plugin/Release --tag v1.1.0   # 校验 tag 与 plugin.json 版本一致、CHANGELOG 有对应 section
 ```
 
-包内容：git 跟踪的全部文件 + `cursorwrap.exe`，确定性 zip（固定时间戳、不压缩），
+包内容：Git 跟踪的文件与 `cursorwrap.exe`、`CursorWrapApp.dll`，确定性 zip（固定时间戳、不压缩），
 同一份输入永远得到同一个 SHA-256。发布流程（tag → CI verify/build/publish）见
 [.github/workflows/release.yml](.github/workflows/release.yml) 与
 [AGENTS.md](AGENTS.md)。双语 release notes 在

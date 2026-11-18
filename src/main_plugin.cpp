@@ -1,4 +1,4 @@
-// main.cpp — WinShunCursorWrap: a Win顺 resident plugin.
+// main_plugin.cpp — WinShunCursorWrap: a Win顺 resident plugin.
 //
 // Multi-monitor cursor wrapping: when the pointer reaches an outer edge of
 // the monitor layout it re-enters from the nearest opposite edge (PowerToys
@@ -13,28 +13,33 @@
 // full grammar). Changes apply immediately and persist in the plugin's data
 // directory (WS_DATA_DIR/settings.json); the host's settings card remains
 // authoritative for keys the search bar has not overridden.
-#include "winshun.h"
+//
+// The Qt thread dispatches requests and serializes settings changes.
+#include "main_plugin.h"
 
 #include "data_window.h"
+#include "tuning_window_qt.h"
 #include "monitor_watcher.h"
 #include "mouse_hook.h"
 #include "overlay.h"
 #include "query_parser.h"
 #include "settings_store.h"
-#include "settings_window.h"
 #include "wrap_logic.h"
 
 #include <algorithm>
 #include <atomic>
-#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
-#include <mutex>
 #include <string>
-#include <thread>
 #include <vector>
 #include <windows.h>
+
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QTimer>
+#include <QString>
+#include <QVariantMap>
 
 using winshun::ActionRequest;
 using winshun::Effects;
@@ -252,6 +257,8 @@ bool deleteFile(const std::wstring& path)
 
 class CursorWrapPlugin final : public winshun::Plugin {
 public:
+    ~CursorWrapPlugin() override { shuttingDown(); }
+
     std::string name() const override { return "ra9fael.cursorwrap"; }
 
 protected:
@@ -293,7 +300,19 @@ protected:
         // The windows follow the settings, so the settings page is enough to
         // turn them on (the search bar is not the only way in).
         applyWindowSettings();
-        startCoalescer();
+        appearanceChanged();
+        m_coalescer.setInterval(100);
+        QObject::connect(&m_coalescer, &QTimer::timeout, &m_coalescer, [this] {
+            if (m_refreshPending.exchange(false))
+                refresh();
+            if (m_dataWindow.takeCloseRequest() && m_settings.dataWindow) {
+                cw::RawSettings raw;
+                raw.hasDataWindow = true;
+                raw.dataWindow = false;
+                commitSettings(raw);
+            }
+        });
+        m_coalescer.start();
 
         log(hookOk() && m_watcherOk ? "info" : "warn",
             std::string("cursorwrap: hook ") + (hookOk() ? "installed" : "FAILED")
@@ -523,29 +542,33 @@ protected:
             m_hook->updateSettings(m_settings);
         // The two windows are settings now, so the settings page drives them.
         applyWindowSettings();
-        m_settingsWindow.settingsUpdated();
+        m_tuningWindow.settingsUpdated();
         refresh();
     }
 
     void shuttingDown() override
     {
-        stopCoalescer();
-        m_settingsWindow.stop();
+        m_coalescer.stop();
+        m_tuningWindow.shutdown();
+        if (m_watcher) {
+            m_watcher->stop();
+            m_watcher.reset();
+        }
         m_dataWindow.stop();
         m_overlay.stop();
         if (m_hook) {
             m_hook->stop();
             m_hook.reset();
         }
-        if (m_watcher) {
-            m_watcher->stop();
-            m_watcher.reset();
-        }
         m_engine.reset();
     }
 
     void appearanceChanged() override
     {
+        const auto appearanceMap = QJsonDocument::fromJson(
+            QByteArray::fromStdString(appearance().dump())).object().toVariantMap();
+        m_tuningWindow.applyTheme(QString::fromStdString(theme()), appearanceMap);
+        m_tuningWindow.settingsUpdated();
         // The overlay paints in the host's accent/text colours.
         const Json look = appearance()["nativeLook"];
         if (!look.isObject())
@@ -579,6 +602,7 @@ protected:
         dataColors.background = colors.background;
         dataColors.dark = colors.dark;
         m_dataWindow.setColors(dataColors);
+
     }
 
 private:
@@ -589,41 +613,6 @@ private:
     // remembers it, so the windows survive a plugin restart.
 
     bool hookOk() const { return m_hook && m_hook->installed(); }
-
-    // The hook only sets m_refreshPending (it must not touch the host's
-    // stdout: a slow write there is what makes Windows drop a low-level hook).
-    // This thread coalesces those flags into one refresh per 100 ms, which is
-    // all a status row left open needs.
-    void startCoalescer()
-    {
-        m_coalescerRunning.store(true);
-        m_coalescer = std::thread([this] {
-            while (m_coalescerRunning.load()) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                if (m_refreshPending.exchange(false))
-                    refresh();
-                // The data window's X must turn the setting off, so the two
-                // surfaces cannot disagree about whether it is open. The write
-                // is serialised against the protocol thread's own writes.
-                if (m_dataWindow.takeCloseRequest()) {
-                    std::lock_guard lock(m_persistMutex);
-                    if (m_settings.dataWindow) {
-                        cw::RawSettings raw;
-                        raw.dataWindow = false;
-                        raw.hasDataWindow = true;
-                        commitSettings(raw);
-                    }
-                }
-            }
-        });
-    }
-
-    void stopCoalescer()
-    {
-        m_coalescerRunning.store(false);
-        if (m_coalescer.joinable())
-            m_coalescer.join();
-    }
 
     // Start or stop the windows so they match the settings. Called from
     // initialized(), settingsChanged() and after every window command.
@@ -763,7 +752,7 @@ private:
         persistPluginSettings();
         pushHostSettings(merged);
         applyWindowSettings();
-        m_settingsWindow.settingsUpdated();
+        m_tuningWindow.settingsUpdated();
     }
 
     // "set:<field>:<value>" -> a partial RawSettings. False for a field this
@@ -1054,14 +1043,7 @@ private:
 
     void openTuningWindow()
     {
-        m_settingsWindow.start(
-            [this] { return tuningSnapshot(); },
-            [this](const cw::RawSettings& raw) {
-                // The window's thread. The same mutex the coalescer's data-
-                // window close uses; commitSettings is the one update path.
-                std::lock_guard lock(m_persistMutex);
-                commitSettings(raw);
-            });
+        m_tuningWindow.show();
     }
 
     cw::SettingsUiState tuningSnapshot()
@@ -1755,26 +1737,23 @@ Item statusRow()
     std::unique_ptr<cw::MonitorWatcher> m_watcher;
     cw::Overlay m_overlay;       // edge bands + readout (settings.tuningOverlay)
     cw::DataWindow m_dataWindow; // the live data window (settings.dataWindow)
-    cw::SettingsWindow m_settingsWindow; // the tuning window (showSettings)
-    // Set from inside the hook callback; drained by the coalescing timer so
-    // the hook path never does I/O.
+    cw::TuningWindowQml m_tuningWindow {
+        [this] { return tuningSnapshot(); },
+        [this](const cw::RawSettings& raw) { commitSettings(raw); }
+    };
     std::atomic<bool> m_refreshPending { false };
-    std::thread m_coalescer;
-    std::atomic<bool> m_coalescerRunning { false };
-    // Guards the settings state against the two writers: the protocol thread
-    // (a command) and the coalescer (the data window's close button).
-    std::mutex m_persistMutex;
+    QTimer m_coalescer;
     bool m_hookOk = false;
     bool m_watcherOk = false;
     bool m_hookEnabled = true;
     bool m_pluginSaved = false;
 };
 
-int main()
+namespace cw {
+
+std::unique_ptr<winshun::Plugin> makePlugin()
 {
-    // Keep EnumDisplayMonitors, low-level hook coordinates, and SetCursorPos
-    // in the same physical-pixel coordinate space on mixed-DPI desktops.
-    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-    CursorWrapPlugin plugin;
-    return plugin.serve();
+    return std::make_unique<CursorWrapPlugin>();
 }
+
+} // namespace cw

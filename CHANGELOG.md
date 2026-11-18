@@ -9,6 +9,23 @@ single source of truth; release tags are `v<version>`.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-19
+
+### Changed
+
+- **界面重构为 Qt Quick（宿主共享 Qt）。** 调参窗口从原生 Win32 控件改为 Qt Quick，
+  按 Win顺 的外观令牌绘制（深浅色、强调色、圆角、Mica 背景都跟随宿主设置），
+  布局从六行平铺改为四个分组卡片（测量 / 门槛与判定 / 加速度 / 可视化），
+  可视化开关换成 Win11 风格的拨动开关，数值输入框带聚焦下划线。数据窗口与
+  边缘可视化保持原有 GDI 实现，不受影响。
+- **插件改为双层程序。** cursorwrap.exe 变成无 Qt 的启动器，加载
+  CursorWrapApp.dll（Qt 部分在其中）；Qt 运行时直接用 Win顺 安装目录里的
+  那份（清单声明 qt: host / qtVersion: 6.12），插件包不再多几十 MB。
+  回绕引擎、鼠标钩子、时间戳与设置存储的原有实现与红线不变；协议语义
+  不变（112 项往返测试原样通过）。
+- 升级要求不变：minWinShun 仍为 0.22.0（共享 Qt 契约的最低版本）。
+  资源限制放宽：timeoutMs 1500 → 10000，memoryMB 64 → 1024（Qt 需要）。
+
 ## [1.0.0] - 2026-11-18
 
 ### Changed

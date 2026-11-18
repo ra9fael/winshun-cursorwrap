@@ -91,6 +91,13 @@ def validate_manifest() -> dict:
     memory = runtime.get("memoryMB")
     check(isinstance(memory, (int, float)) and 64 <= memory <= 2048,
           f"runtime.memoryMB {memory!r} out of the 64..2048 range")
+    # The windows are Qt Quick on Win顺's own Qt (the shared-Qt contract,
+    # docs/plugins.md): the starter exe loads CursorWrapApp.dll from beside
+    # itself, with the runtime resolving Qt from WS_APP_DIR.
+    check(runtime.get("qt") == "host", "runtime.qt must be 'host' (the tuning window is Qt Quick on the host's Qt)")
+    qt_version = runtime.get("qtVersion")
+    check(isinstance(qt_version, str) and re.fullmatch(r"[1-9][0-9]*\.[0-9]+(?:\.[0-9]+)?", qt_version or ""),
+          f"runtime.qtVersion {qt_version!r} must be like 6.12 or 6.12.0")
 
     commands = manifest.get("commands", [])
     check(len(commands) == 1, "exactly one command")
@@ -218,8 +225,12 @@ def validate_package(package_dir: Path, manifest: dict) -> None:
         check(digest == expected, "SHA256 sidecar does not match the package")
     with zipfile.ZipFile(package) as archive:
         names = set(archive.namelist())
-    for required in ("plugin.json", "cursorwrap.exe", "README.md", "LICENSE"):
+        if "plugin.json" in names:
+            check(json.loads(archive.read("plugin.json")) == manifest, "packaged manifest differs from source")
+    for required in ("plugin.json", "cursorwrap.exe", "CursorWrapApp.dll", "README.md", "LICENSE"):
         check(required in names, f"package is missing {required}")
+    check(not any(Path(name).name.lower().startswith("qt6") and name.lower().endswith(".dll")
+                  for name in names), "package bundles the host's Qt runtime")
     for banned in (".git", "build", "dist", "plugins.log", "cursorwrap.data"):
         check(not any(n == banned or n.startswith(banned + "/") for n in names),
               f"package contains {banned}")

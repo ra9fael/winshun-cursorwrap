@@ -370,16 +370,26 @@ gate_pps,wrapped,gate_off`），可以离线画图或验证建议值；`clear` /
 
 ## 10 架构
 
-单进程单文件 `cursorwrap.exe`，无 DLL、无 Qt、无托盘。四个线程：
+双层程序：`cursorwrap.exe` 是无 Qt 的启动器（`stub_main.cpp`），把 Win顺 安装
+目录（宿主注入的 `WS_APP_DIR`，清单声明 `qt: host` / `qtVersion: 6.12`）加进
+DLL 搜索路径后加载 `CursorWrapApp.dll`——插件的全部逻辑在 DLL 里。线程分工如下。
 
 | 线程 | 职责 |
 |---|---|
-| 协议线程（SDK `serve()`） | `query` / `action` / `settingsChanged` / `shutdown`；持有一个 `WrapEngine` |
+| GUI 线程（QGuiApplication） | 协议分发（`query` / `action` / `settingsChanged` / `shutdown` 经读线程排队转投）、调参窗口 QML、持有一个 `WrapEngine` |
+| stdin 读线程 | 阻塞 `ReadFile`，每行排队转投 GUI 线程（capture 插件的同一模型） |
 | 钩子线程 | `WH_MOUSE_LL` + 自己的消息泵；配置经 `WM_APP_SETTINGS` 投递，热路径无锁 |
 | 监听线程 | message-only 窗口收 `WM_DISPLAYCHANGE` / `WM_SETTINGCHANGE` / `WM_DEVICECHANGE`，500ms 防抖后重建拓扑 |
-| 合并定时器线程 | 100ms 轮询：把钩子置的 `refreshPending` 合成一次 `refresh()`；把数据窗口的关闭请求同步成设置 |
+| GUI 线程的合并定时器 | 100ms 轮询：把钩子置的 `refreshPending` 合成一次 `refresh()`；把数据窗口的关闭请求同步成设置 |
 | 看门狗线程（钩子内） | 1s 比对 `GetCursorPos()` 与钩子最后报告的位置，判定钩子是否被 Windows 静默卸载 |
-| 窗口线程 | 调参覆盖层与数据窗口各自的 `GetMessage` 循环 |
+| 窗口线程 | 调参覆盖层与数据窗口各自的 `GetMessage` 循环（两者保持 GDI，不经 Qt） |
+
+调参窗口是 Qt Quick（`qml/TuningWindow.qml`，资源编进 DLL）：色板来自宿主的
+`appearance` 通知（`nativeLook`，令牌缺失时用 fluent 回退值），暗色标题栏、
+圆角与 Mica 由 DWM 属性设置；四个分组卡片（测量 / 门槛与判定 / 加速度 /
+可视化），加速度的"关"是开关而非隐式空值，采用建议值必须按按钮。窗口读的是
+控制器快照（`tuningSnapshot()`），每个手势都汇入 `commitSettings()`——与
+搜索栏共用同一条提交路径。
 
 ### 钩子线程零 I/O（关键约束）
 

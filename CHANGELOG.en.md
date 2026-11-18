@@ -9,6 +9,29 @@ single source of truth; release tags are `v<version>`.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-19
+
+### Changed
+
+- **The UI is rebuilt on Qt Quick (the host's shared Qt).** The tuning window
+  moves from native Win32 controls to Qt Quick, drawn with Win顺's own
+  appearance tokens (light/dark, the accent, radii and the Mica backdrop all
+  follow the host's settings). The flat six-row list becomes four grouped
+  cards (measurement / gates / acceleration / visualization), the switches
+  are Win11-style toggles, the numeric entries get the focused underline.
+  The data window and the edge overlay keep their GDI implementations and
+  are unaffected.
+- **The plugin is now a two-part program.** cursorwrap.exe is a Qt-less
+  starter that loads CursorWrapApp.dll (the Qt part); the Qt runtime comes
+  from Win顺's own folder (the manifest declares qt: host /
+  qtVersion: 6.12), so the package does not grow by tens of megabytes.
+  The wrap engine, the mouse hook, the timestamps and the settings store
+  keep their implementations and their red lines; the protocol semantics
+  are unchanged (the same 112 round-trip checks pass).
+- The upgrade bar is unchanged: minWinShun stays 0.22.0 (the shared-Qt
+  contract's floor). The resource limits widen: timeoutMs 1500 → 10000,
+  memoryMB 64 → 1024 (Qt needs the room).
+
 ## [1.0.0] - 2026-11-18
 
 ### Changed

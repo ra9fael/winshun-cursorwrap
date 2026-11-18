@@ -404,16 +404,30 @@ arrival or a CHANGE of skip reason — one continuous glide is one entry, so a
 
 ## 10 Architecture
 
-One process, one executable (`cursorwrap.exe`), no DLL, no Qt, no tray. Threads:
+A two-part program: `cursorwrap.exe` is a Qt-less starter (`stub_main.cpp`)
+that adds Win顺's install folder (the host-injected `WS_APP_DIR`; the manifest
+declares `qt: host` / `qtVersion: 6.12`) to the DLL search path and loads
+`CursorWrapApp.dll` — all of the plugin's logic lives in the DLL. Threads:
 
 | Thread | Responsibility |
 |---|---|
-| Protocol (`serve()`) | `query` / `action` / `settingsChanged` / `shutdown`; owns a `WrapEngine` |
+| GUI (QGuiApplication) | protocol dispatch (`query` / `action` / `settingsChanged` / `shutdown`, queued from the reader thread), the tuning window's QML, owns a `WrapEngine` |
+| stdin reader | blocks in `ReadFile`, queues each line onto the GUI thread (the capture plugin's model) |
 | Hook | `WH_MOUSE_LL` with its own message pump; settings arrive via `WM_APP_SETTINGS`, so the hot path is lock-free |
 | Watcher | message-only window receiving `WM_DISPLAYCHANGE` / `WM_SETTINGCHANGE` / `WM_DEVICECHANGE`; rebuilds the topology after a 500 ms debounce |
 | Coalescer | 100 ms poll: folds the hook's `refreshPending` into one `refresh()`, and turns the data window's close request into a setting change |
 | Watchdog | 1 s comparison of `GetCursorPos()` against the position the hook last reported, to detect a silently dropped hook |
-| Window threads | one `GetMessage` loop each for the tuning overlay and the data window |
+| Window threads | one `GetMessage` loop each for the tuning overlay and the data window (both stay GDI, untouched by Qt) |
+
+The tuning window is Qt Quick (`qml/TuningWindow.qml`, compiled into the
+DLL's resources): its palette comes from the host's `appearance` notification
+(`nativeLook`, with fluent fallbacks for missing tokens), and the dark title
+bar, rounded corners and Mica are DWM attributes. Four grouped cards
+(measurement / gates / acceleration / visualization); the acceleration's off
+is a switch rather than an implicit empty value; adopting the suggested gate
+is a button press. The window reads a controller snapshot
+(`tuningSnapshot()`), and every gesture funnels into `commitSettings()` — the
+one commit path the search bar also uses.
 
 ### Zero I/O on the hook thread (a hard constraint)
 

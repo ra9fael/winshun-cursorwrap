@@ -853,6 +853,13 @@ class Plugin {
 public:
     virtual ~Plugin() = default;
 
+    // Local extension: deliver a line from the Qt event loop using the SDK's
+    // dispatcher and output channel. The caller owns the stdin reader.
+    bool receiveLine(const std::string& line)
+    {
+        return !toolAnswer(line) && handle(line);
+    }
+
     // The protocol loop: reads requests until stdin closes or shutdown
     // comes. The process's exit code.
     int serve()

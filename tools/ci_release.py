@@ -30,26 +30,28 @@ def validate_source(event, name):
         raise ValueError('Version must be X.Y.Z')
     if manifest.get('id') != 'ra9fael.cursorwrap':
         raise ValueError('plugin.json id mismatch')
+    sha = git('rev-parse', 'HEAD')
+    inputs = event.get('inputs', {})
     tag = ''
-    publish = name == 'push' or str(event.get('inputs', {}).get('publish', 'false')).lower() == 'true'
+    publish = name == 'push' or str(inputs.get('publish', False)).lower() == 'true'
     if name == 'push':
-        if not event.get('created') or event.get('deleted') or not event.get('ref', '').startswith('refs/tags/'):
-            raise ValueError('Only newly created tags can publish automatically')
-        tag = event['ref'].removeprefix('refs/tags/')
-    else:
-        tag = str(event.get('inputs', {}).get('ref', '') or '')
+        ref = event.get('ref', '')
+        if not event.get('created') or event.get('deleted') or not re.fullmatch(r'refs/tags/v[0-9]+\.[0-9]+\.[0-9]+', ref):
+            raise ValueError('Only newly created version tags can publish automatically')
+        tag = ref.removeprefix('refs/tags/')
+    elif not inputs.get('source_ref'):
+        raise ValueError('Manual verification requires a source_ref')
+    elif publish:
+        tag = inputs['source_ref'].removeprefix('refs/tags/')
     if publish:
-        if not tag:
-            raise ValueError('Publishing requires a version tag')
         if tag != f'v{version}':
             raise ValueError(f'Tag {tag} does not match plugin.json version {version}')
-        tags = git('tag', '--list', tag).splitlines()
-        if tag not in tags:
-            raise ValueError(f'Tag {tag} does not exist')
-        if git('rev-parse', f'refs/tags/{tag}^{{commit}}') != git('rev-parse', 'HEAD'):
+        ref = f'refs/tags/{tag}'
+        if git('rev-parse', f'{ref}^{{commit}}') != sha:
             raise ValueError(f'Tag {tag} does not point at the selected source')
-    elif tag and tag != f'v{version}':
-        raise ValueError(f'Ref {tag} does not match plugin.json version {version}')
+        remote = dict(line.split()[::-1] for line in git('ls-remote', 'origin', ref, f'{ref}^{{}}').splitlines())
+        if remote.get(f'{ref}^{{}}', remote.get(ref)) != sha:
+            raise ValueError(f'Remote tag {tag} does not point at the selected source')
     changelog = (ROOT / 'CHANGELOG.md').read_text(encoding='utf-8-sig')
     if f'## [{version}]' not in changelog:
         raise ValueError(f'CHANGELOG.md has no [{version}] section')
@@ -57,7 +59,7 @@ def validate_source(event, name):
         raise ValueError('LICENSE (MIT) is required')
     print(f'::group::source ok v{version} tag={tag or "-"} publish={publish}')
     print('::endgroup::')
-    return version, tag, publish
+    return sha, tag, publish
 
 
 def validate_package(dist: Path, version: str):
@@ -72,35 +74,32 @@ def validate_package(dist: Path, version: str):
         raise ValueError('SHA256 mismatch')
     with zipfile.ZipFile(package) as archive:
         names = set(archive.namelist())
-    for required in ('plugin.json', 'cursorwrap.exe', 'README.md', 'LICENSE'):
+        manifest = json.loads(archive.read('plugin.json'))
+    if manifest != json.loads((ROOT / 'plugin.json').read_text(encoding='utf-8-sig')):
+        raise ValueError('Package manifest differs from the checked-out source')
+    for required in ('plugin.json', 'cursorwrap.exe', 'CursorWrapApp.dll', 'README.md', 'LICENSE'):
         if required not in names:
             raise ValueError(f'Package is missing {required}')
     for forbidden in ('.git', 'build/', 'dist/', 'plugins.log'):
         if any(n.startswith(forbidden) or n == forbidden for n in names):
             raise ValueError(f'Package contains {forbidden}')
+    if any(Path(n).name.lower().startswith('qt6') and n.lower().endswith('.dll') for n in names):
+        raise ValueError('Package must use the host Qt DLLs')
     print(f'::group::package ok {package.name} {package.stat().st_size} bytes')
     print('::endgroup::')
 
 
 def main():
     dist = Path(sys.argv[1]) if len(sys.argv) > 1 else None
-    if 'GITHUB_EVENT_PATH' in os.environ:
+    if dist is None and 'GITHUB_EVENT_PATH' in os.environ:
         event = json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text(encoding='utf-8'))
         name = os.environ['GITHUB_EVENT_NAME']
         if name not in ('push', 'workflow_dispatch'):
             raise ValueError('Only a new version tag or manual dispatch is allowed')
-        version, tag, publish = validate_source(event, name)
-        sha = git('rev-parse', 'HEAD')
-        outputs = [
-            f'sha={sha}', f'tag={tag}', f'publish={str(publish).lower()}',
-            f'version={version}', f'prerelease={str("-" in version).lower()}',
-        ]
-        for line in outputs:
-            print(f'::set-output name={line.split("=", 1)[0]}::{line.split("=", 1)[1]}')
-        if dist:
-            validate_package(dist, version)
+        sha, tag, publish = validate_source(event, name)
+        with Path(os.environ['GITHUB_OUTPUT']).open('a', encoding='utf-8') as output:
+            output.write(f'sha={sha}\ntag={tag}\npublish={str(publish).lower()}\n')
         return 0
-    # Local: validate the packaged artifact for the manifest version.
     manifest = json.loads((ROOT / 'plugin.json').read_text(encoding='utf-8-sig'))
     validate_package(Path(dist or (ROOT / 'dist')), manifest['version'])
     return 0

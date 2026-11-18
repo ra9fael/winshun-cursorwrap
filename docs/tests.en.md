@@ -13,7 +13,7 @@ original: [tests.md](tests.md).
 | `runtime`: resident / eager / `idleExitSec 0` / `normal` / `timeoutMs 1500` / `memoryMB 64` | §8 | pass |
 | One command, three actions in order `toggleEnabled, cycleMode, copyDiagnostics` | §3 | pass (asserted in L3 too) |
 | The host card's five settings of allowed types; defaults inside the documented ranges; the manifest no longer declares the tuning keys and declares `settingsWindow` | §7 | pass (`tests/validate.py`) |
-| Package contains `plugin.json` / `cursorwrap.exe` / `README.md` / `LICENSE`, no `build/`, `dist/`, `.git` | §8 | `tools/package.py` + `tools/ci_release.py` |
+| Package contains `plugin.json` / `cursorwrap.exe` / `CursorWrapApp.dll` / `README.md` / `LICENSE`, no `build/`, `dist/`, `.git` | §8 | `tools/package.py` + `tools/ci_release.py` |
 | Bilingual anchors cross-link (`docs/spec*.md`, `docs/tests*.md`, README, CHANGELOG) | — | pass |
 
 ## L1 — Pure logic unit tests (`cw_tests`, ctest target, 185 cases + 6 layout fixtures)
@@ -21,7 +21,7 @@ original: [tests.md](tests.md).
 No OS headers: runs anywhere. Commands:
 
 ```powershell
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCW_BUILD_PLUGIN=OFF
 cmake --build build
 ctest --test-dir build --output-on-failure
 # or run directly with the fixture directory:
@@ -92,7 +92,7 @@ The hook callback and settings delivery can be tested without a real hook:
 `tests/protocol_roundtrip.py` drives the real `cursorwrap.exe` over stdio JSON-RPC.
 
 ```powershell
-python tests/protocol_roundtrip.py
+python tests/protocol_roundtrip.py --exe build/local/plugin/Release/cursorwrap.exe --app-dir 'C:/Program Files/WinShun'
 ```
 
 Run on 2026-11-18: **112 checks passed**, process exit code 0.
@@ -236,7 +236,7 @@ coordinates.
 | Item | Content |
 |---|---|
 | Threshold calibration | Capture a real layout with `tools/capture_layout.ps1`, add it under `tests/layouts/` as a regression, and confirm the 50 px adjacency tolerance and 50 px guard radius suit that layout |
-| Packaging | `python tools/package.py` produces `.wsplugin` + `.sha256` + `release-notes.md`; `--tag` validates the version |
+| Packaging | `python tools/package.py --bin-dir build/local/plugin/Release` produces `.wsplugin` + `.sha256` + `release-notes.md`; `--tag` validates the version |
 | Release validation | `python tools/ci_release.py dist` locally, and CI's verify → build → publish |
 | Documentation | Bilingual README, CHANGELOG `[0.2.0]`, `docs/spec*`, `docs/tests*` cross-links |
 | Icon | `winshun-plugin-icons` generates `app.ico` and the `.rc`; registered in `plugins.json` |

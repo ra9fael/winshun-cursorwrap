@@ -2,15 +2,12 @@
 """Package this plugin as dist/<id>-<version>.wsplugin.
 
 Usage:
-  python tools/package.py              # package the committed files + the built exe
-  python tools/package.py --tag v1.2.3 # also require the tag to match plugin.json
+  python tools/package.py --bin-dir build/local/plugin/Release
+  python tools/package.py --bin-dir build/local/plugin/Release --tag v1.2.3
 
-What goes in: every file tracked by git (``git ls-files``), except paths that
-start with a dot (.github, .gitignore, ...), plus ``runtime.program`` from
-plugin.json (the built exe, which is not committed). The zip is deterministic
-(sorted names, fixed timestamps, stored, not compressed), so the same inputs
-always give the same sha256. plugin.json sits at the archive root, which is
-what WinShun's "install from archive" expects.
+The archive contains Git-tracked files, the launcher and the application DLL.
+Hidden paths and duplicate font files already embedded in the DLL are omitted.
+The zip uses sorted names and fixed timestamps. plugin.json sits at the root.
 
 Outputs in dist/: <id>-<version>.wsplugin, its .sha256, and release-notes.md
 (the matching '## [version]' section of CHANGELOG.md plus the checksum). With
@@ -48,13 +45,16 @@ def tracked_files() -> list[str]:
     # the shipped plugin.
     return [n for n in names
             if not any(part.startswith(".") for part in n.split("/"))
-            and not n.startswith("tools/verify/")]
+            and not n.startswith("tools/verify/")
+            and not n.endswith(".ttf")]
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--tag", help="release tag; must be v<version from plugin.json>")
     ap.add_argument("--out", default=str(ROOT / "dist"), help="output folder (default: dist/)")
+    ap.add_argument("--bin-dir", required=True,
+                    help="configuration output folder containing cursorwrap.exe and CursorWrapApp.dll")
     args = ap.parse_args()
 
     manifest = json.loads((ROOT / "plugin.json").read_text(encoding="utf-8"))
@@ -70,23 +70,40 @@ def main() -> int:
     program = str(manifest.get("runtime", {}).get("program", ""))
     if not program.lower().endswith(".exe"):
         return fail(f"runtime.program {program!r} is not an exe; this script packages native plugins")
-    if not (ROOT / program).is_file():
-        return fail(f"{program} not found; build first (cmake -B build && cmake --build build)")
-
-    files = sorted(set(tracked_files()) | {program})
+    bin_dir = Path(args.bin_dir).resolve()
+    dll = "CursorWrapApp.dll"
+    binaries = {name: bin_dir / name for name in (program, dll)}
+    files = {name: ROOT / name for name in tracked_files()}
     if "plugin.json" not in files:
-        return fail("plugin.json is not committed")
-    missing = [f for f in files if not (ROOT / f).is_file()]
+        return fail("plugin.json is not tracked")
+    missing = [str(path) for path in [*files.values(), *binaries.values()] if not path.is_file()]
     if missing:
-        return fail(f"tracked but missing on disk: {missing}")
+        return fail(f"required files are missing: {missing}")
+
+    source_dir = ROOT / "src"
+    stub = source_dir / "stub_main.cpp"
+    common = [ROOT / "cursorwrap.rc"]
+    dll_sources = [p for p in source_dir.iterdir() if p.suffix in (".cpp", ".h") and p != stub]
+    vendor = ROOT / "third_party" / "winshun"
+    shared_ui = [p for p in vendor.rglob("*") if p.suffix in (".cpp", ".h", ".qml", ".ttf")]
+    inputs = {
+        program: [stub, *common],
+        dll: [*dll_sources, *common, *shared_ui, *(ROOT / "qml").glob("*.qml")],
+    }
+    for name, binary in binaries.items():
+        modified = binary.stat().st_mtime_ns
+        stale = next((path for path in inputs[name] if path.stat().st_mtime_ns > modified), None)
+        if stale:
+            return fail(f"{binary} is older than {stale.relative_to(ROOT)}; rebuild before packaging")
+    files.update(binaries)
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     target = out / f"{pid}-{version}.wsplugin"
     total = 0
     with zipfile.ZipFile(target, "w", zipfile.ZIP_STORED) as z:
-        for name in files:
-            data = (ROOT / name).read_bytes()
+        for name in sorted(files):
+            data = files[name].read_bytes()
             total += len(data)
             info = zipfile.ZipInfo(name, FIXED_TIME)
             info.compress_type = zipfile.ZIP_STORED

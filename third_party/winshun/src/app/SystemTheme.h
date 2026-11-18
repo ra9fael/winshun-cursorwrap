@@ -1,0 +1,153 @@
+#pragma once
+
+#include <QAbstractNativeEventFilter>
+#include <QColor>
+#include <QHash>
+#include <QJsonObject>
+#include <QObject>
+#include <QPointer>
+#include <QRawFont>
+#include <QVariant>
+#include <QtQml/qqmlregistration.h>
+
+#include <functional>
+
+namespace ws {
+
+// System appearance for QML: light/dark mode, accent colour, icon font.
+// Colours derived from these live in Theme.qml.
+class SystemTheme : public QObject, public QAbstractNativeEventFilter {
+    Q_OBJECT
+    QML_ELEMENT
+    QML_SINGLETON
+    Q_PROPERTY(bool dark READ dark NOTIFY changed FINAL)
+    Q_PROPERTY(QColor accent READ accent NOTIFY changed FINAL)
+    // A fill that carries white words or marks (see accentFill()).
+    Q_PROPERTY(QColor accentFill READ accentFill NOTIFY changed FINAL)
+    Q_PROPERTY(QString iconFont READ iconFont CONSTANT FINAL)
+    // How much larger a Phosphor icon is drawn than its box (phosphor::kScale).
+    Q_PROPERTY(qreal iconScale READ iconScale CONSTANT FINAL)
+    // Settings > Accessibility > Visual effects > Animation effects.
+    Q_PROPERTY(bool animations READ animations NOTIFY changed FINAL)
+    // Whether our windows can stand on Mica (see WindowEffects): Windows 11
+    // 22H2 or later and the GPU renderer. Decided once at startup.
+    Q_PROPERTY(bool backdropAvailable READ backdropAvailable CONSTANT FINAL)
+    // Windows has Mica (11 22H2 or later), whatever the renderer.
+    Q_PROPERTY(bool backdropSystem READ backdropSystem CONSTANT FINAL)
+    // They do (the 透明效果 setting): their surfaces are translucent then.
+    Q_PROPERTY(bool backdrop READ backdrop NOTIFY changed FINAL)
+    Q_PROPERTY(int glassTransparency READ glassTransparency NOTIFY changed FINAL)
+    Q_PROPERTY(int glassClarity READ glassClarity NOTIFY changed FINAL)
+    // Transparency effects on and no high contrast: otherwise Windows draws
+    // no Mica.
+    Q_PROPERTY(bool materials READ materials NOTIFY changed FINAL)
+    // Rounded on Windows 11 when the appearance setting allows it.
+    Q_PROPERTY(bool roundedCorners READ roundedCorners NOTIFY changed FINAL)
+    Q_PROPERTY(bool nativeWindowBorder READ nativeWindowBorder CONSTANT FINAL)
+    // How large the launcher and the clipboard are drawn (界面大小: dense, compact,
+    // standard, roomy; see uisize::), and its header's height, as C++ places by.
+    Q_PROPERTY(QString uiSize READ uiSize NOTIFY uiSizeChanged FINAL)
+    Q_PROPERTY(int headerHeight READ headerHeight NOTIFY uiSizeChanged FINAL)
+    // 界面风格: fluent | brand | tactile | liquid (Theme.style; Settings::uiStyle).
+    Q_PROPERTY(QString uiStyle READ uiStyle NOTIFY changed FINAL)
+    // How long the mouse rests before a tip shows (SPI_GETMOUSEHOVERTIME, ms).
+    Q_PROPERTY(int hoverTime READ hoverTime NOTIFY changed FINAL)
+    // Tips come up on the icons and buttons the mouse rests on (HoverTip;
+    // 外观 › 悬停提示, Settings::hoverTips, GitHub #368).
+    Q_PROPERTY(bool hoverTips READ hoverTips NOTIFY changed FINAL)
+
+public:
+    explicit SystemTheme(QObject* parent = nullptr);
+
+    bool dark() const;
+    QColor accent() const;
+    QColor accentFill() const;
+    static QColor accentColor(); // accent(), for C++
+    QString iconFont() const { return m_iconFont; }
+    static QString iconFontName(); // iconFont(), for C++ (FileIconProvider draws glyph icons)
+    static qreal iconScale();
+    // The Phosphor icon for "ph:name", "ph-fill:name" or a legacy Segoe code
+    // point, as {text, family}, or undefined: the icon font draws it then
+    // (see phosphor::resolve).
+    Q_INVOKABLE QVariant phosphorIcon(const QString& spec) const;
+    // The font an icon's Text is given (Glyph.qml): the application's, of
+    // this family and size, and never merged with another font. Without
+    // that, a code the family has no glyph for sends Qt through every font
+    // installed, loading each (69 of them here, 17 MB and the time to read
+    // them), to find that none has it: an icon lent from row to row had its
+    // new code for a moment while its family was still the last one's.
+    // The size in points, or, with none, in pixels.
+    Q_INVOKABLE QFont glyphFont(const QString& family, qreal pointSize, int pixelSize = 0) const;
+    // The icon font has the glyph (every character of it). An older Windows
+    // 10 has an older "Segoe MDL2 Assets", without the icons added since: the
+    // text would then take the character from whatever font has it, a Chinese
+    // character from a font of a company's own characters, say. Remembered;
+    // the GUI thread only.
+    Q_INVOKABLE bool hasGlyph(const QString& glyph) const;
+    // hasGlyph's check, in any installed font; true when the font is not
+    // there to ask (the text is drawn as it ever was).
+    static bool fontHas(const QString& family, const QString& glyph);
+    bool animations() const;
+    static int hoverTime();
+    bool materials() const;
+    bool backdropSystem() const;
+    bool roundedCorners() const;
+    bool nativeWindowBorder() const;
+    static void setRoundedCorners(bool on);
+    static bool backdropAvailable() { return s_backdropAvailable; }
+    static void setBackdropAvailable(bool on) { s_backdropAvailable = on; } // before the first window
+    static bool backdrop() { return s_backdropAvailable && s_backdropOn; }
+    static void setBackdropOn(bool on);
+    static int glassTransparency() { return s_glassTransparency; }
+    static int glassClarity() { return s_glassClarity; }
+    static void setGlassAppearance(int transparency, int clarity);
+    static QMetaObject::Connection onAppearanceChanged(QObject* context, std::function<void()> slot);
+    static QString uiSize() { return s_uiSize; }
+    static int headerHeight();
+    static void setUiSize(const QString& size);
+    static QString uiStyle() { return s_uiStyle; }
+    static void setUiStyle(const QString& style); // unknown names are fluent
+    static bool hoverTips() { return s_hoverTips; }
+    static void setHoverTips(bool on);
+
+    // The look in effect for what C++ draws itself (the tray menu, the
+    // taskbar box, pins, the countdown) and for plugins without QML: a few
+    // of the Look's tokens, as Theme.qml works them out (its nativeLook),
+    // written by it whenever the style, light/dark, accent or corners
+    // change. Colours are QColor, radii logical px (0 in the 直角 setting).
+    // Empty until a Theme is made: readers keep their own defaults then.
+    // The process's, shared by every QML engine in it; GUI thread.
+    Q_INVOKABLE void setNativeLook(const QVariantMap& look);
+    static QVariantMap nativeLook() { return s_nativeLook; }
+    static QColor nativeColor(const char* name, const QColor& fallback);
+    static qreal nativeReal(const char* name, qreal fallback);
+    // Whenever nativeLook() changes: once after a style change has settled
+    // (the many tokens of one change arrive one by one), on the event loop.
+    static QMetaObject::Connection onNativeLookChanged(QObject* context, std::function<void()> slot);
+    // nativeLook() as JSON for plugins: colours as "#AARRGGBB".
+    static QJsonObject nativeLookJson();
+
+signals:
+    void changed();
+    void uiSizeChanged(); // not changed(): the colours stay
+
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
+    bool nativeEventFilter(const QByteArray& eventType, void* message, qintptr* result) override;
+
+private:
+    static inline bool s_backdropAvailable = false;
+    static inline bool s_backdropOn = true;
+    static inline int s_glassTransparency = 50;
+    static inline int s_glassClarity = 50;
+    static inline QString s_uiSize = QStringLiteral("standard");
+    static inline QString s_uiStyle = QStringLiteral("fluent");
+    static inline bool s_hoverTips = true;
+    static inline QVariantMap s_nativeLook;
+    static inline QPointer<SystemTheme> s_instance; // the QML singleton
+    QString m_iconFont;
+    mutable QRawFont m_iconRaw; // made the first time hasGlyph asks
+    mutable QHash<QString, bool> m_glyphs; // hasGlyph's answers
+};
+
+} // namespace ws
