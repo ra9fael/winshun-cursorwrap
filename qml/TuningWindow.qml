@@ -4,7 +4,7 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import WinShun
 
-ApplicationWindow {
+Window {
     id: window
 
     required property QtObject tuning
@@ -20,11 +20,16 @@ ApplicationWindow {
     minimumHeight: 380
     title: chinese ? "回绕调参" : "Cursor wrap tuning"
     flags: Qt.Window | Qt.FramelessWindowHint
-    header: TitleBar {
+    // Inactive Mica falls back to grey: the window covers it, as the host's own do.
+    color: tuning.backdrop && window.active ? "transparent" : colors.background
+
+    TitleBar {
+        id: titleBar
+        z: 1
+        width: parent.width
         frame: window.windowFrame
         title: window.title
     }
-    color: tuning.backdrop ? "transparent" : colors.background
 
     function tr(zh: string, en: string): string {
         return chinese ? zh : en
@@ -263,7 +268,10 @@ ApplicationWindow {
 
     ScrollView {
         id: scroll
-        anchors.fill: parent
+        anchors.top: titleBar.bottom
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
         contentWidth: availableWidth
         ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
         clip: true

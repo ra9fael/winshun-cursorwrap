@@ -2,12 +2,11 @@
 
 #include "SystemTheme.h"
 #include "WindowFrame.h"
+#include "platform/WindowEffects.h"
 
 #include <QQmlApplicationEngine>
 #include <QQuickWindow>
 #include <QStyleHints>
-
-#include <dwmapi.h>
 
 #include <utility>
 
@@ -92,16 +91,13 @@ void TuningWindowQml::updateFrame()
         return;
     if (QGuiApplication::platformName() != QStringLiteral("windows"))
         return;
-    const HWND hwnd = reinterpret_cast<HWND>(m_window->winId());
-    const BOOL dark = m_theme.dark();
-    const DWORD corner = m_theme.rounded() ? 2 : 1;
-    const DWORD material = m_theme.backdropOn() ? 2 : 1;
-    ::DwmSetWindowAttribute(hwnd, 20, &dark, sizeof dark);
-    ::DwmSetWindowAttribute(hwnd, 33, &corner, sizeof corner);
-    const bool mica = SUCCEEDED(::DwmSetWindowAttribute(hwnd, 38, &material, sizeof material))
-        && m_theme.backdropOn();
-    const MARGINS margins = mica ? MARGINS {-1, -1, -1, -1} : MARGINS {};
-    const bool backdrop = SUCCEEDED(::DwmExtendFrameIntoClientArea(hwnd, &margins)) && mica;
+    // The host's own frameless look: rounded corners, the DWM shadow and border,
+    // and Mica behind the content. Its frame extension stays at the window's
+    // border; extended over the whole window, DWM would draw its own caption
+    // buttons over TitleBar.qml's.
+    ws::win::styleFramelessWindow(m_window, m_theme.backdropOn());
+    const bool backdrop = m_theme.backdropOn() && ws::win::backdropSupported()
+        && ws::win::materialsEnabled();
     if (m_backdrop != backdrop) {
         m_backdrop = backdrop;
         emit backdropChanged();
