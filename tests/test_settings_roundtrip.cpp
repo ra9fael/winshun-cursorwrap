@@ -64,6 +64,9 @@ const std::vector<Field>& fields()
         { "adjacencyTolerancePx",
           [](cw::Settings& s) { s.adjacencyTolerancePx = 88; },
           [](const cw::Settings& s) { return s.adjacencyTolerancePx == 88; } },
+        { "taskbarGuardPx",
+          [](cw::Settings& s) { s.taskbarGuardPx = 123; },
+          [](const cw::Settings& s) { return s.taskbarGuardPx == 123; } },
         { "impactGate",
           [](cw::Settings& s) { s.impactGate = true; },
           [](const cw::Settings& s) { return s.impactGate == true; } },
@@ -93,7 +96,7 @@ const std::vector<Field>& fields()
 
 // cw::Settings has this many data members. Keep in step with wrap_logic.h; a
 // new field makes the exhaustive test fail until it is listed above.
-constexpr size_t kFieldCount = 14;
+constexpr size_t kFieldCount = 15;
 
 // The owner of a field, by name — so a key moved between owners changes the
 // shape of its round trip, and the exhaustive test follows it automatically.
@@ -165,6 +168,20 @@ CW_TEST(settings_every_field_round_trips)
         if (!differs)
             ++cwtest::failures();
     }
+}
+
+CW_TEST(taskbar_guard_disable_sentinel_round_trips)
+{
+    cw::Settings settings;
+    settings.taskbarGuardPx = -1;
+    const std::string json = cw::dumpOverrides(settings);
+    CW_CHECK(json.find("taskbarGuardPx") != std::string::npos);
+
+    bool valid = false;
+    std::string problem;
+    const cw::Settings read = cw::loadOverrides(json, valid, problem);
+    CW_CHECK(valid);
+    CW_CHECK_EQ(read.taskbarGuardPx, -1);
 }
 
 CW_TEST(settings_band_and_accel_specifically)

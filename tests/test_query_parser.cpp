@@ -106,6 +106,8 @@ CW_TEST(parser_numeric_settings_clamp)
     CW_CHECK(parseCommand("边缘").kind == CommandKind::MenuEdge);
     CW_CHECK(parseCommand("tol").kind == CommandKind::MenuTolerance);
     CW_CHECK(parseCommand("容差").kind == CommandKind::MenuTolerance);
+    CW_CHECK(parseCommand("taskbar").kind == CommandKind::MenuTaskbar);
+    CW_CHECK(parseCommand("任务栏").kind == CommandKind::MenuTaskbar);
 
     const auto guard = parseCommand("guard 120");
     CW_CHECK(guard.kind == CommandKind::SetGuard && guard.value == 120);
@@ -127,6 +129,15 @@ CW_TEST(parser_numeric_settings_clamp)
     CW_CHECK(tolLo.value == 10);
     const auto tolHi = parseCommand("tol 500");
     CW_CHECK(tolHi.value == 200);
+
+    const auto taskbarDefault = parseCommand("taskbar 0");
+    CW_CHECK(taskbarDefault.kind == CommandKind::SetTaskbar && taskbarDefault.value == 0);
+    const auto taskbarOff = parseCommand("taskbar -1");
+    CW_CHECK(taskbarOff.kind == CommandKind::SetTaskbar && taskbarOff.value == -1);
+    const auto taskbarLo = parseCommand("任务栏 -2");
+    CW_CHECK(taskbarLo.kind == CommandKind::SetTaskbar && taskbarLo.value == -1);
+    const auto taskbarHi = parseCommand("taskbar 900");
+    CW_CHECK(taskbarHi.kind == CommandKind::SetTaskbar && taskbarHi.value == 500);
 }
 
 CW_TEST(parser_tuner_commands)

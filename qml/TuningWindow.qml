@@ -359,7 +359,7 @@ Window {
                 NumberRow {
                     settingKey: "taskbarGuardPx"
                     caption: window.tr("任务栏保护带宽", "Taskbar guard band")
-                    description: window.tr("任务栏及其周围这段距离内不回绕；0 = 仅任务栏本身", "No wrap over the taskbar and this far beside it; 0 = the taskbar only")
+                    description: window.tr("任务栏及周围这段距离内不回绕；0 = 仅任务栏，-1 = 关闭", "No wrap over the taskbar and this far beside it; 0 = taskbar only, -1 = off")
                     unit: "px"
                 }
             }

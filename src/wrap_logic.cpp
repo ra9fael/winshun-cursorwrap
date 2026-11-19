@@ -279,7 +279,7 @@ void WrapEngine::noteSample(const Sample& sample)
 bool WrapEngine::taskbarGuardBlocks(int monitorIndex, int64_t x, int64_t y, EdgeType edge) const
 {
     if (m_settings.taskbarGuardPx < 0)
-        return false; // the guard is off: wrap over the appbar too
+        return false; // negative disables the guard
     if (edge != EdgeType::Left && edge != EdgeType::Right)
         return false; // vertical wraps are unaffected by an appbar's band
     MonitorBox box;
@@ -1020,7 +1020,7 @@ bool settingRange(const char* key, SettingRange& out)
     if (k == "edgeThresholdPx") { out = { 1, 20 }; return true; }
     if (k == "wrapGuardPx") { out = { 10, 200 }; return true; }
     if (k == "adjacencyTolerancePx") { out = { 10, 200 }; return true; }
-    if (k == "taskbarGuardPx") { out = { 0, 500 }; return true; }
+    if (k == "taskbarGuardPx") { out = { -1, 500 }; return true; }
     if (k == "impactSpeedPps") { out = { 500, 20000 }; return true; }
     if (k == "impactBandPx") { out = { 50, 500 }; return true; }
     if (k == "impactAccelPps2") { out = { 0, 200000 }; return true; }

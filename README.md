@@ -58,6 +58,8 @@ corner）解决，都得额外记一个操作。本插件用的是「把光标�
 | `cursorwrap guard 120` / `防震 120` | 防震半径（10–200 px） |
 | `cursorwrap edge 5` / `边缘 5` | 边缘判断阈值（1–20 px） |
 | `cursorwrap tol 80` / `容差 80` | 邻接容差（10–200 px） |
+| `cursorwrap taskbar` / `任务栏` | 返回 → -1 关闭 → 0 仅任务栏 → 20/48/50/100/200/500 px 邻近保护带 |
+| `cursorwrap taskbar 0` / `任务栏 0` | 仅保护任务栏实际区域；`taskbar -1` 完全允许在任务栏附近回绕（范围 −1–500 px） |
 | `cursorwrap drag on` / `off` | 拖拽时是否禁用 |
 | `cursorwrap single on` / `off` | 单屏时是否禁用 |
 | `cursorwrap tune on` / `off` / `调参 开` | 调参可视化开关 |
@@ -72,7 +74,7 @@ corner）解决，都得额外记一个操作。本插件用的是「把光标�
 ## 设置归属
 
 - **宿主卡片**（Win顺 › 插件 › 回绕，存 Win顺 自己的配置）：回绕方向、激活方式、拖拽时禁用、单屏时禁用、撞击模式。
-- **调参窗口**（设置卡上的"设置"按钮或搜索里的"调参窗口"行打开）：撞击速度、加速度、测量带宽、防震半径、邻接容差、边缘阈值、调参可视化、撞击光效、数据窗口和建议值。这些是插件自己的配置，保存在插件数据目录的 `settings.json`（只存与默认值不同的键），插件卡片改动与搜索命令都走同一条提交路径。
+- **调参窗口**（设置卡上的"设置"按钮或搜索里的"调参窗口"行打开）：撞击速度、加速度、测量带宽、防震半径、邻接容差、边缘阈值、任务栏保护带（默认 0 = 仅任务栏区域，正值增加邻近范围，-1 = 关闭）、调参可视化、撞击光效、数据窗口和建议值。这些是插件自己的配置，保存在插件数据目录的 `settings.json`（只存与默认值不同的键），插件卡片改动与搜索命令都走同一条提交路径。
 
 数值范围与算法含义不变；越界值回默认。升级后首次启动会把之前存在宿主里的调参值转存进插件自己的文件。
 
@@ -309,7 +311,7 @@ tools\devshell\capture.ps1 -Scenario tests\scenarios\visual-demo.txt -Out shot.p
 
 ```powershell
 python tools/package.py --bin-dir build/local/plugin/Release # dist/<id>-<version>.wsplugin + .sha256 + release-notes.md
-python tools/package.py --bin-dir build/local/plugin/Release --tag v1.1.0   # 校验 tag 与 plugin.json 版本一致、CHANGELOG 有对应 section
+python tools/package.py --bin-dir build/local/plugin/Release --tag v1.2.0   # 校验 tag 与 plugin.json 版本一致、CHANGELOG 有对应 section
 ```
 
 包内容：Git 跟踪的文件与 `cursorwrap.exe`、`CursorWrapApp.dll`，确定性 zip（固定时间戳、不压缩），

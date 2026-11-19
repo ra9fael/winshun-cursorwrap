@@ -354,9 +354,12 @@ void DataWindow::paint()
             // Narrow->wide: the snapshot stores UTF-8; the window paints UTF-16.
             const int needed = MultiByteToWideChar(CP_UTF8, 0, snap.foreground.c_str(),
                                                    -1, nullptr, 0);
-            std::wstring fg(needed > 0 ? needed - 1 : 0, L'\0');
-            if (needed > 1)
-                MultiByteToWideChar(CP_UTF8, 0, snap.foreground.c_str(), -1, fg.data(), needed);
+            std::wstring fg(static_cast<size_t>(needed), L'\0');
+            if (needed > 0 && MultiByteToWideChar(CP_UTF8, 0, snap.foreground.c_str(),
+                                                   -1, fg.data(), needed) > 0)
+                fg.resize(static_cast<size_t>(needed - 1));
+            else
+                fg.clear();
             state += L"  ·  fg " + fg;
         }
         SetTextColor(dc, !snap.hookOk ? bad : (snap.hookResponsive ? ok : warn));

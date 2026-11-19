@@ -40,6 +40,24 @@ CW_TEST(settings_raw_empty_keeps_previous)
     CW_CHECK_EQ(s.edgeThresholdPx, 1);
 }
 
+CW_TEST(taskbar_guard_setting_accepts_disable_sentinel)
+{
+    Settings s;
+    RawSettings raw;
+    raw.taskbarGuardPx = -1;
+    raw.hasTaskbarGuard = true;
+    applySettings(raw, s, false);
+    CW_CHECK_EQ(s.taskbarGuardPx, -1);
+
+    raw.taskbarGuardPx = -2;
+    applySettings(raw, s, true);
+    CW_CHECK_EQ(s.taskbarGuardPx, 0);
+
+    raw.taskbarGuardPx = 500;
+    applySettings(raw, s, true);
+    CW_CHECK_EQ(s.taskbarGuardPx, 500);
+}
+
 CW_TEST(settings_boundary_values_accepted)
 {
     RawSettings raw;

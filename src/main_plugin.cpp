@@ -1481,7 +1481,7 @@ Item statusRow()
     Items taskbarMenu()
     {
         return numericMenu("cursorwrap.taskbar", "taskbar", m_settings.taskbarGuardPx,
-                           { 0, 20, 50, 100, 200, 500 }, " px");
+                           { -1, 0, 20, 48, 50, 100, 200, 500 }, " px");
     }
 
     // A two-way row (on/off) for a boolean setting that has no dedicated

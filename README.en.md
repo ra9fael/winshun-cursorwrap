@@ -69,6 +69,8 @@ anything by itself:
 | `cursorwrap guard 120` | the anti-oscillation radius (10–200 px) |
 | `cursorwrap edge 5` | the edge threshold (1–20 px) |
 | `cursorwrap tol 80` | the adjacency tolerance (10–200 px) |
+| `cursorwrap taskbar` | back → -1 off → 0 appbar only → 20/48/50/100/200/500 px guard band |
+| `cursorwrap taskbar 0` | guard only the appbar itself; `taskbar -1` disables it (range −1–500 px) |
 | `cursorwrap drag on` / `off` | whether dragging wraps |
 | `cursorwrap single on` / `off` | whether one display disables wrapping |
 | `cursorwrap tune on` / `off` | the tuning overlay |
@@ -87,8 +89,9 @@ anything by itself:
   impact mode.
 - **The tuning window** (the 设置 button on the card, or the tuning-window row in
   the search): impact speed, acceleration, measuring band, guard radius,
-  adjacency tolerance, edge threshold, tuning overlay, impact glow, the data
-  window and the suggested gate. These are the plugin's own settings, saved in
+  adjacency tolerance, edge threshold, taskbar guard band (default 0 = appbar
+  only; positive values widen it; -1 = off), tuning overlay, impact glow, the
+  data window and the suggested gate. These are the plugin's own settings, saved in
   its data directory (`settings.json`, only keys that differ from the defaults).
   The search commands, the window's controls and the suggestion all go through
   the same commit path; changing one setting never resets another.
@@ -353,7 +356,7 @@ This round's validation evidence: [docs/validation.en.md](docs/validation.en.md)
 
 ```powershell
 python tools/package.py --bin-dir build/local/plugin/Release # dist/<id>-<version>.wsplugin + .sha256 + release-notes.md
-python tools/package.py --bin-dir build/local/plugin/Release --tag v1.1.0   # also checks the tag matches plugin.json and the CHANGELOG section exists
+python tools/package.py --bin-dir build/local/plugin/Release --tag v1.2.0   # also checks the tag matches plugin.json and the CHANGELOG section exists
 ```
 
 The package contains Git-tracked files plus `cursorwrap.exe` and `CursorWrapApp.dll`, as a deterministic

@@ -36,7 +36,7 @@ struct Settings {
     // out of it reads as the cursor vanishing under an app the user is using.
     // The band is the part of the monitor rect its work area does not cover,
     // widened by this many pixels; 0 keeps only the appbar area itself.
-    int taskbarGuardPx = 0;         // 0..500
+    int taskbarGuardPx = 0;        // -1 disables; 0 = appbar only; 1..500 widens it
     // Impact gate: wrap only when the pointer reaches the edge fast enough.
     // The speed is measured over the last continuous stroke toward the edge,
     // clipped to the approach band (impactBandPx) so a fast flight that

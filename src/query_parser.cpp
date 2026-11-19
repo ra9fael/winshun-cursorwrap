@@ -114,17 +114,22 @@ bool asciiEqual(const std::string& text, const char* lower)
 }
 
 // The number after a keyword token: the rest of the text with spaces and a
-// Chinese colon stripped. Returns nullopt when there is no integer there.
+// Chinese colon stripped. A leading minus is accepted for settings whose range
+// gives it a meaning (currently taskbar -1 disables the guard). Returns nullopt
+// when there is no integer there.
 std::optional<long long> trailingNumber(const std::string& rest)
 {
     std::string digits;
     bool started = false;
+    bool negative = false;
     for (char c : rest) {
         if (std::isdigit(static_cast<unsigned char>(c))) {
             digits.push_back(c);
             started = true;
         } else if (started) {
             break; // digits ended; ignore any trailing words
+        } else if (c == '-' && digits.empty() && !negative) {
+            negative = true;
         } else if (c != ' ' && c != '\t' && c != ':') {
             return std::nullopt; // a word where the number should be
         }
@@ -134,7 +139,7 @@ std::optional<long long> trailingNumber(const std::string& rest)
     long long value = 0;
     for (char c : digits)
         value = value * 10 + (c - '0');
-    return value;
+    return negative ? -value : value;
 }
 
 long long clampToRange(long long v, const char* key)
