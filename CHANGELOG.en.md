@@ -9,6 +9,31 @@ single source of truth; release tags are `v<version>`.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Consecutive crossings at the left/right edges sometimes refused.** The
+  landing circle expired on time only while the impact gate was on, so the
+  gate-off path pinned a push against the edge it had just landed on forever.
+  The circle now expires after 300 ms in both modes; a continuous push still
+  wraps exactly once (the push latch is unchanged).
+- **After an RDP disconnect and unlock, wrapping stopped at an inner rectangle
+  until the plugin restarted.** Two causes: the watcher's HWND_MESSAGE window
+  never received the broadcast WM_DISPLAYCHANGE (broadcasts skip message-only
+  windows), and the first enumeration after a transition can be transitional.
+  The watcher is now a hidden top-level window that also listens to
+  WM_WTSSESSION_CHANGE and WM_POWERBROADCAST, and a layout commits only once
+  two consecutive enumerations agree.
+- The data window's status line now shows the foreground window's process and
+  class, so "a foreground app confines the pointer" answers itself.
+
+### Added
+
+- **Taskbar guard band** (`taskbarGuardPx`, default 0 = the taskbar itself): a
+  horizontal wrap whose arrival sits over the taskbar or this far beside it is
+  refused and counted under its own `taskbar` skip reason; `-1` disables the
+  guard. Vertical wraps and the landing clamp into the work area are
+  unchanged. Query command `taskbar <px>`, and a tuning-window row.
+
 ## [1.1.0] - 2026-11-19
 
 ### Changed
