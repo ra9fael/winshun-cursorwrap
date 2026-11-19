@@ -31,6 +31,12 @@ struct Settings {
     int edgeThresholdPx = 1;        // 1..20
     int wrapGuardPx = 50;           // 10..200
     int adjacencyTolerancePx = 50;  // 10..200
+    // Refuse a horizontal wrap whose arrival point sits over the taskbar (or
+    // any other appbar): the pointer's line there is appbar area, and a wrap
+    // out of it reads as the cursor vanishing under an app the user is using.
+    // The band is the part of the monitor rect its work area does not cover,
+    // widened by this many pixels; 0 keeps only the appbar area itself.
+    int taskbarGuardPx = 0;         // 0..500
     // Impact gate: wrap only when the pointer reaches the edge fast enough.
     // The speed is measured over the last continuous stroke toward the edge,
     // clipped to the approach band (impactBandPx) so a fast flight that
@@ -77,6 +83,7 @@ struct RawSettings {
     double edgeThresholdPx = 1;
     double wrapGuardPx = 50;
     double adjacencyTolerancePx = 50;
+    double taskbarGuardPx = 0;
     bool impactGate = false;
     double impactSpeedPps = 2000;
     double impactBandPx = 400;
@@ -91,6 +98,7 @@ struct RawSettings {
     bool hasEdgeThreshold = false;
     bool hasWrapGuard = false;
     bool hasAdjacency = false;
+    bool hasTaskbarGuard = false;
     bool hasImpactGate = false;
     bool hasImpactSpeed = false;
     bool hasImpactBand = false;
@@ -165,8 +173,9 @@ enum class SkipReason : int {
     OffMonitor,
     NotOnEdge,
     ImpactGate,
+    Taskbar,        // the arrival point is over the taskbar / an appbar
 };
-inline constexpr int kSkipReasonCount = static_cast<int>(SkipReason::ImpactGate) + 1;
+inline constexpr int kSkipReasonCount = static_cast<int>(SkipReason::Taskbar) + 1;
 
 // The name used in diagnostics and the data window (English, stable).
 const char* skipReasonName(SkipReason reason);
@@ -445,6 +454,9 @@ struct ApproachMeasure {
 
 private:
     bool withinGuard(int64_t x, int64_t y, const Sample& sample) const;
+    // True when a wrap from this arrival would carry the pointer out of (or
+    // from right beside) an appbar. Horizontal edges only; the mutex is held.
+    bool taskbarGuardBlocks(int monitorIndex, int64_t x, int64_t y, EdgeType edge) const;
     CursorDirection direction(const Sample& s) const;
     // Signed approach speed and forward acceleration toward `edge` over the
     // last continuous stroke clipped to the approach band; 0/0 when it cannot

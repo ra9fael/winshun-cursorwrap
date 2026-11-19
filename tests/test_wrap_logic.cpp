@@ -28,6 +28,7 @@ CW_TEST(settings_defaults)
     CW_CHECK_EQ(s.edgeThresholdPx, 1);
     CW_CHECK_EQ(s.wrapGuardPx, 50);
     CW_CHECK_EQ(s.adjacencyTolerancePx, 50);
+    CW_CHECK_EQ(s.taskbarGuardPx, 0);
 }
 
 CW_TEST(settings_raw_empty_keeps_previous)
@@ -115,6 +116,127 @@ CW_TEST(engine_no_monitors_is_noop)
     CW_CHECK_EQ(e.stats().wraps, 0);
     const auto [x, y] = e.onMouseMove({ 1919, 540 }, false, false);
     CW_CHECK_EQ(x, 1919);
+}
+
+// ------------------------------------------------- the taskbar guard band ---
+//
+// The user: "taskbar附近区域（左右）是默认不允许穿越的（可配置）". A wrap
+// whose arrival point sits over the taskbar (or any other appbar) carries the
+// hand's push out of an app the user is interacting with; by default that is
+// refused, and `taskbarGuardPx` widens (or, at -1, disables) the band. Only
+// horizontal wraps: the appbar band runs along the horizontal edges, where a
+// vertical wrap's arrival cannot be.
+
+MonitorBox taskbar_monitor_box()
+{
+    MonitorBox m;
+    m.left = 0;
+    m.top = 0;
+    m.right = 1920;
+    m.bottom = 1080;
+    m.primary = true;
+    m.hasWorkArea = true; // a 48 px taskbar along the bottom
+    m.workLeft = 0;
+    m.workTop = 0;
+    m.workRight = 1920;
+    m.workBottom = 1032;
+    return m;
+}
+
+CW_TEST(taskbar_band_blocks_horizontal_wraps_by_default)
+{
+    WrapEngine e;
+    e.rebuild({ taskbar_monitor_box() });
+    // Above the taskbar: wraps normally.
+    CW_CHECK_EQ(e.onMouseMove({ 1919, 540 }, false, false).first, 1);
+    // Back inside first (releasing the push latch), then over the taskbar
+    // (y >= 1032): refused, and named.
+    CW_CHECK_EQ(e.onMouseMove({ 960, 540 }, false, false).first, 960);
+    const auto [x, y] = e.onMouseMove({ 1919, 1060 }, false, false);
+    CW_CHECK_EQ(x, 1919);
+    CW_CHECK_EQ(y, 1060);
+    CW_CHECK_EQ(e.stats().skipped[static_cast<int>(SkipReason::Taskbar)], 1);
+}
+
+CW_TEST(taskband_widens_the_band_only_where_an_appbar_is)
+{
+    WrapEngine e;
+    e.rebuild({ taskbar_monitor_box() });
+    Settings s = e.settings();
+    s.taskbarGuardPx = 40; // 40 px into the work area above the taskbar
+    e.setSettings(s);
+    // 40 px above the work-area bottom is now inside the widened band...
+    const auto [x, y] = e.onMouseMove({ 1919, 1000 }, false, false);
+    CW_CHECK_EQ(x, 1919);
+    CW_CHECK_EQ(y, 1000);
+    // ...but the top-right corner is not: there is no appbar there to widen
+    // from, and a corner match on the top edge wraps downward as before.
+    // (The previous sample sits at the widened band's edge, so the direction
+    // into this corner is up; the corner picks the top edge, whose landing is
+    // the outer Bottom edge, i.e. the taskbar row clamped out of it.)
+    const auto [cx, cy] = e.onMouseMove({ 1919, 0 }, false, false);
+    CW_CHECK_EQ(cx, 1919);
+    CW_CHECK_EQ(cy, 1031);
+}
+
+CW_TEST(taskbar_guard_can_be_turned_off)
+{
+    WrapEngine e;
+    e.rebuild({ taskbar_monitor_box() });
+    Settings s = e.settings();
+    s.taskbarGuardPx = -1; // wrap over the appbar too (the pre-guard behaviour)
+    e.setSettings(s);
+    const auto [x, y] = e.onMouseMove({ 1919, 1060 }, false, false);
+    CW_CHECK(x != 1919); // it wrapped
+    // And the landing is pulled out of the taskbar, as it always was.
+    CW_CHECK_EQ(y, 1031);
+}
+
+CW_TEST(taskbar_guard_needs_a_work_area_to_believe)
+{
+    WrapEngine e;
+    // No work area declared: there is no appbar information at all.
+    e.rebuild({ box(0, 0, 1920, 1080, true) });
+    const auto [x, y] = e.onMouseMove({ 1919, 1060 }, false, false);
+    CW_CHECK(x != 1919); // wraps as before
+    CW_CHECK_EQ(e.stats().skipped[static_cast<int>(SkipReason::Taskbar)], 0);
+    // A work area larger than the monitor (a broken report) says nothing too.
+    MonitorBox broken = box(0, 0, 1920, 1080, true);
+    broken.hasWorkArea = true;
+    broken.workLeft = -100;
+    broken.workTop = -100;
+    broken.workRight = 3000;
+    broken.workBottom = 2000;
+    e.rebuild({ broken });
+    const auto [x2, y2] = e.onMouseMove({ 1, 540, }, false, false);
+    (void)x2;
+    (void)y2;
+    CW_CHECK_EQ(e.stats().skipped[static_cast<int>(SkipReason::Taskbar)], 0);
+}
+
+// ------------------------------------------------------- drag suppression ---
+//
+// The user: "capture插件在拖动框选区域的时候也不能穿越". Holding the left
+// button is `disableDuringDrag` (on by default); with it off, a capture-style
+// marquee drag wraps like any other move, and the engine never treated the
+// drag itself specially.
+
+CW_TEST(drag_suppression_follows_the_setting)
+{
+    WrapEngine e;
+    e.rebuild({ box(0, 0, 1920, 1080, true), box(1920, 0, 3840, 1080) });
+    // Default: the left button held suppresses the wrap, and the reason says so.
+    CW_CHECK_EQ(e.onMouseMove({ 3839, 540 }, true, true).first, 3839);
+    CW_CHECK_EQ(e.stats().skipped[static_cast<int>(SkipReason::Dragging)], 1);
+    // With the setting off (the capture-plugin case): the drag wraps, to the
+    // other desktop's far edge.
+    Settings s = e.settings();
+    s.disableDuringDrag = false;
+    e.setSettings(s);
+    CW_CHECK_EQ(e.onMouseMove({ 3839, 540 }, true, true).first, 1);
+    // And a release-time move inside the layout stays put (an inner edge never
+    // wraps): the drag setting changes nothing about the topology itself.
+    CW_CHECK_EQ(e.onMouseMove({ 1920, 540 }, true, false).first, 1920);
 }
 
 CW_TEST(engine_direction_feeds_edge_priority)

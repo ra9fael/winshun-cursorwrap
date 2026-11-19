@@ -115,6 +115,9 @@ void markOverride(cw::RawSettings& raw, const cw::SettingsField& field,
     } else if (key == "adjacencyTolerancePx") {
         raw.adjacencyTolerancePx = s.adjacencyTolerancePx;
         raw.hasAdjacency = true;
+    } else if (key == "taskbarGuardPx") {
+        raw.taskbarGuardPx = s.taskbarGuardPx;
+        raw.hasTaskbarGuard = true;
     } else if (key == "impactGate") {
         raw.impactGate = s.impactGate;
         raw.hasImpactGate = true;
@@ -153,6 +156,51 @@ cw::RawSettings rawFromJson(const Json& s)
 bool inRemoteSession()
 {
     return GetSystemMetrics(SM_REMOTESESSION) != 0;
+}
+
+// UTF-16 -> UTF-8, for the data window's foreground label.
+std::string narrowUtf8(const std::wstring& text)
+{
+    const int needed = ::WideCharToMultiByte(CP_UTF8, 0, text.c_str(),
+                                             static_cast<int>(text.size()),
+                                             nullptr, 0, nullptr, nullptr);
+    std::string out(needed > 0 ? needed : 0, '\0');
+    if (needed > 0)
+        ::WideCharToMultiByte(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()),
+                              out.data(), needed, nullptr, nullptr);
+    return out;
+}
+
+// "notepad.exe:Notepad" for the foreground window, or empty when there is
+// none (a secure desktop, or the moment between two foreground windows).
+// The data window shows it next to the hook's health: a foreground app that
+// confines or captures the pointer answers "why does it never wrap here"
+// in a way the engine's own skip reasons cannot.
+std::string foregroundWindowLabel()
+{
+    const HWND foreground = ::GetForegroundWindow();
+    if (!foreground)
+        return {};
+    wchar_t className[128] = {};
+    ::GetClassNameW(foreground, className, 128);
+    DWORD pid = 0;
+    ::GetWindowThreadProcessId(foreground, &pid);
+    std::wstring image;
+    if (HANDLE process = ::OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid)) {
+        wchar_t path[MAX_PATH] = {};
+        DWORD size = MAX_PATH;
+        if (::QueryFullProcessImageNameW(process, 0, path, &size))
+            image = path;
+        ::CloseHandle(process);
+    }
+    const size_t slash = image.find_last_of(L"\\/");
+    if (slash != std::wstring::npos)
+        image.erase(0, slash + 1);
+    std::string label = image.empty() ? std::string("(pid " + std::to_string(pid) + ")")
+                                      : narrowUtf8(image);
+    if (!className[0])
+        return label;
+    return label + ":" + narrowUtf8(className);
 }
 
 std::vector<cw::MonitorBox> enumerateMonitors()
@@ -286,16 +334,18 @@ protected:
         m_hookOk = m_hook->installed();
 
         m_watcher = std::make_unique<cw::MonitorWatcher>();
-        m_watcherOk = m_watcher->start([this] {
-            if (m_engine) {
-                m_engine->rebuild(enumerateMonitors());
+        m_watcherOk = m_watcher->start(
+            [this] { return enumerateMonitors(); },
+            [this](const std::vector<cw::MonitorBox>& monitors) {
+                if (!m_engine)
+                    return;
+                m_engine->rebuild(monitors);
                 if (m_hook)
                     m_hook->updateSettings(m_engine->settings());
                 // The overlay windows must follow the new layout.
                 if (m_overlay.active() && m_engine)
                     m_overlay.start(m_engine->monitorsSnapshot());
-            }
-        });
+            });
         m_overlay.setEngine(m_engine.get());
         // The windows follow the settings, so the settings page is enough to
         // turn them on (the search bar is not the only way in).
@@ -365,6 +415,8 @@ protected:
             return edgeMenu();
         case cw::CommandKind::MenuTolerance:
             return toleranceMenu();
+        case cw::CommandKind::MenuTaskbar:
+            return taskbarMenu();
         case cw::CommandKind::MenuDrag:
             return boolMenu("cursorwrap.row.drag", chinese ? "拖拽时不回绕" : "No wrap while dragging",
                             chinese ? "按住左键拖动窗口时禁用回绕，防止把窗口甩到对角"
@@ -662,6 +714,7 @@ private:
         snap.settings = d.settings;
         snap.stats = d.stats;
         snap.verdict = m_engine->lastVerdict();
+        snap.foreground = foregroundWindowLabel();
         // The engine's own last sample wins once it has one.
         if (m_engine->lastSample(snap.pointer))
             snap.hasPointer = true;
@@ -777,6 +830,9 @@ private:
         } else if (field == "tol") {
             raw.adjacencyTolerancePx = static_cast<double>(value);
             raw.hasAdjacency = true;
+        } else if (field == "taskbar") {
+            raw.taskbarGuardPx = static_cast<double>(value);
+            raw.hasTaskbarGuard = true;
         } else if (field == "drag") {
             raw.disableDuringDrag = value != 0;
             raw.hasDrag = true;
@@ -820,6 +876,8 @@ private:
             return edgeMenu();
         if (field == "tol")
             return toleranceMenu();
+        if (field == "taskbar")
+            return taskbarMenu();
         if (field == "mode")
             return modeMenu();
         if (field == "impact")
@@ -979,6 +1037,13 @@ private:
                        std::string(chinese ? "Enter 应用（当前 " : "Enter to apply (current ")
                            + intText(m_settings.adjacencyTolerancePx)
                            + (chinese ? " px）" : " px)"));
+        case cw::CommandKind::SetTaskbar:
+            return row("set:taskbar:" + intText(cmd.value),
+                       std::string(chinese ? "任务栏保护带宽：" : "Taskbar guard band: ")
+                           + intText(cmd.value) + " px" + pending,
+                       std::string(chinese ? "Enter 应用（当前 " : "Enter to apply (current ")
+                           + intText(m_settings.taskbarGuardPx)
+                           + (chinese ? " px）" : " px)"));
         case cw::CommandKind::SetMode:
             return row("set:mode:" + intText(cmd.value),
                        std::string(chinese ? "回绕模式：" : "Wrap mode: ")
@@ -1079,9 +1144,9 @@ private:
                  chinese ? "不认识的词：" + text : "Unknown words: " + text,
                  chinese ? "试试：best 最优 · trace 轨迹 · tuner 调参 · data 数据 · impact 撞击 · "
                          "speed 速度 · band 区间 · mode 模式 · drag 拖拽 · single 单屏 · "
-                         "activation 激活 · guard 防震 · edge 边缘 · tol 容差 · diag 诊断"
+                         "activation 激活 · guard 防震 · edge 边缘 · tol 容差 · taskbar 任务栏 · diag 诊断"
                          : "try: best · trace · tuner · data · impact · speed · band · mode · "
-                           "drag · single · activation · guard · edge · tol · diag");
+                           "drag · single · activation · guard · edge · tol · taskbar · diag");
         row.invalid();
         return row;
     }
@@ -1413,6 +1478,12 @@ Item statusRow()
                            { 10, 30, 50, 80, 120, 200 }, " px");
     }
 
+    Items taskbarMenu()
+    {
+        return numericMenu("cursorwrap.taskbar", "taskbar", m_settings.taskbarGuardPx,
+                           { 0, 20, 50, 100, 200, 500 }, " px");
+    }
+
     // A two-way row (on/off) for a boolean setting that has no dedicated
     // action: Enter applies set:<field>:<0|1>.
     Items boolMenu(const char* id, std::string title, std::string hint, bool current,
@@ -1715,6 +1786,7 @@ Item statusRow()
         text += "edge threshold: " + intText(d.settings.edgeThresholdPx) + " px\n";
         text += "wrap guard: " + intText(d.settings.wrapGuardPx) + " px\n";
         text += "adjacency tolerance: " + intText(d.settings.adjacencyTolerancePx) + " px\n";
+        text += "taskbar guard: " + intText(d.settings.taskbarGuardPx) + " px\n";
         text += "tuning overlay: " + std::string(m_settings.tuningOverlay ? "on" : "off") + "\n";
         text += "data window: " + std::string(m_settings.dataWindow ? "on" : "off") + "\n";
         text += std::string("impact gate: ") + (d.settings.impactGate ? "on" : "off") + "\n";

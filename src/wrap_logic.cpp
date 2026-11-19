@@ -59,6 +59,7 @@ const char* skipReasonName(SkipReason reason)
     case SkipReason::OffMonitor: return "off-monitor";
     case SkipReason::NotOnEdge: return "not-on-edge";
     case SkipReason::ImpactGate: return "impact-gate";
+    case SkipReason::Taskbar: return "taskbar";
     }
     return "unknown";
 }
@@ -240,22 +241,20 @@ bool WrapEngine::withinGuard(int64_t x, int64_t y, const Sample& sample) const
     // the pointer there — clamped, it can never travel the 50 px out of the
     // circle, so "push right at the edge" refused forever (the user's "从左到右
     // 无法穿越": their R->L test succeeded first and left the landing behind).
-    // With the impact gate ON the circle is redundant anyway: a pinned push has
-    // no measurable travel and the gate refuses it fail-closed, while a real
-    // run-up measures and wraps. So on the gated path the circle expires after
-    // a short cooldown — long enough to swallow the hand's residual push, short
-    // enough that the next deliberate push gets an honest gate verdict instead
-    // of an opaque "guard · blocked" forever. The gate-off path keeps the pure
-    // space guard: that is PowerToys' semantics and normal mode must not move.
-    static constexpr long long kGateLandingGuardUs = 300 * 1000;
+    // So the circle expires by TIME in both modes now: the hand's residual push
+    // points AWAY from the landing edge (it was the motion that wrapped), so
+    // after the cooldown nothing re-arms it but a deliberate return — and the
+    // gate-off path gets the same escape the gated path has, where a pinned
+    // push then measures no travel and is refused fail-closed anyway.
+    static constexpr long long kLandingGuardUs = 300 * 1000;
     if (m_hasLastWrap) {
         const int64_t dx = x - m_lastWrap.x;
         const int64_t dy = y - m_lastWrap.y;
         const int64_t guard = m_settings.wrapGuardPx;
         const bool inside = dx * dx + dy * dy <= guard * guard;
-        const bool expired = m_settings.impactGate && m_lastWrapTimeUs > 0
+        const bool expired = m_lastWrapTimeUs > 0
             && sample.tUs >= m_lastWrapTimeUs
-            && sample.tUs - m_lastWrapTimeUs > kGateLandingGuardUs;
+            && sample.tUs - m_lastWrapTimeUs > kLandingGuardUs;
         if (inside && !expired)
             return true;
     }
@@ -275,6 +274,36 @@ void WrapEngine::noteSample(const Sample& sample)
     m_history.push_back(sample);
     if (m_history.size() > kHistoryMax)
         m_history.erase(m_history.begin(), m_history.begin() + (m_history.size() - kHistoryMax));
+}
+
+bool WrapEngine::taskbarGuardBlocks(int monitorIndex, int64_t x, int64_t y, EdgeType edge) const
+{
+    if (m_settings.taskbarGuardPx < 0)
+        return false; // the guard is off: wrap over the appbar too
+    if (edge != EdgeType::Left && edge != EdgeType::Right)
+        return false; // vertical wraps are unaffected by an appbar's band
+    MonitorBox box;
+    if (!m_topology.monitorRect(monitorIndex, box) || !box.hasWorkArea)
+        return false;
+    // A work area that is not a proper sub-rect of the monitor tells nothing
+    // about an appbar: refuse to guess.
+    if (box.workLeft < box.left || box.workTop < box.top
+        || box.workRight > box.right || box.workBottom > box.bottom
+        || box.workLeft >= box.workRight || box.workTop >= box.workBottom)
+        return false;
+    const int64_t widen = m_settings.taskbarGuardPx;
+    // An appbar exists only where the work area pulls in from the monitor
+    // rect; the guard covers that band plus `widen` pixels of the work area
+    // beside it. Widening a side with no appbar would block that whole edge.
+    if (box.workBottom < box.bottom && y >= box.workBottom - widen)
+        return true;
+    if (box.workTop > box.top && y < box.workTop + widen)
+        return true;
+    if (box.workLeft > box.left && x < box.workLeft + widen)
+        return true;
+    if (box.workRight < box.right && x >= box.workRight - widen)
+        return true;
+    return false;
 }
 
 WrapEngine::ApproachMeasure WrapEngine::approachSpeedPps(EdgeType edge,
@@ -645,6 +674,13 @@ std::pair<int64_t, int64_t> WrapEngine::onMouseMove(const Sample& sample, bool m
         return skip(SkipReason::NotOnEdge, index);
     }
 
+    // Over the taskbar (or another appbar): the pointer is on appbar area, and
+    // the wrap would carry the hand's push out of it mid-interaction. Only the
+    // horizontal edges: a vertical wrap out of the taskbar band is where the
+    // pointer cannot be anyway (the band runs along the horizontal edges).
+    if (taskbarGuardBlocks(index, sample.x, sample.y, edge))
+        return skip(SkipReason::Taskbar, index);
+
     // Impact gate: reaching the edge must look like a hit, not a drift.
     // Measured over the last continuous stroke, inside the approach band; a
     // sample without a timestamp (tUs == 0) cannot prove speed and fails closed.
@@ -984,6 +1020,7 @@ bool settingRange(const char* key, SettingRange& out)
     if (k == "edgeThresholdPx") { out = { 1, 20 }; return true; }
     if (k == "wrapGuardPx") { out = { 10, 200 }; return true; }
     if (k == "adjacencyTolerancePx") { out = { 10, 200 }; return true; }
+    if (k == "taskbarGuardPx") { out = { 0, 500 }; return true; }
     if (k == "impactSpeedPps") { out = { 500, 20000 }; return true; }
     if (k == "impactBandPx") { out = { 50, 500 }; return true; }
     if (k == "impactAccelPps2") { out = { 0, 200000 }; return true; }
@@ -1040,6 +1077,8 @@ void applySettings(const RawSettings& raw, Settings& out, bool merge)
                                            "adjacencyTolerancePx",
                                            fallback.adjacencyTolerancePx,
                                            previous.adjacencyTolerancePx);
+    out.taskbarGuardPx = applyNumber(raw.taskbarGuardPx, raw.hasTaskbarGuard, "taskbarGuardPx",
+                                     fallback.taskbarGuardPx, previous.taskbarGuardPx);
     out.impactSpeedPps = applyNumber(raw.impactSpeedPps, raw.hasImpactSpeed, "impactSpeedPps",
                                      fallback.impactSpeedPps, previous.impactSpeedPps);
     out.impactBandPx = applyNumber(raw.impactBandPx, raw.hasImpactBand, "impactBandPx",

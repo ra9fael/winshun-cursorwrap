@@ -51,6 +51,8 @@ const Token kTokens[] = {
     { "边缘", CommandKind::MenuEdge, 0 },
     { "tol", CommandKind::MenuTolerance, 0 },
     { "容差", CommandKind::MenuTolerance, 0 },
+    { "taskbar", CommandKind::MenuTaskbar, 0 },
+    { "任务栏", CommandKind::MenuTaskbar, 0 },
     { "diag", CommandKind::CopyDiagnostics, 0 },
     { "诊断", CommandKind::CopyDiagnostics, 0 },
     { "drag on", CommandKind::SetDrag, 1 },
@@ -233,6 +235,12 @@ ParsedCommand parseCommand(const std::string& rawText)
             if (n) {
                 cmd.kind = CommandKind::SetTolerance;
                 cmd.value = clampToRange(*n, "adjacencyTolerancePx");
+            }
+            break;
+        case CommandKind::MenuTaskbar:
+            if (n) {
+                cmd.kind = CommandKind::SetTaskbar;
+                cmd.value = clampToRange(*n, "taskbarGuardPx");
             }
             break;
         case CommandKind::MenuDrag:

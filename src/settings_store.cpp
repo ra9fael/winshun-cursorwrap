@@ -87,6 +87,12 @@ const std::vector<SettingsField>& settingsFields()
           [](const Settings&) { return false; },
           [](const Settings&) { return std::string(); } },
 
+        { "taskbarGuardPx", FieldKind::Number, FieldOwner::Plugin,
+          [](const Settings& s) { return s.taskbarGuardPx != Settings{}.taskbarGuardPx; },
+          [](const Settings& s) { return static_cast<long long>(s.taskbarGuardPx); },
+          [](const Settings&) { return false; },
+          [](const Settings&) { return std::string(); } },
+
         { "impactGate", FieldKind::Bool, FieldOwner::Host,
           [](const Settings& s) { return s.impactGate != Settings{}.impactGate; },
           [](const Settings&) { return 0LL; },
@@ -164,6 +170,9 @@ bool readKeyIntoRaw(const winshun::Json& v, const SettingsField& field, RawSetti
     } else if (key == "adjacencyTolerancePx") {
         raw.adjacencyTolerancePx = v.toNumber();
         raw.hasAdjacency = true;
+    } else if (key == "taskbarGuardPx") {
+        raw.taskbarGuardPx = v.toNumber();
+        raw.hasTaskbarGuard = true;
     } else if (key == "impactGate") {
         raw.impactGate = v.toBool();
         raw.hasImpactGate = true;

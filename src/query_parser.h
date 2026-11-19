@@ -59,6 +59,7 @@ enum class CommandKind {
     MenuGuard,      // guard submenu
     MenuEdge,       // edge submenu
     MenuTolerance,  // tolerance submenu
+    MenuTaskbar,    // appbar-guard submenu
     MenuDrag,       // "no wrap while dragging" submenu
     MenuSingle,     // "disable on a single monitor" submenu
     MenuTuner,      // tuning-overlay submenu
@@ -75,6 +76,7 @@ enum class CommandKind {
     SetGuard,       // value: px
     SetEdge,        // value: px
     SetTolerance,   // value: px
+    SetTaskbar,     // value: px of the appbar guard (0 = the appbar band only)
     SetDrag,        // value: 0 = wrap while dragging, 1 = do not
     SetSingle,      // value: 0 = wrap on one monitor, 1 = do not
     SetOverlay,     // value: 0 = overlay off, 1 = overlay on

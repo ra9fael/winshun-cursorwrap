@@ -85,6 +85,7 @@ if(CW_BUILD_PLUGIN)
         ${tuning_sources}
         src/wrap_topology.cpp
         src/wrap_logic.cpp
+        src/topology_settle.cpp
         src/arrival_hist.cpp
         src/query_parser.cpp
         src/settings_store.cpp
@@ -97,7 +98,7 @@ if(CW_BUILD_PLUGIN)
         cursorwrap.rc
     )
     add_tuning_ui(CursorWrapApp qml)
-    target_link_libraries(CursorWrapApp PRIVATE gdi32)
+    target_link_libraries(CursorWrapApp PRIVATE gdi32 wtsapi32)
     find_package(Qt6 6.12.0 EXACT REQUIRED COMPONENTS Test)
     add_executable(cw_tuning_test
         tests/test_tuning_window.cpp ${tuning_sources}
@@ -161,6 +162,7 @@ add_executable(cw_tests
     src/impact_flash.cpp
     src/wrap_topology.cpp
     src/wrap_logic.cpp
+    src/topology_settle.cpp
     src/query_parser.cpp
     src/settings_store.cpp
 )

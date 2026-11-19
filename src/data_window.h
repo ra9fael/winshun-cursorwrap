@@ -39,6 +39,11 @@ struct DataSnapshot {
     long long setCursorFailures = 0;
     int monitors = 0;
     int outerEdges = 0;
+    // The foreground window's process and class, UTF-8 ("explorer.exe:Shell_TrayWnd").
+    // The one question the skip reasons cannot answer by themselves: a
+    // foreground app that confines or captures the pointer is invisible to the
+    // engine, which otherwise reports a healthy hook and a plain skip.
+    std::string foreground;
     Settings settings;
     Stats stats;
     EdgeVerdict verdict;

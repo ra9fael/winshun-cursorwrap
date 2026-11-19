@@ -355,6 +355,13 @@ Window {
                     description: window.tr("判定两块屏幕相邻的容差", "Tolerance for detecting adjacent displays")
                     unit: "px"
                 }
+                Divider {}
+                NumberRow {
+                    settingKey: "taskbarGuardPx"
+                    caption: window.tr("任务栏保护带宽", "Taskbar guard band")
+                    description: window.tr("任务栏及其周围这段距离内不回绕；0 = 仅任务栏本身", "No wrap over the taskbar and this far beside it; 0 = the taskbar only")
+                    unit: "px"
+                }
             }
 
             Group {

@@ -350,6 +350,15 @@ void DataWindow::paint()
         state += !snap.hookOk ? L"FAILED" : (snap.hookResponsive ? L"live" : L"repaired");
         state += L"  ·  " + num(snap.monitors) + L" monitor(s), "
             + num(snap.outerEdges) + L" outer edge(s)";
+        if (!snap.foreground.empty()) {
+            // Narrow->wide: the snapshot stores UTF-8; the window paints UTF-16.
+            const int needed = MultiByteToWideChar(CP_UTF8, 0, snap.foreground.c_str(),
+                                                   -1, nullptr, 0);
+            std::wstring fg(needed > 0 ? needed - 1 : 0, L'\0');
+            if (needed > 1)
+                MultiByteToWideChar(CP_UTF8, 0, snap.foreground.c_str(), -1, fg.data(), needed);
+            state += L"  ·  fg " + fg;
+        }
         SetTextColor(dc, !snap.hookOk ? bad : (snap.hookResponsive ? ok : warn));
         RECT r2 { left, y, right, y + 18 };
         DrawTextW(dc, state.c_str(), -1, &r2, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
